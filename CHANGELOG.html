@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dreams & Machines Character Creator Changelog</title>
+<style>
+:root {
+  --teal: #00B4B4;
+  --teal-dim: #007a7a;
+  --teal-glow: rgba(0, 180, 180, 0.25);
+  --bg: #0a0f0f;
+  --bg3: #131e1e;
+  --panel: #111a1a;
+  --border: rgba(0,180,180,0.2);
+  --text: #d4e8e8;
+  --text-dim: #7aa8a8;
+  --text-bright: #f0ffff;
+  --accent: #ff6b35;
+  --warning: #ffd166;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at 20% 10%, rgba(0,180,180,0.08), transparent 55%), var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+}
+.header {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 28px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+.back-link, .upgrade-link {
+  display: inline-block;
+  color: var(--teal);
+  border: 1px solid var(--teal-dim);
+  background: rgba(0,180,180,0.06);
+  text-decoration: none;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.back-link:hover, .upgrade-link:hover {
+  border-color: var(--teal);
+  box-shadow: 0 0 18px var(--teal-glow);
+}
+h1 {
+  margin: 0;
+  color: var(--text-bright);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: clamp(1.8rem, 5vw, 3rem);
+}
+.subtitle {
+  color: var(--text-dim);
+  margin-top: 8px;
+  font-size: 0.95rem;
+}
+.version {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 20px 24px;
+  margin-bottom: 14px;
+}
+h2 {
+  color: var(--teal);
+  margin: 0 0 10px;
+  font-size: 1.2rem;
+  letter-spacing: 0.08em;
+}
+ul { margin: 0; padding-left: 1.2rem; }
+li { margin: 6px 0; color: var(--text); }
+.note { color: var(--text-dim); font-size: 0.9rem; }
+.footer-links { margin-top: 24px; display: flex; gap: 10px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="./dnm-character-creator.html" onclick="if (history.length > 1) { history.back(); return false; }">← Back to Character Creator</a>
+
+  <section class="header">
+    <h1>Changelog</h1>
+    <div class="subtitle">Dreams &amp; Machines Character Creator. Short timeline of user-facing changes.</div>
+  </section>
+
+  <section class="version">
+    <h2>Version 1.10</h2>
+    <ul>
+      <li>Added tracked uses for Haggler, Just What They Need, I Know a Guy, Ambush, and Tough, each with a Use control and a used state.</li>
+      <li>Added New Session and New Adventure controls beside End Scene, so abilities limited to a session or an adventure refresh at the right boundary.</li>
+      <li>Moved Tech Level up to the name line and stacked the Origin, Archetype, and Temperament tags, giving the Goals boxes more room.</li>
+      <li>Origin, Archetype, and Temperament tooltips now show what each one is, instead of repeating its own label.</li>
+      <li>Expanded panels no longer snap shut and the page no longer jumps when you equip an item, take a rest, or confirm an action.</li>
+      <li>Fixed the version link in the header, which was showing an older release than the one you were using.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.09</h2>
+    <ul>
+      <li>Added expandable reference cards for all core actions, including Counterattack.</li>
+      <li>Added confirmed Momentum spending for Second Wind, Create Truth, Ask a Question, Damage, Reduce Time, Follow-Up, and Counterattack.</li>
+      <li>Added once-per-scene Adrenaline Rush controls and an End Scene reset.</li>
+      <li>Added an interactive Spear's Blend scene effect and automatic Bold and Spear's Blend Spirit bonuses.</li>
+      <li>Added Breather, Break, and Bed controls which restore Spirit and recharge eligible Powered item stacks.</li>
+      <li>Added Charged and Discharged state tracking for Powered items and weapons, including manual handling for Powered (Special).</li>
+      <li>Added Custom Items and Knowledge Fragments as persistent free-text lists.</li>
+      <li>Fixed starting Spirit and Supply Point initialization and added a confirmed Supply Point reset.</li>
+      <li>Relabeled Character Truths to Truths, added Truth type guidance, and connected action controls to Truth creation.</li>
+      <li>Reorganized the finished sheet and refined the identity header, resource layout, and play controls.</li>
+      <li>Adopted the stable app filename <code>dnm-character-creator.html</code>.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.08</h2>
+    <ul>
+      <li>Added equipped state and structured equipped-item effects.</li>
+      <li>Added fuller catalogue descriptions, effect notes, and improved equipment tooltips.</li>
+      <li>Added editable current resource values on the finished sheet.</li>
+      <li>Added editable Truth and Injury tracking.</li>
+      <li>Improved catalogue scrolling, floating tooltips, item details, and printable sheet behavior.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.07</h2>
+    <ul>
+      <li>Added portrait web addresses, live portrait preview, and portrait rendering on the finished sheet.</li>
+      <li>Persisted portrait addresses through share codes, imports, and local saves.</li>
+      <li>Expanded Supportive and Rivalry Bond rules tooltips.</li>
+      <li>Improved Owned Item disclosure, spacing, and expanded content.</li>
+      <li>Fixed Item Catalogue search focus loss while typing.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.06</h2>
+    <ul>
+      <li>Added a clickable changelog link from the version label in the app header.</li>
+      <li>Added this standalone changelog page with a Back to Character Creator link.</li>
+      <li>Moved Growth to the second-to-last section of the character sheet.</li>
+      <li>Moved Character Share Code to the bottom of the character sheet.</li>
+      <li>Fixed Item Catalogue sub-filter rendering so sub-filters appear after selecting a main filter.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.05</h2>
+    <ul>
+      <li>Exhaustion now disables rolls using the affected attribute.</li>
+      <li>Exhausted attributes are struck through in the Dice Roller dropdown.</li>
+      <li>Item Catalogue sub-filters now appear after selecting a main category.</li>
+      <li>Character Share Code moved to second-to-last section.</li>
+      <li>Growth moved to the bottom of the sheet.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.04</h2>
+    <ul>
+      <li>Added local saved characters in browser local storage.</li>
+      <li>Added finalized character mode.</li>
+      <li>Moved Character Share Code to a collapsible bottom section.</li>
+      <li>Added dynamic Spirit, Supply Points, Coin, Growth, and Momentum fields.</li>
+      <li>Expanded equipment, item, vehicle, GLIF, and Bond tooltips.</li>
+      <li>Made Item Catalogue and Starting Equipment collapsible.</li>
+      <li>Added clickable Exhaustion States.</li>
+      <li>Made inventory items expandable.</li>
+    </ul>
+  </section>
+
+  <section class="version">
+    <h2>v.1.03</h2>
+    <ul>
+      <li>Added full skill names on the sheet.</li>
+      <li>Added attribute and skill tooltips.</li>
+      <li>Added the full item catalogue.</li>
+      <li>Added Exhaustion States section.</li>
+      <li>Added Dice Roller.</li>
+      <li>Added shared roll room support.</li>
+      <li>Added collapsible share code.</li>
+      <li>Fixed character-code base64 import reliability.</li>
+    </ul>
+  </section>
+
+  <div class="footer-links">
+    <a class="back-link" href="./dnm-character-creator.html" onclick="if (history.length > 1) { history.back(); return false; }">← Back to Character Creator</a>
+    <a class="upgrade-link" href="./UPGRADE_NOTES.md">View cumulative upgrade notes</a>
+  </div>
+</main>
+</body>
+</html>
