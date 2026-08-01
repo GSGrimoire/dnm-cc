@@ -3,7 +3,7 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.13
+  Version: 1.13-beta (Owlbear embedded mode spike)
   File:    dnm-character-creator.html (stable filename; do not version the filename)
   Docs:    CHANGELOG.html (player-facing) / UPGRADE_NOTES.md (cumulative technical log)
 
@@ -2326,6 +2326,33 @@ body::after {
 
 
 
+
+/* ============================================================
+   OWLBEAR EMBEDDED MODE (beta)
+   Applied by the module block at the end of the file, only when the page
+   detects it is running inside Owlbear Rodeo. Standalone in a browser tab,
+   none of this matches and the page looks exactly as it always has.
+   ============================================================ */
+body.obr-embedded .site-header,
+body.obr-embedded .progress-bar,
+body.obr-embedded .hex-bg,
+body.obr-embedded .dm-room-block { display: none !important; }
+body.obr-embedded #app { padding-top: 0; }
+body.obr-embedded .obr-only { display: block; }
+.obr-only { display: none; }
+
+.obr-bar {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 10px;
+  background: var(--panel, #111a1a);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: .1em;
+}
+.obr-bar .obr-name { color: var(--teal); text-transform: uppercase; }
+.obr-bar .obr-save { margin-left: auto; color: var(--text-dim); }
+.obr-bar .obr-save.dirty { color: var(--warning); }
+.obr-bar .obr-save.failed { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -5231,7 +5258,15 @@ function readLocalLibrary() {
 }
 
 function writeLocalLibrary(list) {
-  localStorage.setItem(LOCAL_LIBRARY_KEY, JSON.stringify(list));
+  // The read has always been guarded; the write had not been. Browsers partition or
+  // refuse storage for third-party iframes, so inside Owlbear this throws — and it is
+  // called from toggleExhaustion() and friends, which would take the whole handler
+  // down with it. Failing to save a local copy is not worth losing an edit over.
+  try {
+    localStorage.setItem(LOCAL_LIBRARY_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.warn('[dnm] local library unavailable in this context', e);
+  }
 }
 
 function summarizeCharacterForLibrary(c) {
@@ -7457,7 +7492,7 @@ function renderDicePanel() {
       <div id="diceResultArea">${diceUI.lastResult ? renderDiceResult(diceUI.lastResult) : ''}</div>
     </div>
 
-    <div style="margin-top:18px;">
+    <div class="dm-room-block" style="margin-top:18px;">
       <div class="sheet-section-title">Shared Roll Room</div>
       <div class="room-bar">
         <div class="dice-field" style="flex:1;min-width:160px;">
@@ -7746,4 +7781,264 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 </script>
+
+<!-- ============================================================
+     OWLBEAR RODEO EMBEDDED MODE — BETA
+     ------------------------------------------------------------
+     This block is inert unless the page is running inside Owlbear Rodeo.
+     OBR.isAvailable is false in a normal browser tab, in which case nothing
+     below runs and the creator behaves exactly as it does today. That is the
+     whole design: one file, one set of rules, two contexts.
+
+     WHAT IT DOES WHEN EMBEDDED:
+       · reads the character code off the token that opened the modal
+       · loads it and jumps straight to the finalized play sheet
+       · writes the rebuilt code back to the token after every edit
+       · sends rolls to the extension's shared log instead of Ro's server
+       · treats Momentum as the room's pool rather than a private counter
+
+     WHY A MODULE BLOCK AND NOT A SEPARATE FILE:
+       The creator is deliberately one file, so it can be downloaded and opened
+       from disk. A separate script would break that. The cost is that this code
+       cannot be imported by anything else, which is fine — nothing should.
+     ============================================================ -->
+<script type="module">
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+
+// These four constants must match dnm.js in the dnm-obr repo exactly. They are
+// the contract between the two halves of the extension: change one, change both.
+const EXT_ID   = "com.thuknights.dnm-obr";
+const CHAR_KEY = `${EXT_ID}/char`;
+const CHANNEL  = `${EXT_ID}/events`;
+const ROOM_KEY = "com.thuknights.dnm-rolls/state";
+
+const SAVE_DEBOUNCE_MS = 400;
+
+let tokenId = null;
+let ready = false;          // true once a character is loaded and saving is allowed
+let saveTimer = null;
+let lastSaved = "";
+let roomMomentum = null;
+
+const bar = () => document.getElementById("obrSaveState");
+
+function setSaveState(text, cls) {
+  const el = bar();
+  if (!el) return;
+  el.textContent = text;
+  el.className = "obr-save" + (cls ? " " + cls : "");
+}
+
+// -------------------------------------------------------------
+// Saving
+// -------------------------------------------------------------
+// The token holds the DM1 code and nothing else, so a save is just
+// buildCharacterCode() written back. Rebuilding the whole code rather than
+// patching CP means the SN snapshot is refreshed too, which is what keeps the
+// roller popover's view of this token's stats current without extra plumbing.
+function queueSave() {
+  if (!ready) return;
+  setSaveState("unsaved", "dirty");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(commit, SAVE_DEBOUNCE_MS);
+}
+
+async function commit() {
+  if (!ready || !tokenId) return;
+  let code;
+  try {
+    code = buildCharacterCode();
+  } catch (err) {
+    console.error("[dnm] could not build code", err);
+    setSaveState("save failed", "failed");
+    return;
+  }
+  if (code === lastSaved) { setSaveState("saved"); return; }
+  try {
+    await OBR.scene.items.updateItems([tokenId], (items) => {
+      for (const it of items) it.metadata[CHAR_KEY] = { v: 1, code };
+    });
+    lastSaved = code;
+    setSaveState("saved");
+  } catch (err) {
+    console.error("[dnm] save failed", err);
+    setSaveState("save failed", "failed");
+  }
+}
+
+// Every mutation in this file funnels through renderAll(), so wrapping it is one
+// hook instead of thirty. The alternative was calling queueSave() from each
+// handler, which would be missed the first time a new handler was added.
+function hookRenderAll() {
+  const original = window.renderAll;
+  window.renderAll = function patchedRenderAll(...args) {
+    const out = original.apply(this, args);
+    queueSave();
+    return out;
+  };
+}
+
+// -------------------------------------------------------------
+// Rolls
+// -------------------------------------------------------------
+// postRoll() normally POSTs to Ro's server. Embedded, the extension's broadcast
+// channel already carries rolls to every open panel and to the GM's background
+// page, which persists them. Replacing the function rather than editing doRoll()
+// keeps the standalone path untouched.
+//
+// OPEN: the creator's dice panel has no Difficulty control, so the entry cannot
+// carry a real pass/fail verdict. Successes and complications are exact; the
+// verdict is reported as passed on one or more successes, which matches D1, the
+// commonest case. Adding Difficulty to the panel is the proper fix.
+function installRollBridge() {
+  window.postRoll = function postRollToOwlbear(from, res) {
+    const detail = res.dice.map((d) => ({ d, kind: classifyDie(d, res.attrValue, res.skillValue) }));
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      t: Date.now(),
+      who: (from || "Unnamed").slice(0, 24),
+      label: "",
+      an: res.attrName, av: res.attrValue,
+      sn: res.skillName, sv: res.skillValue,
+      diff: 0,
+      detail,
+      succ: res.successes,
+      comp: res.complications,
+      pass: res.successes > 0,
+      gain: 0,
+    };
+    OBR.broadcast.sendMessage(CHANNEL, { type: "roll", entry }, { destination: "ALL" })
+      .catch((err) => console.warn("[dnm] roll broadcast failed", err));
+  };
+}
+
+// -------------------------------------------------------------
+// Momentum
+// -------------------------------------------------------------
+// Momentum is a group pool: DM_DATA's own resource text says the group can save
+// up to 6, and the Circumspect drive refers to the group pool explicitly. This
+// file tracks it per character anyway, which is harmless alone and wrong at a
+// table. Embedded, the counter reads and writes the room's pool; currentMomentum
+// is mirrored so a code carried back out is not stale.
+function installMomentumBridge() {
+  const original = window.adjustResource;
+  window.adjustResource = function patchedAdjustResource(key, delta) {
+    if (key !== "momentum") return original.call(this, key, delta);
+    OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
+      .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+    // Not applied locally: pool events are deltas, and the GM's metadata update
+    // will arrive shortly. Applying here as well would double count.
+  };
+}
+
+function adoptRoom(meta) {
+  const found = meta && meta[ROOM_KEY];
+  const next = found && typeof found.momentum === "number" ? found.momentum : 0;
+  if (next === roomMomentum) return;
+  roomMomentum = next;
+  if (!ready) return;
+  state.character.currentMomentum = next;
+  renderAll();
+}
+
+// -------------------------------------------------------------
+// Loading
+// -------------------------------------------------------------
+function insertBar(name) {
+  if (document.getElementById("obrBar")) return;
+  const el = document.createElement("div");
+  el.id = "obrBar";
+  el.className = "obr-bar obr-only";
+  el.innerHTML = `<span class="obr-name"></span>
+    <span style="color:var(--text-dim)">on this token</span>
+    <span class="obr-save" id="obrSaveState">saved</span>`;
+  el.querySelector(".obr-name").textContent = name || "Character";
+  document.getElementById("app").prepend(el);
+}
+
+function loadIntoCreator(code) {
+  const result = parseCharacterCode(code);
+  if (result.error) return result.error;
+  state.character = { ...getDefaultCharacter(), ...result.character };
+  // A character on a token is by definition already built, so the sheet opens on
+  // the play view rather than at step one of the wizard.
+  state.character.finalized = true;
+  state.currentStep = STEPS.indexOf("summary");
+  if (roomMomentum != null) state.character.currentMomentum = roomMomentum;
+  const importSection = document.getElementById("importSection");
+  if (importSection) importSection.style.display = "none";
+  normalizeCurrentValues();
+  ready = true;
+  lastSaved = code;
+  renderAll();
+  insertBar(state.character.name);
+  setSaveState("saved");
+  return null;
+}
+
+// Pasting a code on an empty token has to write it through to the token, which
+// the standalone import path has no reason to do.
+function hookImport() {
+  const original = window.importCharacter;
+  window.importCharacter = function patchedImportCharacter(...args) {
+    const out = original.apply(this, args);
+    if (state.character && state.character.finalized === false) {
+      state.character.finalized = true;
+    }
+    if (document.getElementById("importSection")?.style.display === "none") {
+      ready = true;
+      insertBar(state.character.name);
+      renderAll();
+      commit();
+    }
+    return out;
+  };
+}
+
+// -------------------------------------------------------------
+// Start
+// -------------------------------------------------------------
+async function startEmbedded() {
+  document.body.classList.add("obr-embedded");
+
+  hookRenderAll();
+  hookImport();
+  installRollBridge();
+  installMomentumBridge();
+
+  try {
+    adoptRoom(await OBR.room.getMetadata());
+  } catch (err) {
+    console.warn("[dnm] could not read room state", err);
+  }
+  OBR.room.onMetadataChange(adoptRoom);
+
+  const params = new URLSearchParams(location.search);
+  tokenId = params.get("item");
+  if (!tokenId) return; // opened without a token: leave the import screen up
+
+  let item = null;
+  try {
+    const items = await OBR.scene.items.getItems([tokenId]);
+    item = items && items[0];
+  } catch (err) {
+    console.error("[dnm] could not read the token", err);
+  }
+  if (!item) return;
+
+  const stored = item.metadata && item.metadata[CHAR_KEY];
+  if (!stored || !stored.code) return; // fresh token: the import screen is the prompt
+
+  const error = loadIntoCreator(stored.code);
+  if (error) {
+    const box = document.getElementById("importError");
+    if (box) box.textContent = "⚠ " + error;
+  }
+}
+
+if (OBR.isAvailable) {
+  OBR.onReady(startEmbedded);
+}
+</script>
+
 </body>
