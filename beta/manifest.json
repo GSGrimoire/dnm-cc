@@ -1,0 +1,22 @@
+{
+  "name": "Dreams & Machines",
+  "version": "0.6.0",
+  "manifest_version": 1,
+  "author": "GS Grimoire",
+  "description": "Dreams and Machines character sheet roller",
+  "icon": "https://gsgrimoire.github.io/dnm-obr/icon.svg",
+  "background_url": "https://gsgrimoire.github.io/dnm-obr/background.html",
+  "permissions": [
+    {
+      "name": "clipboard-write",
+      "reason": "Copying a character code back to the character creator"
+    }
+  ],
+  "action": {
+    "title": "D&M Rolls",
+    "icon": "https://gsgrimoire.github.io/dnm-obr/icon.svg",
+    "popover": "https://gsgrimoire.github.io/dnm-obr/index.html",
+    "height": 640,
+    "width": 400
+  }
+}
