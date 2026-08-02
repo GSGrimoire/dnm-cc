@@ -1,3 +1,89 @@
+v1.14 — One file, two contexts
+What changed
+`APP_VERSION` and the header comment moved to `1.14`. Four sheet changes that apply
+everywhere, one new mode that only activates inside a frame.
+Sheet changes (both contexts):
+`pickRollStat()` added. Attributes and Skills render with `.pickable` and an onclick
+that selects them into `diceUI`. An exhausted Attribute refuses the click, because a
+test against it auto-fails and the panel already blocks the roll.
+`renderDicePanel()` moved in `renderSummaryStep()` from below Inventory to directly
+after Resources, and given `id="dicePanelAnchor"` so `pickRollStat()` can scroll to it.
+`diceUI.difficulty` added, with a D0–D5 selector beside the Roll button. `computeRoll()`
+now returns `difficulty`, `passed` and `momentumGained`; `renderDiceResult()` shows the
+verdict and the Momentum figure. This was load-bearing, not cosmetic: Momentum
+gained is successes beyond the Difficulty, so without it the sheet could not report the
+one number a player acts on immediately after a test.
+`renderShareCodeSection()` puts Copy Code and Save Local above the code, and the code
+in a fixed-height scroller.
+Embedded mode (module block at the end of the file):
+Detects that it is framed, loads the Owlbear SDK, and if `OBR.isAvailable`:
+reads the DM1 code off the token named in `?item=`, loads it, and jumps to the
+finalized play view
+writes the rebuilt code back to token metadata after every edit, debounced 400 ms
+replaces `postRoll()` so rolls broadcast on the extension's channel instead of
+POSTing to Ro's server
+binds `currentMomentum` to the room's shared pool
+adds a header bar with save state, Copy Code, Detach and Close
+Why one file rather than two
+The alternative was a second sheet implementation in the extension repo, which is what
+existed at v1.13. It duplicated the Actions table, the item catalogue, the rest tiers and
+the roll engine, and every one of those was a drift risk. Embedding the creator deletes
+the duplicate: the sheet a player sees at the table is the same code that built the
+character, so it cannot fall behind.
+The cost is that a load-bearing page now runs inside someone else's iframe. Three things
+protect against that:
+The mode is opt-in by context, not by build. `window.self === window.top` is
+checked first, and in a normal tab the block returns before doing anything.
+The SDK is imported dynamically, not statically. A static import would fetch from
+esm.sh on every page load, including for someone who opened the creator offline or
+from a downloaded copy — a round trip to load code that would then do nothing.
+A failed import is caught. Framed by something that is not Owlbear, or a CDN
+outage, logs a warning and leaves a working creator.
+The Momentum fix, and why the first attempt was wrong
+Momentum is a group pool: `DM_DATA`'s own resource text says the group can save up to 6,
+and the Circumspect drive refers to the group pool explicitly. This file tracks it per
+character anyway.
+The first embedded implementation wrapped `adjustResource()`. That is what the counter's
+`+` and `−` buttons call, so it appeared to work while being wrong everywhere else. There
+are six write paths: `setResource()` from the number input, the direct `-=` in the three
+Momentum-spending abilities, the direct `=` in Adrenaline Rush, and the clamp in
+`normalizeCurrentValues()`.
+Wrapping six functions would have failed the next time a seventh was added. Instead
+`currentMomentum` is defined as an accessor property on the character object, so there is
+no way to write the field that does not go through the setter. `JSON.stringify` reads
+accessors normally, so `buildCharacterCode()` still serialises a plain number.
+The setter applies locally before broadcasting. That is safe here and not in the roller:
+this page never applies pool events from the broadcast channel, and the GM's metadata
+update sets the value absolutely rather than as a delta, so there is nothing to double
+count. `__setMomentumFromRoom` is non-enumerable and lets the GM's value in without the
+setter treating it as a local spend.
+Also fixed
+`writeLocalLibrary()` had an unguarded `localStorage.setItem`. The read was wrapped, the
+write was not, and it is called from `toggleExhaustion()` among others. Browsers partition
+or refuse storage for embedded contexts, so inside a frame this threw and took the whole
+handler down. Now guarded. This mattered regardless of Owlbear.
+Open
+`DM_API_BASE` is still `''`. The roll bridge bypasses it, but `joinRoom()` does not,
+so the Shared Roll Room panel would resolve to a 404 relative to whatever origin serves
+the page. Embedded mode hides that panel (`.dm-room-block`); standalone it is unchanged
+and still depends on Ro's server.
+Storage partitioning. An embedded creator will not see characters saved from a
+normal tab, same origin or not. Codes remain the way a character crosses over.
+The creator's standalone Momentum counter is still private. Correct for a solo
+browser tab, wrong at a table; the embedded path is the one that is right. Worth
+relabelling the counter as the group pool.
+`sheet.js` / `sheet.css` / `sheet.html` in `dnm-obr` are now redundant if the
+embedded creator proves out, along with `rules.js` and `build-rules.mjs`. They are kept
+until it does.
+Verified
+Ran the file in both contexts under jsdom. Unframed and offline: zero network calls, no
+`obr-embedded` class, no header bar, `currentMomentum` a plain field, click-to-roll and
+the Difficulty selector working, D2 roll reporting the correct verdict and Momentum.
+Framed with a stub SDK: character loaded from the token, header rendered, an ability spend
+of 2 Momentum broadcast as `delta: -2` without touching a private counter, the GM's
+absolute update accepted without echoing, a roll broadcast with real `diff`, `pass` and
+`gain`, and the token rewritten. Momentum confirmed across all six write paths.
+
 # Upgrade notes — v1.13
 
 Append this section to `UPGRADE_NOTES.md`.
