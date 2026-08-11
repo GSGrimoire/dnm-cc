@@ -58,7 +58,7 @@ to 9 flowed back to the counter; and Momentum was untouched by any of it.
 - Nanobarrier's escalating Threat cost is still an unresolved ruling and is not wired.
 
 
-v1.14 — One file, two contexts
+## v1.14 — One file, two contexts
 What changed
 `APP_VERSION` and the header comment moved to `1.14`. Four sheet changes that apply
 everywhere, one new mode that only activates inside a frame.
