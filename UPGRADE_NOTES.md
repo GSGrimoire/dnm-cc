@@ -1,3 +1,314 @@
+# v1.17 — The Rolls and Actions Log
+
+Append to `UPGRADE_NOTES.md`. Ships alongside `CHANGELOG.html` v1.17 and a rebuilt
+`dnm-obr` (`dnm.js`, `roller.js`, `style.css`, `index.html`).
+
+The player write test **passed** before this release: a player edited a sheet in an
+incognito window and the change was visible from the GM window. That was the decisive
+step, and it clears the blocker recorded in the v1.16 handoff. The quarantined files in
+`_pending-deletion/` are held only until v1.17 is confirmed working in play.
+
+---
+
+## What this release is for
+
+Rolls have travelled to the shared log since v1.12. Nothing else did. A player spent
+Momentum on a Counterattack, pushed Threat to send a Communicator message, or burned a
+once-per-scene ability, and the pools moved with no record of who moved them or why.
+The GM saw a number change.
+
+v1.17 puts abilities, item uses and every pool change into the same log as rolls.
+
+---
+
+## Attribution, and why the accessor could not do it alone
+
+The Momentum accessor bound in embedded mode catches all six write paths. That is
+precisely why it cannot label them: it sits *underneath* the call sites and observes a
+number changing, not a reason. The property that made it correct in v1.15 is the same
+property that makes it anonymous.
+
+The design is therefore two-sided:
+
+1. **Call sites announce.** Each handler calls `logAction(label, detail)` immediately
+   before mutating Momentum. This parks a label in `pendingActionLabel`.
+2. **The accessor consumes, or invents.** The setter takes the parked label if there is
+   one. If there is not, it still logs — as a bare `"spent 2 Momentum"`.
+
+The second half is the important half. It means a Momentum path added later that nobody
+remembers to wire up produces an *unlabelled* entry rather than *no* entry. That is
+deliberately the inverse of the failure mode that shipped in the wrapped-`adjustResource()`
+attempt, where the five paths nobody wired were silent and the code looked correct while
+being wrong everywhere else.
+
+Wired call sites, verified against source rather than from memory:
+
+| Handler | Label |
+|---|---|
+| `useSecondWind` | Second Wind |
+| `spendMomentumForAction` | Counterattack, Ask a Question, Damage +1, Reduce Time, Follow-Up |
+| `createTruthWithMomentum` | Create Truth |
+| `useLimitedFeature` (`iKnowAGuy`, momentum option) | I Know a Guy |
+| `useAdrenalineRush` | Adrenaline Rush |
+| `useItemAction` (new) | *item name* — *action label* |
+
+### The clamp had to be silenced
+
+`normalizeCurrentValues()` clamps `currentMomentum`, and embedded that field is an
+accessor bound to the room pool. Every clamp is a pool write. Loading a sheet whose
+Momentum sits above its current maximum would have announced a spend to the whole table
+that no player made.
+
+`normalizeCurrentValues()` is now a thin wrapper calling `normalizeCurrentValuesInner()`
+inside `withPoolLogSuppressed()`. The whole function is wrapped rather than the single
+clamp line, so this stays correct if another resource is bound to the room later.
+
+`withPoolLogSuppressed` saves and restores the previous flag value rather than setting it
+to `false` on exit, so nesting cannot clear a suppression it did not set.
+
+### Threat already carried its reason
+
+`addThreat(amount, reason)` has taken a reason since v1.15 and every call site passes a
+real one. The embedded bridge computed it, used it for the local toast, and dropped it
+from the broadcast. Carrying it through is most of what makes the Threat half of the log
+readable, and it cost one field.
+
+Manual counter nudges log, by ruling. Their reason string changed from `'manual'` to
+`'manual adjustment'` so the entry reads properly on its own line.
+
+### `logActionNow()`
+
+For actions that announce but move no pool — a limited-use ability with no cost — nothing
+downstream is coming to consume the parked label. Without an explicit flush it would sit
+in `pendingActionLabel` and mislabel the *next* real spend. `logActionNow()` flushes and
+clears; standalone it only clears.
+
+---
+
+## Log entry shape
+
+Action entries share `state.log` with rolls. Same dedupe by `id`, same `MAX_LOG_ENTRIES`
+cap, same `trimState` byte budget.
+
+```js
+{ id, t, kind: "action", who, label, detail, pool, delta }
+```
+
+They are not a second list. The log's value is one ordered record of what happened; two
+lists would need interleaving by timestamp at every consumer instead of once in
+`applyEvent`.
+
+**A roll entry carries no `kind` at all** — including the entries already sitting in a
+live room's metadata from before v1.17. Consumers must therefore treat *absent* `kind` as
+"roll" rather than requiring the field. `renderEntry` branches on `e.kind === "action"`
+and falls through to `renderRollEntry` otherwise.
+
+This was not cosmetic. `renderEntry` read `e.detail.length`, `e.succ` and `e.diff`
+unconditionally. An action entry reaching the old renderer would have thrown and taken
+the whole feed down.
+
+`who` prefers the character name and falls back to `OBR.player.getName()`, resolved once
+at start. A failed name lookup is non-fatal and never blocks an action.
+
+---
+
+## Item actions became buttons
+
+Five items carry an `itemActions` entry, not four. The v1.16 handoff listed four because
+it described them as "the Threat items"; **Combat Medkit** spends Momentum rather than
+adding Threat and fell outside that phrasing.
+
+| Item | Resource | Op | Value |
+|---|---|---|---|
+| Combat Automed | threat | add | 1 |
+| Combat Medkit | momentum | spend | 1 |
+| Communicator | threat | add | 1 |
+| Emergency Trauma Kit | threat | add | 1 |
+| Tactical Lens | threat | add | 1 |
+
+Found by walking `DM_DATA.items` programmatically. All five are
+`type: "manualResourceChange"`.
+
+`useItemAction()` funnels through `addThreat()` and a plain write to `currentMomentum` —
+the same two paths abilities use — so item actions reach the pools by the existing route
+with no parallel plumbing to keep in step. The Threat branch does not call `logAction()`,
+because `addThreat` announces with its own reason and would otherwise log the press twice.
+
+An unaffordable Momentum action renders disabled rather than hidden: the item still has
+the ability, the character just cannot pay right now. The rules text stays below the
+button, because the button says what it costs but not when you may press it.
+
+---
+
+## Shared Roll Room disabled
+
+`DM_API_BASE` is `''`, so `/api/roll`, `/api/stream` and `/api/tail` resolved against
+`gsgrimoire.github.io` and 404'd. The endpoint was to be hosted by Ro and is not going to
+be stood up. The panel offered a Connect button that could only ever fail.
+
+Turned off behind `SHARED_ROOM_ENABLED = false`, **not deleted**. The wire format is a
+worked design — the POST contract, SSE with a polling tail as fallback, the feed renderer
+— and rebuilding it from nothing later would cost more than carrying a few hundred dormant
+lines. Setting the flag true and pointing `DM_API_BASE` at a live host is the whole of the
+work to restore it.
+
+`postRoll()` gained an early return on the flag. A character saved before v1.17 can still
+carry a `roomCode` in its share code, and without the guard those characters would fire a
+failing POST on every roll forever.
+
+This is unrelated to the in-Owlbear log, which needs no server: it rides the broadcast
+channel and is persisted to room metadata by the GM's background page.
+
+---
+
+## Start Over
+
+There was no way out of a finished sheet except reloading the tab by hand.
+
+`startOver()` navigates to `location.pathname` rather than resetting state in place. A
+reload is the only thing that reliably clears every module-level variable the creator
+accumulates during a build — `diceUI`, `roomState`, the scroll-restore scope map,
+`pendingThreat`. Resetting `state.character` alone leaves those behind.
+
+Nothing is auto-loaded from `localStorage` at boot (the local library is explicit, with
+Load buttons), so a reload genuinely lands on an empty front page.
+
+The confirm text differs depending on whether the character is already in the local
+library, because "you will lose this" is false when it is saved and worth saying plainly
+when it is not.
+
+The button carries `.tab-only`, a new inverse of `.obr-only`: visible by default, hidden
+under `body.obr-embedded`. Embedded, the character lives on the token and "start over"
+would mean something destructive and unintended.
+
+---
+
+## Rulings settled
+
+**New Adventure clears I Know a Guy — already true.** `startNewAdventure()` clears the
+`scene`, `session` and `adventure` boundaries, and `iKnowAGuy` is `reset: 'adventure'`.
+The v1.16 handoff carried this as an open question; it was answered by the code. No change
+shipped, and the backlog item is closed.
+
+---
+
+## Still open
+
+**Nanobarrier.** Deliberately still absent from `LIMITED_USE_FEATURES`. The escalating
+cost *is* in the rulebook text carried in `DM_DATA` — first use free, second 1 Threat,
+each subsequent +1 — so the counter is straightforward. What does not exist anywhere in
+the source is a **reset boundary**. Treating it as a binary used flag would be
+mechanically wrong, and inventing a boundary would be worse. Blocked on a ruling: scene,
+session, or Bed.
+
+`GLIF-Pattern Clothing` remains excluded for the separate reason that its limit is per
+machine, not per character.
+
+**Log does not backfill on connect.** A player who joins late or reloads sees an empty
+feed. This mattered less when the log held only rolls; now that it is the session's record
+of actions, it matters more. The log is in room metadata, so the data exists — the gap is
+that a connecting client does not seed from it.
+
+**Discharge is not logged.** `toggleItemDischarged()` moves no shared pool, so it sits
+outside the "changes Momentum or Threat" scope this release was built to. Worth revisiting
+if the table wants it.
+
+---
+
+## Testing
+
+`applyEvent` was tested directly for action handling, dedupe, ordering and legacy roll
+entries lacking `kind`.
+
+The creator was booted in jsdom with the module block stripped, and the accessor was
+reproduced around the real `state.character` to verify: labelled spends carry the ability
+name, unlabelled writes still log, gains read as gains, the `normalizeCurrentValues()`
+clamp is silent, and a flushed label does not leak into the next spend.
+
+**Both jsdom limits from v1.16 still apply.** `OBR.isAvailable` is false and the transport
+cannot handshake, so the real broadcast path, frame detection and the GM's metadata write
+are **not verified here** and can only be confirmed in a live room. The accessor test
+reproduces the setter's logic; it does not exercise `OBR.broadcast`.
+
+
+# Upgrade notes — v1.16
+
+Append this section to `UPGRADE_NOTES.md`.
+
+---
+
+## v1.16 — The SDK comes in-house
+
+### What changed
+
+`APP_VERSION` and the header comment moved to `1.16`. The Owlbear SDK is bundled into
+the file. There is no longer any network request on load, in either context.
+
+### Why
+
+Embedded mode was silently dead. The symptom was misleading: the modal opened, the
+creator rendered, the import screen offered the local library, and edits persisted across
+a close and reopen — so it looked like a working sheet that had merely forgotten which
+character it was on. The persistence was `localStorage`, not the token. Nothing in the
+module block was running at all.
+
+The cause was the SDK import. v1.13 used a static `import` from esm.sh and worked. v1.14
+made it a lazy `import()` behind a frame check to avoid fetching a CDN module for tab
+users who would never need it. Either way the file depends, at runtime, on a third-party
+script fetched from inside somebody else's iframe on somebody else's network. A Content
+Security Policy, a corporate proxy, a CDN outage or being offline each take embedded mode
+down, and each does it silently.
+
+Bundling removes the dependency rather than working around it. From npm
+`@owlbear-rodeo/sdk@3.1.0`, bundled with esbuild as minified ESM, with the trailing
+`export{Zo as default}` replaced by `const OBR = Zo;` — an inline module cannot import
+from itself, so the default export becomes a plain binding in the block's scope. That one
+substitution is the only edit to published code.
+
+This also restores what the lazy import was for. There is now no request at all, so a tab
+user pays nothing, and the file works offline and from a downloaded copy — which the
+static import had broken and the lazy import only partly fixed.
+
+**To update the SDK:** `npm install @owlbear-rodeo/sdk@<version>`, bundle with esbuild
+`--format=esm --minify`, swap the trailing export for `const OBR = Zo;`, and paste it over
+the block. Verified there are no identifier collisions between the minified bundle and the
+embedded block's own names.
+
+Cost: the file grows from about 485 kB to 529 kB. One cached request, against a dependency
+that could not be relied on.
+
+### Also fixed: rolls were losing their Difficulty
+
+The roll bridge was sending `diff: 0`, `pass: successes > 0` and `gain: 0` on every roll,
+so a shared log entry from the sheet never matched one made in the roller popover.
+
+This was a regression I introduced. The fix existed at v1.14, applied directly to the
+derived file. When the build changed so that the beta is generated from a shared embed
+block, the edit was not in the block and was overwritten on the next rebuild. The fix is
+now in `embed-block.html`, which is the only place it can survive a rebuild.
+
+Worth generalising: **anything patched into a generated file is lost.** Every edit belongs
+in the source the generator reads.
+
+### Verified
+
+Tab, offline, with the real bundled SDK rather than a stub: zero network calls,
+`OBR.isAvailable` false, no `obr-embedded` class, no header bar, import screen up, sheet
+renders 15 sections, Difficulty control and click-to-roll present, Threat toasts without a
+pool, Momentum still a plain field.
+
+Embedded: character loaded from the token, header rendered, import screen hidden, Momentum
+read from the room, Threat counter showing the room's value, a Momentum spend and an
+Adrenaline Rush broadcast as `-2` and `+3`, a roll broadcast carrying its real Difficulty,
+and the token written. The emitted code reparses with only `CP` changed.
+
+### Still open
+
+The two-player test is still not done. Everything so far has been one browser. Whether a
+non-GM can write item metadata to their own token is the question that gates deleting
+`sheet.js`, `sheet.css`, `sheet.html`, `rules.js` and `build-rules.mjs`.
+
+
 ## v1.15 — Threat reaches the table
  
 ### What changed
