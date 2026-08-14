@@ -3,8 +3,11 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.16
-  File:    dnm-character-creator.html (stable filename; do not version the filename)
+  Version: 1.17
+  File:    index.html (stable filename; do not version the filename)
+           Deployed at https://gsgrimoire.github.io/dnm-cc/ — always link the folder,
+           never a filename. dnm-character-creator.html has never existed in the repo
+           and 404s; that stale reference lived in this comment until v1.17.
   Docs:    CHANGELOG.html (player-facing) / UPGRADE_NOTES.md (cumulative technical log)
 
   Versioning policy (from v1.09 onward):
@@ -2366,6 +2369,43 @@ body.obr-embedded #app { padding-top: 0; }
 body.obr-embedded .obr-only { display: block; }
 .obr-only { display: none; }
 
+/* The inverse of .obr-only: present in a browser tab, gone inside Owlbear.
+   Start Over belongs to the tab only — embedded, the character lives on the
+   token and "start over" would mean something destructive and unintended. */
+body.obr-embedded .tab-only { display: none !important; }
+
+/* ============================================================
+   ITEM ACTION BUTTONS (v1.17)
+   Items whose rules text says "add 1 to Threat" or "spend 1 Momentum" now
+   get a button rather than a descriptive note. Styled off .powered-toggle,
+   which is the existing precedent for a per-item control in Owned Items.
+   ============================================================ */
+.item-action-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px;
+}
+.item-action-btn {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 9px;
+  cursor: pointer;
+  background: rgba(255,107,53,0.08);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  transition: all 0.15s ease;
+}
+.item-action-btn.momentum {
+  background: var(--teal-faint);
+  color: var(--teal);
+  border-color: var(--teal-dim);
+}
+.item-action-btn:hover { box-shadow: 0 0 14px var(--teal-glow); }
+.item-action-btn:disabled {
+  opacity: 0.4; cursor: not-allowed; box-shadow: none;
+}
+
 .obr-bar {
   position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; gap: 10px;
@@ -2483,7 +2523,7 @@ body.obr-embedded .obr-only { display: block; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.16';
+const APP_VERSION = '1.17';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -3757,11 +3797,65 @@ function renderItemEffectNotes(item) {
   getItemSituationalEffects(item).forEach(effect => {
     parts.push(`<div class="owned-description"><strong>Situational:</strong> ${escHtml(effect.rulesText || effect.label || '')}</div>`);
   });
-  getItemActions(item).forEach(action => {
-    parts.push(`<div class="owned-description"><strong>Manual action:</strong> ${escHtml(action.rulesText || action.label || '')}</div>`);
-  });
+  // v1.17: item actions are buttons now, not notes. Five items in the catalogue carry
+  // an itemAction — Communicator, Tactical Lens, Combat Automed and Emergency Trauma
+  // Kit each add 1 Threat; Combat Medkit spends 1 Momentum. Every one of them is a
+  // thing a player decides to do, and until now each was a line of text asking them to
+  // remember to move the counter by hand. The rules text stays underneath the button,
+  // because the button says what it costs but not when you are allowed to press it.
+  const actions = getItemActions(item);
+  if (actions.length) {
+    parts.push(`<div class="item-action-row no-print">${actions.map(action => {
+      const isMomentum = action.resource === 'momentum';
+      const verb = action.operation === 'spend' ? 'Spend' : 'Add';
+      const cost = `${verb} ${action.value} ${isMomentum ? 'Momentum' : 'Threat'}`;
+      // A Momentum spend the character cannot afford is disabled rather than hidden:
+      // the item still has the ability, they just cannot pay for it right now.
+      const affordable = !isMomentum || getEffectiveResource('momentum') >= Number(action.value || 0);
+      return `<button class="item-action-btn ${isMomentum ? 'momentum' : ''}"
+        ${affordable ? '' : 'disabled'}
+        title="${escHtml(action.rulesText || '')}"
+        onclick="event.stopPropagation(); useItemAction('${escHtml(item.id)}','${escHtml(action.id)}')">${escHtml(action.label)} · ${cost}</button>`;
+    }).join('')}</div>`);
+    actions.forEach(action => {
+      parts.push(`<div class="owned-description">${escHtml(action.rulesText || action.label || '')}</div>`);
+    });
+  }
   if (!parts.length) return '';
   return `<div class="owned-effect-list">${parts.join('')}</div>`;
+}
+
+// v1.17. Both branches funnel through the same two functions the rest of the sheet
+// uses — addThreat() and a plain write to currentMomentum — so an item action reaches
+// the shared pools by exactly the path an ability does, with no separate plumbing to
+// keep in step.
+function useItemAction(itemId, actionId) {
+  const item = getItemById(itemId);
+  if (!item) return;
+  const action = getItemActions(item).find(a => a.id === actionId);
+  if (!action) return;
+  const value = Math.max(0, Math.round(Number(action.value) || 0));
+  if (!value) return;
+
+  if (action.resource === 'momentum') {
+    if (getEffectiveResource('momentum') < value) {
+      showToast(`${item.name}: ${action.label} needs ${value} Momentum.`, 'error');
+      return;
+    }
+    logAction(`${item.name} — ${action.label}`, `spent ${value} Momentum`);
+    state.character.currentMomentum = getEffectiveResource('momentum') - value;
+    saveCharacterLocal(true);
+    renderAll();
+    showToast(`${item.name}: spent ${value} Momentum. ${action.label}.`, 'success');
+    return;
+  }
+
+  if (action.resource === 'threat') {
+    // addThreat() carries the reason to the log itself, so no logAction() here — that
+    // would announce the same press twice.
+    addThreat(value, `${item.name} — ${action.label}`);
+    return;
+  }
 }
 
 function renderResourceBonusBreakdown(resource) {
@@ -4399,6 +4493,7 @@ function useLimitedFeature(key, option = '') {
         showToast('I Know a Guy requires 2 Momentum for that option.', 'error');
         return;
       }
+      logAction(feature.name, 'spent 2 Momentum');
       state.character.currentMomentum = getEffectiveResource('momentum') - 2;
       detail = ' Spent 2 Momentum.';
     } else if (option === 'threat') {
@@ -4410,6 +4505,15 @@ function useLimitedFeature(key, option = '') {
   }
 
   if (!markLimitedFeatureUsed(key)) return;
+  // A limited-use ability is worth announcing even when it moves no shared pool —
+  // "used until Bed" is information the table wants. The two branches that already
+  // announced a pool spend above are not re-announced here: pendingActionLabel is
+  // still set for the Momentum branch, and the Threat branch announces through
+  // addThreat() below, which carries its own reason.
+  if (!pendingActionLabel && !pendingThreat) {
+    logAction(feature.name, `used${detail ? ' —' + detail.replace(/\.$/, '').toLowerCase() : ''}`);
+    logActionNow();
+  }
   saveCharacterLocal(true);
   renderAll();
   showToast(`${feature.name} used.${detail} Refreshes with ${limitedUseResetText(feature.reset)}.`, 'success');
@@ -4588,7 +4692,15 @@ function renderPlayControls() {
 //   2. Seed on finalize instead (see seedResourcesOnFinalize), and only into fields
 //      that are still null. Returning to editing after play must not overwrite a
 //      Spirit or Supply value the character earned or spent at the table.
+// v1.17: this clamps currentMomentum, and embedded that field is an accessor bound to
+// the room pool. Every clamp is therefore a pool write. Wrapping the whole function
+// rather than the single clamp line keeps it correct if another resource is bound to
+// the room later.
 function normalizeCurrentValues() {
+  return withPoolLogSuppressed(normalizeCurrentValuesInner);
+}
+
+function normalizeCurrentValuesInner() {
   normalizeInventoryEntries();
   const c = state.character;
   const statsReady = !!computeStats();
@@ -5356,6 +5468,28 @@ function summarizeCharacterForLibrary(c) {
   const origin = c.origin && DM_DATA.origins[c.origin] ? DM_DATA.origins[c.origin].name : 'No origin';
   const archetype = c.archetype && (DM_DATA.archetypes[c.archetype] || DM_DATA.advancedArchetypes[c.archetype]) ? (DM_DATA.archetypes[c.archetype] || DM_DATA.advancedArchetypes[c.archetype]).name : 'No archetype';
   return `${origin} • ${archetype}`;
+}
+
+// v1.17. There was previously no way out of a finished sheet except reloading the
+// tab by hand, which is not obvious and is not something a player thinks to try.
+//
+// This navigates rather than resetting state in place. A reload is the only thing
+// that reliably clears every module-level variable the creator accumulates during a
+// build — diceUI, roomState, the scroll-restore scope map, the pending Threat holder.
+// Resetting state.character alone would leave those behind and has been a source of
+// odd behaviour in other single-page tools. location.pathname drops any query string
+// while staying on this deployment, so it works from a subfolder or a local file.
+//
+// Nothing is auto-loaded from localStorage at boot — the local library is explicit,
+// with Load buttons — so a reload genuinely lands on an empty front page. Saved
+// characters are untouched, which is what the confirm text promises.
+function startOver() {
+  const saved = readLocalLibrary().some(rec => rec.id === state.character.localSaveId);
+  const warning = saved
+    ? 'Start over with a new character?\n\nThis character is already saved locally, so you can load it again from the front page.'
+    : 'Start over with a new character?\n\nThis character has NOT been saved locally. Anything not saved or copied as a share code will be lost.';
+  if (!confirm(warning)) return;
+  location.href = location.pathname;
 }
 
 function saveCharacterLocal(silent = false) {
@@ -6472,9 +6606,9 @@ function renderThreatCounter() {
   return `<div class="resource-counter obr-only threat-counter">
     <div class="resource-label dm-tip" tabindex="0">Threat<span class="dm-tip-body"><span class="dm-tip-title">Threat</span><span class="dm-tip-desc">The Game Master's pool, shared by the whole table. Abilities and items that tell you to add Threat push it here. Anyone can add; only the GM should spend.</span></span></div>
     <div class="resource-controls">
-      <button class="resource-btn" onclick="addThreat(-1, 'manual')">&minus;</button>
+      <button class="resource-btn" onclick="addThreat(-1, 'manual adjustment')">&minus;</button>
       <div class="resource-value">${value}</div>
-      <button class="resource-btn" onclick="addThreat(1, 'manual')">+</button>
+      <button class="resource-btn" onclick="addThreat(1, 'manual adjustment')">+</button>
     </div>
     <div class="resource-max">group pool</div>
   </div>`;
@@ -6578,6 +6712,56 @@ function activateSceneEffect(key) {
   if (!state.character.activeSceneEffects.includes(key)) state.character.activeSceneEffects.push(key);
 }
 
+// ============================================================
+// THE ROLLS AND ACTIONS LOG (v1.17)
+// ============================================================
+// Rolls have travelled to the shared log since v1.12. Everything else a player
+// does at the table — spending Momentum on a Counterattack, pushing Threat to send
+// a Communicator message, burning a once-per-scene ability — happened silently. The
+// pool numbers moved and nobody knew who moved them or why.
+//
+// logAction() is the announcement. Standalone it does nothing at all: there is no
+// shared log for a single browser tab to write to, and a toast already fired at the
+// call site. Embedded, the module block replaces it to broadcast an action entry.
+//
+// WHY CALL SITES ANNOUNCE, RATHER THAN THE MOMENTUM ACCESSOR DOING IT ALONE:
+// The accessor bound in embedded mode catches every write to currentMomentum, which
+// is exactly why it cannot label them. It sits underneath the six write paths and
+// sees a number change, not a reason. So each handler announces itself first, and
+// the accessor logs whatever it was not told about as a bare pool change. Nothing is
+// invisible, and nothing needs remembering when a new ability is added later — the
+// worst case for a handler nobody wires up is an unlabelled entry, not a missing one.
+//
+// This is deliberately the opposite failure mode to the wrapped-adjustResource()
+// attempt that preceded the accessor, where the paths nobody wired up were silent.
+let pendingActionLabel = null;
+let suppressPoolLog = false;
+
+// Call immediately BEFORE the mutation, so the accessor sees the label in the same
+// tick and does not also emit a bare entry for the same spend.
+function logAction(label, detail) {
+  pendingActionLabel = { label, detail: detail || '' };
+}
+
+// For actions that announce but move no shared pool, so nothing downstream is going
+// to consume the pending label. Standalone this clears it and stops; embedded, the
+// module block replaces this to emit the entry on its own. Without it a pool-less
+// announcement would sit in pendingActionLabel and mislabel the next real spend.
+function logActionNow() {
+  pendingActionLabel = null;
+}
+
+// normalizeCurrentValues() clamps currentMomentum, which is a write like any other as
+// far as the accessor is concerned. Loading a sheet whose Momentum sits above its
+// current maximum would otherwise announce a spend to the whole table that no player
+// made. Bookkeeping is not an action.
+function withPoolLogSuppressed(fn) {
+  const previous = suppressPoolLog;
+  suppressPoolLog = true;
+  try { return fn(); }
+  finally { suppressPoolLog = previous; }
+}
+
 // v1.15: every Threat change in the app goes through here.
 //
 // Threat is the GM's pool and this file has never modelled it, so until now the app
@@ -6619,6 +6803,7 @@ function useAdrenalineRush(points) {
   const bonusText = bonuses.length ? ` Bonus sources before the Spirit maximum: ${bonuses.map(b => `+${b.amount} from ${b.name}`).join(' and ')}.` : '';
   const rivalryText = (state.character.bonds || []).some(b => b.type === 'rivalry') ? ' Your rivalry-bonded ally also gains 1 Spirit.' : '';
   showToast(`Adrenaline Rush restored ${gained} Spirit.${bonusText}${rivalryText}`, 'success');
+  logAction('Adrenaline Rush', `regained ${gained} Spirit, added ${threat} Threat`);
   addThreat(threat, 'Adrenaline Rush');
 }
 
@@ -6638,6 +6823,9 @@ function useSecondWind(points, target) {
     }
     state.character.currentSpirit = before + amount;
   }
+  logAction('Second Wind', target === 'self'
+    ? `spent ${cost} Momentum, regained ${amount} Spirit`
+    : `spent ${cost} Momentum, an ally regains ${amount} Spirit`);
   state.character.currentMomentum -= cost;
   saveCharacterLocal(true);
   renderAll();
@@ -6656,6 +6844,7 @@ function spendMomentumForAction(key, cost) {
     showToast(`${labels[key] || 'This action'} needs ${cost} Momentum.`, 'error');
     return;
   }
+  logAction(labels[key] || key, `spent ${cost} Momentum`);
   state.character.currentMomentum -= cost;
   saveCharacterLocal(true);
   renderAll();
@@ -6669,6 +6858,7 @@ function createTruthWithMomentum() {
     return;
   }
   normalizeEditableLists();
+  logAction('Create Truth', `spent ${cost} Momentum`);
   state.character.currentMomentum -= cost;
   state.character.truths.push('');
   saveCharacterLocal(true);
@@ -6924,6 +7114,7 @@ function renderSummaryStep() {
     <button class="btn btn-secondary" onclick="printSheet(true)">Download Light PDF</button>
     <button class="btn btn-secondary" onclick="editCharacter()">Edit Character</button>
     <button class="btn btn-secondary" onclick="saveCharacterLocal(false)">Save Local</button>
+    <button class="btn btn-secondary tab-only" onclick="startOver()">Start Over</button>
   </div>`;
 
   // THE ACTUAL CHARACTER SHEET
@@ -7556,14 +7747,14 @@ function renderInventorySection() {
   }
   return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
     <div class="sheet-section-title inventory-section-title">Inventory & Equipment</div>
-    <details class="collapsible-section no-print" open>
-      <summary>Item Catalogue</summary>
-      ${renderCatalogueBlock()}
-    </details>
     <details class="collapsible-section" open>
       <summary>Starting Equipment</summary>
       <div style="font-size:0.82rem;color:var(--text-dim);">${archetypeData ? archetypeData.equipment : '—'}</div>
       ${originData && originData.specialNote ? `<div style="font-size:0.82rem;color:var(--warning);margin-top:8px;">⚠ ${originData.specialNote}</div>` : ''}
+    </details>
+    <details class="collapsible-section no-print" open>
+      <summary>Item Catalogue</summary>
+      ${renderCatalogueBlock()}
     </details>
     <details class="collapsible-section" open>
       <summary>Owned Items</summary>
@@ -7598,6 +7789,46 @@ const SKILL_KEYS = ['fight','move','operate','sneak','study','survive','talk'];
 
 // Configurable API base. Empty string = same origin as the page.
 const DM_API_BASE = ''; // e.g. 'https://ro-server.example.com'
+
+// ============================================================
+// SHARED ROLL ROOM — DISABLED IN v1.17
+// ============================================================
+// The Shared Roll Room posts to /api/roll, /api/stream and /api/tail relative to
+// DM_API_BASE. That endpoint was to be hosted by Ro; it is not going to be stood up,
+// so with DM_API_BASE empty every request resolves against gsgrimoire.github.io and
+// 404s. The panel offered a Connect button that could only ever fail.
+//
+// Turned off with a flag rather than deleted. The wire format below is a real, worked
+// design — the POST contract, the SSE stream with a polling tail as fallback, the feed
+// renderer — and rebuilding it from nothing later would be worse than carrying a few
+// hundred dormant lines. Setting this to true and pointing DM_API_BASE at a live host
+// is the whole of the work to bring it back.
+//
+// Note this is a separate thing from the Rolls and Actions log inside Owlbear, which
+// needs no server at all: it rides the extension's broadcast channel and is persisted
+// to room metadata by the GM's background page. Embedded mode hid this panel anyway
+// via body.obr-embedded .dm-room-block, so nothing changes there.
+const SHARED_ROOM_ENABLED = false;
+
+function renderSharedRoomBlock(c) {
+  return `<div class="dm-room-block" style="margin-top:18px;">
+      <div class="sheet-section-title">Shared Roll Room</div>
+      <div class="room-bar">
+        <div class="dice-field" style="flex:1;min-width:160px;">
+          <label>Room Code (share with party)</label>
+          <input class="dm-input" id="roomCodeInput" placeholder="e.g. our-tuesday-game" value="${escHtml(c.roomCode||'')}"
+            oninput="state.character.roomCode=this.value;">
+        </div>
+        <button class="btn btn-secondary" onclick="joinRoom()" style="align-self:flex-end;">Connect</button>
+        <span class="room-status ${roomState.connected?'online':'offline'}" id="roomStatus">${roomState.connected?'● Connected':'○ Offline'}</span>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-dim);line-height:1.5;margin-bottom:4px;">
+        Everyone who connects with the same room code shares a roll feed. Rolls also post to the server log.
+        A standalone view is available at <span class="teal">/room/&lt;code&gt;</span>.
+      </div>
+      <div class="room-feed" id="roomFeed">${renderFeed()}</div>
+    </div>`;
+}
 
 const diceUI = { attr: 'might', skill: 'fight', count: 2, difficulty: 1, lastResult: null };
 const roomState = { connected: false, source: null, feed: [] };
@@ -7659,23 +7890,7 @@ function renderDicePanel() {
       <div id="diceResultArea">${diceUI.lastResult ? renderDiceResult(diceUI.lastResult) : ''}</div>
     </div>
 
-    <div class="dm-room-block" style="margin-top:18px;">
-      <div class="sheet-section-title">Shared Roll Room</div>
-      <div class="room-bar">
-        <div class="dice-field" style="flex:1;min-width:160px;">
-          <label>Room Code (share with party)</label>
-          <input class="dm-input" id="roomCodeInput" placeholder="e.g. our-tuesday-game" value="${escHtml(c.roomCode||'')}"
-            oninput="state.character.roomCode=this.value;">
-        </div>
-        <button class="btn btn-secondary" onclick="joinRoom()" style="align-self:flex-end;">Connect</button>
-        <span class="room-status ${roomState.connected?'online':'offline'}" id="roomStatus">${roomState.connected?'● Connected':'○ Offline'}</span>
-      </div>
-      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-dim);line-height:1.5;margin-bottom:4px;">
-        Everyone who connects with the same room code shares a roll feed. Rolls also post to the server log.
-        A standalone view is available at <span class="teal">/room/&lt;code&gt;</span>.
-      </div>
-      <div class="room-feed" id="roomFeed">${renderFeed()}</div>
-    </div>
+    ${SHARED_ROOM_ENABLED ? renderSharedRoomBlock(c) : ''}
   </div>`;
 }
 
@@ -7756,6 +7971,12 @@ function doRoll() {
 
 // ---- Networking ----
 function postRoll(from, res) {
+  // v1.17: the panel is hidden, but a character saved before v1.17 can still be
+  // carrying a roomCode in its share code. Without this guard those characters would
+  // fire a failing POST on every roll for a server that is never coming up. The
+  // module block replaces this whole function in embedded mode, so Owlbear is
+  // unaffected either way.
+  if (!SHARED_ROOM_ENABLED) return;
   const room = (state.character.roomCode || '').trim();
   if (!room) return; // not in a room; local-only roll
   const payload = {
@@ -8160,6 +8381,31 @@ function bindMomentumToRoom(character) {
       mirror = next;
       OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
         .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+
+      // v1.17. The accessor catches all six write paths, which is exactly why it
+      // cannot name them: it sees a number change, not a reason. So the handlers
+      // announce themselves first by parking a label, and this consumes it.
+      //
+      // When nothing was parked, the change is still logged — just unlabelled. That
+      // covers the counter buttons and the number input, which are real player
+      // decisions with no name attached, and it covers any Momentum path added later
+      // that nobody remembers to wire up. An entry reading "spent 2 Momentum" with no
+      // ability beside it is a small loss; a spend the table never sees is the bug
+      // the wrapped-adjustResource() attempt shipped, and this cannot reproduce it.
+      //
+      // suppressPoolLog is set around normalizeCurrentValues(), whose clamp is a pool
+      // write like any other. Loading a sheet is not an action.
+      if (!suppressPoolLog) {
+        const spent = delta < 0;
+        const parked = pendingActionLabel;
+        pendingActionLabel = null;
+        sendAction({
+          label: parked ? parked.label : (spent ? "Momentum spent" : "Momentum gained"),
+          detail: parked ? parked.detail : `${spent ? "spent" : "gained"} ${Math.abs(delta)} Momentum`,
+          pool: "momentum",
+          delta,
+        });
+      }
     },
   });
 
@@ -8188,8 +8434,64 @@ function installThreatBridge() {
     if (!n) return;
     OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "threat", delta: n }, { destination: "ALL" })
       .catch((err) => console.warn("[dnm] threat broadcast failed", err));
+    // v1.17: the reason was always computed and always thrown away here — used for the
+    // local toast and dropped from the broadcast. Every Threat call site passes a real
+    // one: the item and action name, "Adrenaline Rush", "I Know a Guy", "manual
+    // adjustment". Carrying it through is the whole of what makes the Threat half of
+    // the log readable.
+    sendAction({
+      label: reason || "Threat",
+      detail: `${n > 0 ? "added" : "removed"} ${Math.abs(n)} Threat`,
+      pool: "threat",
+      delta: n,
+    });
     // Still shows the toast, so the player sees what was pushed and why.
     if (typeof original === "function") original(n, reason);
+  };
+}
+
+// -------------------------------------------------------------
+// The Rolls and Actions log (v1.17)
+// -------------------------------------------------------------
+// Action entries share the log with roll entries, so they need a discriminator. Roll
+// entries written before v1.17 have no `kind` at all, which is why the consumer treats
+// a missing `kind` as "roll" rather than requiring one — the entries already sitting in
+// a live room's metadata have to keep rendering.
+let playerName = "Someone";
+
+async function resolvePlayerName() {
+  try {
+    const name = await OBR.player.getName();
+    if (name) playerName = name;
+  } catch (err) {
+    // Non-fatal. A log entry attributed to "Someone" is worse than one attributed
+    // correctly and far better than no entry, so this never blocks an action.
+    console.warn("[dnm] could not read player name", err);
+  }
+}
+
+function sendAction({ label, detail, pool, delta }) {
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    t: Date.now(),
+    kind: "action",
+    who: (state.character?.name || playerName || "Someone").slice(0, 24),
+    label: String(label || "Action").slice(0, 48),
+    detail: String(detail || "").slice(0, 80),
+    pool: pool || null,
+    delta: typeof delta === "number" ? delta : 0,
+  };
+  OBR.broadcast.sendMessage(CHANNEL, { type: "action", entry }, { destination: "ALL" })
+    .catch((err) => console.warn("[dnm] action broadcast failed", err));
+}
+
+// The creator's logAction() only parks a label; this is what makes it travel. The
+// pool-less variant flushes immediately because no pool write is coming to consume it.
+function installActionBridge() {
+  window.logActionNow = function flushActionToOwlbear() {
+    if (!pendingActionLabel) return;
+    sendAction({ label: pendingActionLabel.label, detail: pendingActionLabel.detail });
+    pendingActionLabel = null;
   };
 }
 
@@ -8360,6 +8662,12 @@ async function startEmbedded() {
   hookImport();
   installRollBridge();
   installThreatBridge();
+  installActionBridge();
+
+  // Resolved once at start rather than per entry. sendAction() prefers the character
+  // name when there is one; this is the fallback for a sheet opened on a token that
+  // has no character on it yet.
+  await resolvePlayerName();
 
   try {
     adoptRoom(await OBR.room.getMetadata());
