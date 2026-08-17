@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dreams &amp; Machines Character Creator — Changelog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&family=Exo+2:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --teal: #00B4B4;
+  --teal-dim: #007a7a;
+  --teal-glow: rgba(0, 180, 180, 0.25);
+  --teal-faint: rgba(0, 180, 180, 0.08);
+  --bg: #0a0f0f;
+  --bg2: #0e1515;
+  --bg3: #131e1e;
+  --bg4: #1a2828;
+  --panel: #111a1a;
+  --border: rgba(0,180,180,0.2);
+  --border-bright: rgba(0,180,180,0.6);
+  --text: #d4e8e8;
+  --text-dim: #7aa8a8;
+  --text-bright: #f0ffff;
+  --accent: #ff6b35;
+  --warning: #ffd166;
+  --font-display: 'Rajdhani', sans-serif;
+  --font-body: 'Exo 2', sans-serif;
+  --font-mono: 'Share Tech Mono', monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  line-height: 1.55;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse at 20% 10%, rgba(0,180,180,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(0,180,180,0.04) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+  pointer-events: none;
+  z-index: 1;
+}
+.hex-bg {
+  position: fixed;
+  inset: 0;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0-2l26-15V17L28 2 2 17v32L28 64z' fill='none' stroke='rgba(0,180,180,0.08)' stroke-width='1'/%3E%3Cpath d='M28 100L0 84V66l28 16 28-16v18L28 100z' fill='none' stroke='rgba(0,180,180,0.06)' stroke-width='1'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+.page {
+  position: relative;
+  z-index: 2;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 44px 20px 72px;
+}
+.site-header {
+  text-align: center;
+  padding: 12px 0 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 28px;
+}
+.logo-text {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+  text-shadow: 0 0 40px var(--teal-glow), 0 0 80px rgba(0,180,180,0.1);
+}
+.logo-text span { color: var(--teal); }
+.logo-sub {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.32em;
+  color: var(--teal-dim);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.nav-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.btn-link {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--teal);
+  text-decoration: none;
+  border: 1px solid var(--teal-dim);
+  background: rgba(0,180,180,0.05);
+  padding: 8px 12px;
+  transition: all 0.18s ease;
+}
+.btn-link:hover {
+  border-color: var(--teal);
+  background: var(--teal-faint);
+  box-shadow: 0 0 18px var(--teal-glow);
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 26px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+.version-kicker {
+  font-family: var(--font-mono);
+  color: var(--teal);
+  font-size: 0.68rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+h1, h2, h3 {
+  font-family: var(--font-display);
+  color: var(--text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  margin: 0 0 12px;
+}
+h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); }
+h2 { font-size: 1.55rem; margin-top: 4px; }
+h3 { font-size: 1.05rem; color: var(--teal); margin-top: 18px; }
+p { margin: 0 0 14px; color: var(--text); }
+.lead {
+  font-size: 1rem;
+  color: var(--text-dim);
+  max-width: 760px;
+}
+ul {
+  margin: 10px 0 0 0;
+  padding: 0;
+  list-style: none;
+}
+li {
+  position: relative;
+  padding-left: 22px;
+  margin-bottom: 9px;
+  color: var(--text);
+}
+li::before {
+  content: '◆';
+  position: absolute;
+  left: 0;
+  top: 0.08em;
+  color: var(--teal);
+  font-size: 0.72rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.feature-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 16px;
+}
+.feature-card h3 { margin-top: 0; margin-bottom: 8px; }
+.feature-card p { font-size: 0.88rem; color: var(--text-dim); margin-bottom: 0; }
+.timeline-entry {
+  border-left: 2px solid var(--teal-dim);
+  padding-left: 16px;
+  margin-top: 20px;
+}
+.timeline-entry h2 { margin-bottom: 8px; }
+.version-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  color: var(--teal);
+  border: 1px solid var(--teal-dim);
+  padding: 2px 7px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.note {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  border-left: 3px solid var(--warning);
+  background: rgba(255,209,102,0.06);
+  padding: 10px 12px;
+  margin-top: 14px;
+}
+.footer {
+  text-align: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 28px;
+}
+
+.dev-note-panel {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--teal);
+  padding: 14px 16px;
+  margin-top: 18px;
+}
+.dev-note-panel h3 { margin-top: 0; }
+.dev-note-panel p { color: var(--text-dim); margin-bottom: 10px; }
+.link-inline {
+  color: var(--teal);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--teal-dim);
+}
+.link-inline:hover { color: var(--text-bright); border-bottom-color: var(--teal); }
+
+@media (max-width: 600px) {
+  .panel { padding: 20px; }
+  .nav-row { justify-content: stretch; }
+  .btn-link { width: 100%; text-align: center; }
+}
+@media print {
+  body { background: #ffffff; color: #111111; }
+  .hex-bg, body::before, body::after, .nav-row { display: none; }
+  .page { max-width: none; padding: 0; }
+  .panel, .feature-card { border-color: #cccccc; background: #ffffff; color: #111111; }
+  h1, h2, h3, p, li, .lead, .footer { color: #111111; }
+}
+</style>
+</head>
+<body>
+<div class="hex-bg"></div>
+<main class="page">
+  <header class="site-header">
+    <div class="logo-text">DREAMS <span>&amp;</span> MACHINES</div>
+    <div class="logo-sub">Player Changelog</div>
+    <nav class="nav-row" aria-label="Changelog links">
+      <a class="btn-link" href="./">Back to Character Creator</a>
+      <a class="btn-link" href="./UPGRADE_NOTES.md">Technical Notes</a>
+    </nav>
+  </header>
+
+  <section class="panel">
+    <div class="version-kicker">Current Version</div>
+    <h1>Version v.1.18</h1>
+    <p class="lead">Nanobarrier is now tracked properly, with its cost climbing each time you use it in a scene and resetting when the scene ends. Extra damage got a full row of buttons instead of one. Charging and discharging items now shows up in the shared log.</p>
+
+    <div class="dev-note-panel">
+      <h3>Player Changelog vs. Technical Log</h3>
+      <p>This page is the player-facing changelog: it explains what changed in practical play terms. For implementation details, data schema changes, compatibility notes, and developer handoff context, use the technical notes.</p>
+      <p><a class="link-inline" href="./UPGRADE_NOTES.md">Open the technical upgrade notes</a>.</p>
+    </div>
+
+    <div class="grid">
+      <article class="feature-card">
+        <h3>Nanobarrier</h3>
+        <p>Barrier, Shock and Display each have a button showing what the next activation costs. First use in a scene is free, then 1 Threat, then 2, climbing until the scene ends.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Extra Damage</h3>
+        <p>Six buttons instead of one, reading "3 Momentum : 3 Damage" so both halves of the trade are visible before you commit.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Precision Firepower</h3>
+        <p>If you have the talent, the damage buttons show the doubled figures rather than making you work them out mid-fight.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Charge and Discharge</h3>
+        <p>Discharging or recharging an item posts to the shared log, so the table can see when something has been spent.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Rests Stay Quiet</h3>
+        <p>A Bed rest that recharges six items posts one line, not six. The log records what happened without burying everything else.</p>
+      </article>
+      </div>
+
+    <div class="note">The Rolls and Actions log is an Owlbear Rodeo feature. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone.</div>
+  </section>
+
+  <section class="panel">
+    <div class="version-kicker">Version History</div>
+
+    <article class="timeline-entry">
+      <span class="version-tag">v.1.18</span>
+      <h2>Nanobarrier, damage buttons, and item charge logging</h2>
+      <ul>
+        <li>Added Nanobarrier as a tracked ability with all three options — Barrier, Shock and Display — each showing what the next activation will cost.
+        <li>Nanobarrier's first use in a scene is free, the second costs 1 Threat, and each use after that costs one more. All three options draw on the same count.
+        <li>The cost resets at End Scene, and therefore also at New Session and New Adventure.
+        <li>Replaced the single extra-damage button with six, one per Momentum, labelled so both the cost and the damage are visible before you commit.
+        <li>Damage buttons show doubled damage for characters with Precision Firepower, with a note naming the talent responsible.
+        <li>Discharging or recharging a Powered item now posts to the Rolls and Actions log.
+        <li>A rest posts a single summary line rather than one entry per item recharged.
+      </ul>
+
+      <span class="version-tag">v.1.17</span>
+      <h2>Rolls and Actions Log, item buttons, and Start Over</h2>
+      <ul>
+        <li>The shared roll log became the Rolls and Actions log: it now records ability uses, item uses, and every change to the Momentum and Threat pools alongside rolls.
+        <li>Log entries name who acted and what they used, so "Kell — Second Wind — spent 3 Momentum, regained 2 Spirit" reads as one line instead of a number moving on its own.
+        <li>Added buttons for the five items whose rules carry a cost: Communicator, Tactical Lens, Combat Automed and Emergency Trauma Kit add Threat; Combat Medkit spends Momentum. These were previously notes asking you to move the counter yourself.
+        <li>An item button you cannot currently afford is shown greyed out rather than hidden, so you can still see the item has the ability.
+        <li>Manual adjustments to the Threat counter now post to the log.
+        <li>Added a Start Over button beside Save Local on a finished sheet. It warns first if the character has not been saved locally.
+        <li>Moved Starting Equipment above the Item Catalogue in Inventory &amp; Equipment.
+        <li>Removed the Shared Roll Room panel, which relied on a server that is not going to be available.
+        <li>Confirmed that New Adventure refreshes I Know a Guy, which it already did.
+      </ul>
+
+      <span class="version-tag">v.1.16</span>
+      <h2>Threat reaches the table</h2>
+      <ul>
+        <li>Threat changes made on the sheet now reach the shared Threat pool in Owlbear instead of only printing a reminder.
+        <li>Roll entries in the shared log carry the real Difficulty, whether the test passed, and the Momentum gained.
+        <li>The Owlbear character sheet and the character creator became a single page, so the sheet you play on and the sheet you build on can no longer drift apart.
+      </ul>
+
+      <span class="version-tag">v.1.15</span>
+      <h2>Momentum as a group pool</h2>
+      <ul>
+        <li>Momentum on an Owlbear sheet is the group's pool, not a private counter. Spending it in any way — the buttons, the number field, or an ability — moves the shared total.
+        <li>Every Threat source in the app was routed through one place, so a new one is wired into the table automatically.
+      </ul>
+    </article>
+
+    <article class="timeline-entry">
+      <span class="version-tag">v.1.10</span>
+      <h2>you can Rest and use abilities etc.</h2>
+      <ul>
+        <li>Added tracked uses for Haggler, Just What They Need, I Know a Guy, Ambush, and Tough, each with a Use control and a used state.
+        <li>Added New Session and New Adventure controls beside End Scene, so abilities limited to a session or an adventure refresh at the right boundary.
+        <li>Moved Tech Level up to the name line and stacked the Origin, Archetype, and Temperament tags, giving the Goals boxes more room.
+        <li>Origin, Archetype, and Temperament tooltips now show what each one is, instead of repeating its own label.
+        <li>Expanded panels no longer snap shut and the page no longer jumps when you equip an item, take a rest, or confirm an action.
+        <li>Fixed the version link in the header, which was showing an older release than the one you were using.
+      </ul>
+
+      <span class="version-tag">v.1.09</span>
+      <h2>Overhaul to layout, Actions and Momentum, + items now can be &ldquo;discharged&rdquo; if Powered. Lots of little tinkerings.</h2>
+      <ul>
+        <li>Added expandable reference cards for all core actions, including Counterattack.
+        <li>Added confirmed Momentum spending for Second Wind, Create Truth, Ask a Question, Damage, Reduce Time, Follow-Up, and Counterattack.
+        <li>Added once-per-scene Adrenaline Rush controls and an End Scene reset.
+        <li>Added an interactive Spear's Blend scene effect and automatic Bold and Spear's Blend Spirit bonuses.
+        <li>Added Breather, Break, and Bed controls which restore Spirit and recharge eligible Powered item stacks.
+        <li>Added Charged and Discharged state tracking for Powered items and weapons, including manual handling for Powered (Special).
+        <li>Added Custom Items and Knowledge Fragments as persistent free-text lists.
+        <li>Fixed starting Spirit and Supply Point initialization and added a confirmed Supply Point reset.
+        <li>Relabeled Character Truths to Truths, added Truth type guidance, and connected action controls to Truth creation.
+        <li>Reorganized the finished sheet and refined the identity header, resource layout, and play controls.
+      </ul>
+
+      <span class="version-tag">v.1.08</span>
+      <h2>Item Effects, Resources, Truths, Injuries, and Catalogue Refinement</h2>
+      <ul>
+        <li>Full descriptions added for all equipment, vehicles, and Common GLIF patterns.</li>
+        <li>Item Catalogue and Owned Items can show expanded item descriptions.</li>
+        <li>Owned Items can be marked as equipped or unequipped.</li>
+        <li>Only one armor item can be equipped at a time.</li>
+        <li>Handy armor increases maximum Supply Points while equipped.</li>
+        <li>Equipped situational item reminders appear on relevant Attributes, Skills, and Dice Roller choices.</li>
+        <li>Resource counters were cleaned up and given rules tooltips.</li>
+        <li>Growth maximum corrected to 10 and Coin maximum set to 20.</li>
+        <li>Character Truths changed into editable saved fields.</li>
+        <li>Injuries added as editable saved fields.</li>
+        <li>Tech Level and Rarity tags now explain their specific levels.</li>
+        <li>Item Catalogue tooltip clipping and horizontal scrollbar issues fixed.</li>
+        <li>Clear Search added to reset catalogue text and filters.</li>
+        <li>Finalized sheet layout cleaned up.</li>
+      </ul>
+    </article>
+
+    <article class="timeline-entry">
+      <span class="version-tag">v.1.07</span>
+      <h2>Portraits and Owned Item Display</h2>
+      <ul>
+        <li>Character Portrait Web Address field added.</li>
+        <li>Live portrait preview added while editing character information.</li>
+        <li>Portraits now appear in finalized character sheet headers.</li>
+        <li>Portrait addresses are saved in character data, share codes, imports, and local saves.</li>
+        <li>Portrait validation and Clear Portrait support added.</li>
+        <li>Supportive Bond and Rivalry tooltips updated with their mechanical benefits.</li>
+        <li>Owned Items received a disclosure indicator and cleaner expanded text.</li>
+        <li>Item Catalogue search no longer loses focus while typing.</li>
+      </ul>
+    </article>
+
+    <article class="timeline-entry">
+      <span class="version-tag">v.1.06</span>
+      <h2>Changelog, Sheet Order, and Catalogue Filters</h2>
+      <ul>
+        <li>Changelog page added and linked from the version label.</li>
+        <li>Back to Character Creator links added to the changelog.</li>
+        <li>Growth moved near the end of the character sheet.</li>
+        <li>Character Share Code moved to the bottom.</li>
+        <li>Item Catalogue subfilters now update correctly when the main category filter changes.</li>
+      </ul>
+    </article>
+  </section>
+
+  <footer class="footer">Dreams &amp; Machines Character Creator - Changelog</footer>
+</main>
+</body>
+</html>
