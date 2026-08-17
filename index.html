@@ -3,7 +3,7 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.19
+  Version: 1.19B
   File:    index.html (stable filename; do not version the filename)
            Deployed at https://gsgrimoire.github.io/dnm-cc/ — always link the folder,
            never a filename. dnm-character-creator.html has never existed in the repo
@@ -2537,7 +2537,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.19';
+const APP_VERSION = '1.19B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4635,7 +4635,7 @@ function takeRest(key) {
   // Powered item a character owns, and posting each separately would bury the rest
   // of the log under a single button press.
   const restDetail = [
-    `regained ${gained} Spirit`,
+    gained > 0 ? `regained ${gained} Spirit` : '',
     recharged.length ? `recharged ${recharged.length} ${recharged.length === 1 ? 'item' : 'items'}` : '',
     refreshedAbilities.length ? `refreshed ${refreshedAbilities.length} ${refreshedAbilities.length === 1 ? 'ability' : 'abilities'}` : '',
   ].filter(Boolean).join(', ');
@@ -6835,6 +6835,7 @@ const BOUNDARY_ORDER = ['adventure', 'session', 'scene'];
 const REST_ORDER = ['bed', 'break', 'breather'];
 
 let suppressActionLog = false;
+let capturedActions = null;
 
 // Catching up must not write to the shared log. The GM's press was already logged
 // once, by the GM. Without this, every player reconciling the same press would post
@@ -6860,15 +6861,18 @@ function writeAppliedEpochs(roomEpochs) {
   state.character.appliedEpochs = out;
 }
 
-// Returns a short description of what was applied, or '' if nothing was.
+// Returns { summary, detail } describing what was applied, or null if nothing was.
+// The detail comes from the internal logAction() calls that endScene() and takeRest()
+// already make — captured rather than discarded, so the log entry carries the same
+// numbers the player sees in their toast.
 function catchUpToRoomEpochs(roomEpochs) {
-  if (!roomEpochs || !state.character || !state.character.finalized) return '';
+  if (!roomEpochs || !state.character || !state.character.finalized) return null;
   const applied = readAppliedEpochs();
 
   // First contact: adopt the room's position without acting on it.
   if (!applied) {
     writeAppliedEpochs(roomEpochs);
-    return '';
+    return null;
   }
 
   const behind = k => (Number(roomEpochs[k]) || 0) > (applied[k] || 0);
@@ -6876,20 +6880,30 @@ function catchUpToRoomEpochs(roomEpochs) {
 
   const boundary = BOUNDARY_ORDER.find(behind);
   const rest = REST_ORDER.find(behind);
+  if (!boundary && !rest) { writeAppliedEpochs(roomEpochs); return null; }
 
-  withActionLogSuppressed(() => {
-    // Boundary before rest: a new scene then a rest reads correctly in that order,
-    // and a rest's ability refresh should not be undone by a boundary reset applied
-    // immediately after it.
-    if (boundary === 'adventure') { startNewAdventure(); done.push('New Adventure'); }
-    else if (boundary === 'session') { startNewSession(); done.push('New Session'); }
-    else if (boundary === 'scene') { endScene(); done.push('End Scene'); }
-    if (rest) { takeRest(rest); done.push(REST_TYPES[rest] ? REST_TYPES[rest].name : rest); }
-  });
+  const captured = [];
+  const previousCapture = capturedActions;
+  capturedActions = captured;
+  try {
+    withActionLogSuppressed(() => {
+      // Boundary before rest: a new scene then a rest reads correctly in that order,
+      // and a rest's ability refresh should not be undone by a boundary reset applied
+      // immediately after it.
+      if (boundary === 'adventure') { startNewAdventure(); done.push('New Adventure'); }
+      else if (boundary === 'session') { startNewSession(); done.push('New Session'); }
+      else if (boundary === 'scene') { endScene(); done.push('End Scene'); }
+      if (rest) { takeRest(rest); done.push(REST_TYPES[rest] ? REST_TYPES[rest].name : rest); }
+    });
+  } finally {
+    capturedActions = previousCapture;
+  }
 
   writeAppliedEpochs(roomEpochs);
-  if (done.length) saveCharacterLocal(true);
-  return done.join(' + ');
+  saveCharacterLocal(true);
+
+  const detail = captured.map(a => a.detail).filter(Boolean).join('; ');
+  return { summary: done.join(' + '), detail };
 }
 
 // Mirrors readEpochs() in dnm.js. Rooms written before extension 0.8.0 have no
@@ -6930,9 +6944,17 @@ let suppressPoolLog = false;
 // Call immediately BEFORE the mutation, so the accessor sees the label in the same
 // tick and does not also emit a bare entry for the same spend.
 function logAction(label, detail) {
-  // Suppressed while reconciling a GM-pushed boundary: that press was logged once by
-  // the GM, and every character catching up must not each post their own copy.
-  if (suppressActionLog) return;
+  // While reconciling a GM-pushed boundary the internal calls from endScene() and
+  // takeRest() are CAPTURED rather than sent. They still hold the detail worth
+  // showing — how much Spirit came back, how many items recharged — so v1.19B keeps
+  // them and folds them into a single catch-up entry instead of throwing them away.
+  //
+  // Sending them as-is would post one entry per character per internal call, which is
+  // the flood this guard exists to prevent.
+  if (suppressActionLog) {
+    if (capturedActions) capturedActions.push({ label, detail: detail || '' });
+    return;
+  }
   pendingActionLabel = { label, detail: detail || '' };
 }
 
@@ -7086,12 +7108,23 @@ function activateSpearsBlend() {
 const MAX_DAMAGE_MOMENTUM = 6;
 
 // c.talent is the archetype pick and may be a single key or an array; growth can add
-// more. Both shapes appear in saved characters, so both are flattened here rather
-// than at each call site.
+// more. Both shapes appear in saved characters, so both are flattened here.
+//
+// v1.19B FIX: forced talents were missing. An archetype's forcedTalent is granted
+// automatically and is NEVER written into c.talent — the render sites read it straight
+// off archetypeData. Nanobarrier is exactly that case, so hasTalent('nanobarrier')
+// returned false for every character who actually had it, and useNanobarrier() bailed
+// on its own guard. The card rendered (it renders from archetypeData) but no button
+// ever did anything, which is why the cost sat at FREE forever.
+//
+// The unit test masked this by assigning state.character.talent directly, which is not
+// how a real character of that archetype is shaped.
 function getCharacterTalentKeys() {
   const c = state.character || {};
   const base = Array.isArray(c.talent) ? c.talent : [c.talent];
-  return [...base, ...(c.growthExtraTalents || [])].filter(Boolean);
+  const arch = DM_DATA.archetypes[c.archetype] || DM_DATA.advancedArchetypes[c.archetype];
+  const forced = arch && arch.forcedTalent ? [arch.forcedTalent] : [];
+  return [...forced, ...base, ...(c.growthExtraTalents || [])].filter(Boolean);
 }
 
 function hasTalent(key) {
@@ -8776,6 +8809,8 @@ function installActionBridge() {
   };
 }
 
+let lastRoomState = null;
+
 function adoptRoom(meta) {
   const found = meta && meta[ROOM_KEY];
   const next = found && typeof found.momentum === "number" ? found.momentum : 0;
@@ -8783,10 +8818,14 @@ function adoptRoom(meta) {
   const changed = next !== roomMomentum || nextThreat !== obrThreat;
   roomMomentum = next;
   obrThreat = nextThreat;
-  // v1.19: epochs are reconciled before the early return, because a room whose
-  // pools happen to be unchanged can still have moved a boundary forward.
-  let caughtUp = '';
-  if (ready && found) caughtUp = catchUpToRoomEpochs(readRoomEpochs(found));
+  // v1.19B: the room state is remembered even when the character is not loaded yet.
+  // adoptRoom() runs during startEmbedded BEFORE loadFromToken() sets ready, so the
+  // first pass could never reconcile — which is why catch-up appeared to wait for the
+  // next unrelated room change rather than happening on open.
+  lastRoomState = found || null;
+
+  let caughtUp = null;
+  if (ready && found) caughtUp = reconcileEpochs(found);
 
   if (!changed && !caughtUp) return;
   if (!ready) return;
@@ -8795,7 +8834,39 @@ function adoptRoom(meta) {
     else state.character.currentMomentum = next;
   }
   renderAll();
-  if (caughtUp) showToast(`The GM called ${caughtUp}. Your sheet has caught up.`, 'success');
+}
+
+// -------------------------------------------------------------
+// Epoch reconciliation (v1.19B)
+// -------------------------------------------------------------
+// Applies whatever the GM pushed, then announces it to the shared log.
+//
+// WHY THIS BROADCASTS, HAVING BEEN DELIBERATELY SILENT IN v1.19:
+// v1.19 suppressed catch-up logging to stop one GM press producing an entry per
+// character. That was right about the flood and wrong about the need. A player whose
+// sheet has not caught up cannot tell the difference between "the rest already
+// applied" and "the rest has not reached me", and the natural response to that doubt
+// is to take the rest again — two Bed rests from one call.
+//
+// So the internal calls stay suppressed and exactly ONE deliberate entry is sent per
+// character. The table sees who has caught up and on what, which is the question the
+// silence left unanswered.
+function reconcileEpochs(roomState) {
+  const result = catchUpToRoomEpochs(readRoomEpochs(roomState));
+  if (!result) return null;
+  const detail = result.detail ? `${result.summary} — ${result.detail}` : result.summary;
+  sendAction({ label: 'Caught up', detail });
+  showToast(`The GM called ${result.summary}. Your sheet has caught up.`, 'success');
+  return result;
+}
+
+// Called once the character is actually loaded. Without this the sheet reconciles only
+// when room metadata next changes, which from a player's seat looks like the rest
+// arriving at random — or not at all until they touched something.
+function reconcileOnOpen() {
+  if (!ready || !lastRoomState) return;
+  const result = reconcileEpochs(lastRoomState);
+  if (result) renderAll();
 }
 
 // -------------------------------------------------------------
@@ -8917,6 +8988,8 @@ function loadIntoCreator(code) {
   renderAll();
   insertBar(state.character.name);
   setSaveState("saved");
+  // Now that ready is true, apply anything the GM pushed while this sheet was closed.
+  reconcileOnOpen();
   return null;
 }
 
@@ -8937,6 +9010,7 @@ function hookImport() {
       insertBar(state.character.name);
       renderAll();
       commit();
+      reconcileOnOpen();
     }
     return out;
   };

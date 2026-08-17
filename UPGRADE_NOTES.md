@@ -1,3 +1,163 @@
+# v1.19B — Nanobarrier fix, eager catch-up, visible reconciliation
+
+Creator **v1.19B**, extension **0.8.1**. Fix release on top of v1.19.
+
+---
+
+## The Nanobarrier bug
+
+Nanobarrier did nothing. The card rendered, showed `NEXT: FREE`, and never changed. No
+Threat, no log entry, no counter movement.
+
+Cause: `useNanobarrier()` opens with `if (!hasTalent('nanobarrier')) return;`, and
+`hasTalent()` read only `c.talent` and `c.growthExtraTalents`. **Nanobarrier is a forced
+talent** — Sentinel's `forcedTalent` — and a forced talent is granted by the archetype
+and is *never written into `c.talent`*. The render sites read it straight off
+`archetypeData`, which is why the card appeared while every press was silently ignored.
+
+Two things made this survive testing:
+
+1. The v1.18 harness set `state.character.talent = 'nanobarrier'` directly. That is not
+   how a real character of that archetype is shaped. The fixture asserted the code
+   worked for a character that cannot exist.
+2. The first attempt at this fix read `DM_DATA.archetypes[c.archetype]` only. Sentinel
+   lives in **`advancedArchetypes`**, so the fix failed in the same silent direction.
+   Caught because the corrected fixture threw rather than quietly passing.
+
+`getCharacterTalentKeys()` now resolves the archetype from both tables, exactly as the
+five other call sites in the file already did, and prepends `forcedTalent`.
+
+**Lesson worth keeping:** a fixture that assigns state directly instead of building the
+object the way the app builds it will confirm whatever the code already does. When a
+feature depends on how a character is *shaped*, the test has to construct it from
+`DM_DATA` rather than assert its way past the shape.
+
+---
+
+## Catch-up now happens on open
+
+Reported as: rests only landing once the sheet was interacted with.
+
+Cause: `adoptRoom()` runs during `startEmbedded()` **before** `loadFromToken()` sets
+`ready = true`, and it guarded reconciliation with `if (ready && found)`. The first pass
+therefore always skipped. After that, reconciliation only ran when
+`OBR.room.onMetadataChange` fired — some *other* change to the room — which from a
+player's seat looked like the rest arriving at random.
+
+Fixes:
+
+- `adoptRoom()` stores the room state in `lastRoomState` regardless of `ready`.
+- `reconcileOnOpen()` runs after `ready = true`, at the end of `loadFromToken()` and
+  after a fresh import onto a token.
+
+---
+
+## Catch-up is now visible in the log
+
+v1.19 suppressed catch-up logging to stop one GM press producing an entry per character.
+That was right about the flood and **wrong about the need**.
+
+A player whose sheet has not caught up cannot distinguish "the rest already applied" from
+"the rest has not reached me". The natural response to that doubt is to take the rest
+again — two Bed rests from one call.
+
+So the internal `logAction()` calls from `endScene()` and `takeRest()` stay suppressed,
+but they are now **captured rather than discarded**, and exactly **one** deliberate entry
+is sent per character carrying their detail:
+
+> **Kell** · Caught up — *Bed — regained 5 Spirit, recharged 2 items*
+
+One entry per character is the point here: the table can see who has caught up and who
+has not. That is the question v1.19's silence left unanswered.
+
+`capturedActions` saves and restores its previous value, matching the two suppression
+flags, so nesting cannot strand a buffer.
+
+Also fixed: a rest restoring no Spirit no longer emits `regained 0 Spirit`. The clause is
+dropped when the value is zero.
+
+---
+
+## GM button confirmations
+
+Two-step. First press arms the button and relabels it `Confirm?`; second press sends.
+Arming clears after 4 seconds, and arming one button disarms any other, so a stray click
+elsewhere in the panel cannot fire something armed earlier.
+
+The 800 ms disable-after-send from v1.19 is kept — it stops a double-send, but it does
+nothing about the *first* press being a misclick, which is the expensive case. Every
+attached character acts on it and there is no undo.
+
+---
+
+## Roller pool adjustments are logged
+
+The roller's own +/- buttons were the last unlogged way to move a pool. The sheet has
+logged its pool changes since v1.17, so a number moving with no entry beside it meant
+somebody had used these — invisible, and precisely the ambiguity the log exists to
+remove.
+
+**On attribution:** the roller does not know which character an Owlbear login is playing,
+and there is no mapping to consult. It uses the selected token's character name when
+there is one, falling back to the Owlbear display name, and labels the entry *Manual
+adjustment* so it is never mistaken for an ability.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `roller.js`, `style.css`, `manifest.json` (0.8.1). `dnm.js`,
+   `index.html`, `background.js` and `background.html` are unchanged from 0.8.0.
+2. **`dnm-cc/index.html`**
+3. Docs
+4. Full room reload
+
+No reinstall. Schema stays at v2; no metadata migration.
+
+---
+
+## Documentation history restored
+
+`CHANGELOG.html` was rebuilt **from the deployed file** rather than from the copy in this
+workspace, and now runs unbroken from **v1.03 to v1.19B** — 18 entries.
+
+The v1.18 and v1.19 changelogs shipped earlier had silently dropped v1.03–v1.05 and
+v1.11–v1.14. They were regenerated from a v1.17 copy reconstructed out of the old 1.08
+file plus what was known in-session, rather than from the live document. Same failure as
+the backfill claim and the handoff's stale filename: **a document rebuilt from a
+description of itself loses whatever the description omitted.**
+
+Rule going forward: edit the deployed `CHANGELOG.html`, never regenerate it.
+
+---
+
+## Testing
+
+Nanobarrier is now tested against a character built the way a real Sentinel is built —
+archetype resolved from `DM_DATA`, `c.talent` deliberately set to something *else* —
+plus a negative case confirming a non-Sentinel archetype does not gain it.
+
+Catch-up: structured return verified, captured detail present, zero-Spirit clause
+omitted, internal calls still suppressed, suppression and capture buffer both restored,
+normal logging resumes after.
+
+Regression: v1.19 catch-up semantics (highest boundary wins, boundary before rest, three
+presses equal one rest, legacy rooms no-op), v1.18 damage buttons and Precision Firepower
+doubling, v1.17 room disabled, five item actions, Start Over, pool clamp suppression.
+
+**Untested here, as before.** `OBR.isAvailable` is false in jsdom, so the broadcast of the
+catch-up entry, the reconcile-on-open trigger, the role gate, and the roller's two-step
+confirm are **not** verified. They need a live room.
+
+### Live checks
+
+- Sentinel: press Barrier, confirm the log entry and that the cost moves to 1 Threat.
+- Close a player's sheet, GM presses Bed, player **opens** the sheet — catch-up should be
+  immediate, with no roll or button press needed first.
+- Confirm exactly one catch-up entry per character, carrying Spirit/item detail.
+- GM panel: first press shows `Confirm?`, wait 4 s, confirm it disarms itself.
+- Nudge Threat from the roller and confirm it appears in the log with a name.
+
 # Dreams & Machines character creator: cumulative upgrade notes
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.

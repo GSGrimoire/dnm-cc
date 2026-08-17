@@ -254,8 +254,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.17</h1>
-    <p class="lead">This update is about the table seeing what you do. Abilities, item uses and pool changes now appear in the shared log alongside rolls, the four items that cost Threat and the one that costs Momentum have real buttons, and the creator finally has a way back to the front page.</p>
+    <h1>Version v.1.19B</h1>
+    <p class="lead">A fix release. Nanobarrier was doing nothing at all for Sentinels, and sheets were only picking up the GM's rests once you touched something. Both are fixed, and catching up now announces itself in the log so nobody takes a rest twice.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -265,30 +265,26 @@ h1 {
 
     <div class="grid">
       <article class="feature-card">
-        <h3>Rolls and Actions log</h3>
-        <p>The shared log in Owlbear now records abilities and item uses, not just rolls. Spend Momentum on a Counterattack and the table sees who spent it and what for.</p>
+        <h3>Nanobarrier Works</h3>
+        <p>Sentinels can actually use it now. The cost climbs from Free to 1 Threat and upward, and every activation reaches the log.</p>
       </article>
       <article class="feature-card">
-        <h3>Item buttons</h3>
-        <p>Communicator, Tactical Lens, Combat Automed and Emergency Trauma Kit have a button for their Threat cost. Combat Medkit has one for its Momentum cost.</p>
+        <h3>Instant Catch-Up</h3>
+        <p>Opening your sheet applies whatever the GM called while it was closed. No need to roll or press something first.</p>
       </article>
       <article class="feature-card">
-        <h3>Start Over</h3>
-        <p>A Start Over button sits beside Save Local on a finished sheet, returning you to the front page without reloading the tab by hand.</p>
+        <h3>Visible Catch-Up</h3>
+        <p>Your sheet says so in the log when it catches up, with the Spirit and items involved, so nobody rests twice out of doubt.</p>
       </article>
       <article class="feature-card">
-        <h3>Manual changes count</h3>
-        <p>Nudging the Threat counter by hand posts to the log like anything else. Bookkeeping is visible, not secret.</p>
+        <h3>GM Confirmations</h3>
+        <p>Table control buttons arm on the first press and send on the second, so a misclick cannot rest the whole table.</p>
       </article>
       <article class="feature-card">
-        <h3>Equipment first</h3>
-        <p>Starting Equipment now sits above the Item Catalogue, so the list you are working from comes before the list you are searching.</p>
+        <h3>Roller Pools Logged</h3>
+        <p>Nudging Momentum or Threat from the roller now posts to the log under the name of whoever pressed it.</p>
       </article>
-      <article class="feature-card">
-        <h3>Shared Roll Room removed</h3>
-        <p>The Shared Roll Room panel is gone. It needed a server that was never going to be running, so its Connect button could only ever fail.</p>
-      </article>
-    </div>
+      </div>
 
     <div class="note">The Rolls and Actions log is an Owlbear Rodeo feature. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone.</div>
   </section>
@@ -297,6 +293,43 @@ h1 {
     <div class="version-kicker">Version History</div>
 
     <article class="timeline-entry">
+      <span class="version-tag">v.1.19B</span>
+      <h2>Nanobarrier fix and catch-up improvements</h2>
+      <ul>
+        <li>Fixed Nanobarrier doing nothing. Sentinels are granted it automatically, and the sheet was not counting an automatically granted talent as one you have, so every press was silently ignored and the cost never moved off Free.
+        <li>Sheets now catch up the moment they are opened, instead of waiting until you rolled or pressed something.
+        <li>When your sheet catches up, it posts to the log so the table can see who has received a rest and who has not.
+        <li>The catch-up entry carries the detail — Spirit regained, items recharged — rather than only naming what the GM called.
+        <li>A rest that restores no Spirit no longer says "regained 0 Spirit".
+        <li>GM table control buttons now ask for confirmation. The first press arms the button, the second sends it, and it disarms itself after a few seconds.
+        <li>Adjusting Momentum or Threat with the roller's own buttons now posts to the log, attributed to whoever pressed them.
+        <li>Requires extension 0.8.1.
+      </ul>
+
+      <span class="version-tag">v.1.19</span>
+      <h2>GM table controls</h2>
+      <ul>
+        <li>Added a Table Controls panel to the roller, visible only to the GM, with buttons for Breather, Break and Bed rests and for End Scene, New Session and New Adventure.
+        <li>Pressing one applies it to every attached character, not just the sheets that happen to be open.
+        <li>A character whose sheet was closed catches up the next time it is opened, and is told what was called.
+        <li>Catching up after several missed presses applies the strongest one once. Three missed Bed rests is one Bed rest.
+        <li>A new character attached to a token does not retroactively take rests it was never present for.
+        <li>The GM calling a rest appears once in the log, attributed to the GM, rather than once per character.
+        <li>Requires extension 0.8.0. The install link is unchanged, so no reinstall is needed.
+      </ul>
+
+      <span class="version-tag">v.1.18</span>
+      <h2>Nanobarrier, damage buttons, and item charge logging</h2>
+      <ul>
+        <li>Added Nanobarrier as a tracked ability with all three options — Barrier, Shock and Display — each showing what the next activation will cost.
+        <li>Nanobarrier's first use in a scene is free, the second costs 1 Threat, and each use after that costs one more. All three options draw on the same count.
+        <li>The cost resets at End Scene, and therefore also at New Session and New Adventure.
+        <li>Replaced the single extra-damage button with six, one per Momentum, labelled so both the cost and the damage are visible before you commit.
+        <li>Damage buttons show doubled damage for characters with Precision Firepower, with a note naming the talent responsible.
+        <li>Discharging or recharging a Powered item now posts to the Rolls and Actions log.
+        <li>A rest posts a single summary line rather than one entry per item recharged.
+      </ul>
+
       <span class="version-tag">v.1.17</span>
       <h2>Rolls and Actions log, item buttons, and Start Over</h2>
       <ul>
