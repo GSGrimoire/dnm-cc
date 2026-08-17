@@ -2,6 +2,176 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.19 + dnm-obr 0.8.0 — GM table controls
+
+Append to `UPGRADE_NOTES.md`. Both repos change together. The room metadata schema
+moves to **v2**, so deploy the extension first.
+
+---
+
+## The problem
+
+A rest or a scene boundary is per-character state living inside each token's DM1 code.
+The GM wants one button that reaches every attached character.
+
+Three ways to do it, two of them wrong:
+
+**Broadcast the reset.** Only reaches sheets that are currently open, which at any
+moment is nearly none of them. A player whose sheet was closed never gets the rest, and
+there is no way for them to find out they missed it.
+
+**Have the extension decode every token, apply the reset, re-encode.** Works, but drags
+the entire DM1 format into the extension. The snapshot split exists precisely so the
+extension never has to interpret character data; this would undo it, and every future
+character-format change would become an extension change too.
+
+**Epoch counters.** The GM increments an integer in room metadata. Each character
+records the epoch it last applied and reconciles when its sheet next opens.
+
+The third one is what shipped. The extension increments integers and knows nothing else.
+The reset becomes lazy, which is what makes it correct for closed sheets: a player who
+was offline gets their rest the moment they open up.
+
+---
+
+## Schema (extension 0.8.0)
+
+`EMPTY_STATE` is now `v: 2` and carries:
+
+```js
+epochs: { scene: 0, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 }
+```
+
+Rests sit alongside scene boundaries because the mechanism is identical — a counter the
+GM increments and each sheet catches up to. They differ only in what the sheet does on
+arrival.
+
+**Rooms written before 0.8.0 have no `epochs` key at all**, and those rooms are live
+right now. Both sides read through a defaulting helper — `readEpochs()` in `dnm.js`,
+`readRoomEpochs()` in the creator — rather than assuming presence. A missing key must
+read as zero, not `undefined`, or every comparison silently fails.
+
+`applyEvent` handles `type: "epoch"` with a **monotonic increment, never an assignment**,
+so a GM with the panel open in two windows cannot clobber themselves into a lower value.
+
+`trimState` now rebuilds `epochs` before trimming. Losing one to the byte budget would
+send every sheet backwards and re-apply a boundary the table already had.
+
+---
+
+## Catch-up rules (creator v1.19)
+
+`catchUpToRoomEpochs()` compares room epochs against `character.appliedEpochs`.
+
+**Applies once, not N times.** Three Bed presses missed while a sheet was closed produce
+one Bed rest. Rests clamp to maxima and boundary resets clear flags, so replaying would
+change nothing except flooding the log.
+
+**Highest wins.** New Adventure subsumes New Session subsumes End Scene; Bed subsumes
+Break subsumes Breather. Only the strongest pending boundary and the strongest pending
+rest are applied; the rest are synced without acting.
+
+**Boundary before rest.** A new scene followed by a rest reads correctly in that order,
+and a rest's ability refresh should not be undone by a boundary reset applied after it.
+
+**First contact syncs silently.** A character with no `appliedEpochs` — newly built, or
+attached to a token for the first time — adopts the room's position without applying
+anything. Otherwise every new character would arrive and immediately take a rest it was
+never present for.
+
+### The flood guard
+
+This is the part that would have been a bad bug.
+
+`endScene()` and `takeRest()` both call `logAction()`. Without intervention, every
+character reconciling the same GM press would post its own copy to the shared log — one
+button producing an entry per character at the table.
+
+Catch-up therefore runs inside `withActionLogSuppressed()`, and `logAction()` returns
+early while that flag is set. The GM's press is logged **once**, by the GM, from the
+roller. There is a test asserting catch-up emits exactly zero log entries, and another
+asserting normal logging resumes afterwards.
+
+The flag saves and restores its previous value rather than clearing to `false` on exit,
+matching `withPoolLogSuppressed`, so nesting cannot clear a suppression it did not set.
+
+`adoptRoom()` reconciles **before** its early return, because a room whose pools happen
+to be unchanged can still have moved a boundary forward.
+
+---
+
+## The panel
+
+GM-only, above the log in the roller popover. Rest row: Breather, Break, Bed. Boundary
+row: End Scene, New Session, New Adventure.
+
+Hidden for players rather than disabled — these reach every character at the table, and
+it should not look like something a player might be permitted to press. `pushEpoch()`
+re-checks the role anyway rather than trusting the hidden attribute.
+
+Each button disables itself for 800 ms after a press. Every press is a real increment
+that every sheet will act on, so an accidental double-click is a second rest at the
+table.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `dnm.js`, `roller.js`, `index.html`, `style.css`,
+   `manifest.json`. A creator sending nothing new is harmless; a creator expecting
+   `epochs` from a `dnm.js` that never writes them would sit permanently at zero.
+2. **`dnm-cc/index.html`** as `index.html`.
+3. Docs.
+4. Full room reload. The background page is cached per room session.
+
+No reinstall. `background_url` and the manifest filename are unchanged from 0.7.0 —
+only `version` and `description` moved.
+
+---
+
+## Testing
+
+18 assertions on catch-up, all passing: first contact silent, no-op when current, scene
+applied once, highest boundary wins, three missed Beds produce one rest, highest rest
+tier wins, boundary-then-rest ordering, catch-up logs nothing, suppression restored,
+logging resumes, legacy rooms are a no-op, unfinalized characters ignored.
+
+11 on the reducer: increments, unknown boundaries ignored, legacy v1 rooms upgrade
+without losing pools, epoch log entries dedupe by id while the increment still lands,
+trim preserves epochs under byte pressure.
+
+Regression: v1.17 and v1.18 features intact.
+
+**Unchanged jsdom limits.** `OBR.isAvailable` is false, so the broadcast path, the GM's
+metadata write, and the role gate on the panel are **not** verified here. The harness
+calls `catchUpToRoomEpochs()` directly; it does not exercise `OBR.broadcast` or
+`OBR.player.getRole()`.
+
+### Live checks worth doing
+
+- GM presses Bed. A player with their sheet **open** catches up; confirm exactly one log
+  entry, attributed to the GM, not one per player.
+- GM presses End Scene while a player's sheet is **closed**. That player opens it and
+  should see the catch-up toast and a cleared Nanobarrier counter.
+- Confirm players cannot see the Table Controls panel at all.
+- Attach a brand-new character to a token in a room with non-zero epochs. It should
+  apply nothing.
+
+---
+
+## Still open
+
+**Nothing blocking.** Nanobarrier shipped in v1.18; the backfill item was withdrawn as
+based on a stale claim.
+
+`GLIF-Pattern Clothing` remains excluded — its limit is per machine, not per character.
+
+Worth considering later: the panel pushes boundaries but has no way to show the GM which
+characters have caught up and which are still behind. Not needed for play, but it would
+answer "did everyone get that rest?" without asking around the table.
+
+
+
 # v1.18 — Nanobarrier, damage buttons, charge logging
 
 Append to `UPGRADE_NOTES.md`. Creator-only release; `dnm-obr` is unchanged and stays
