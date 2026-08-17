@@ -3,7 +3,7 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.17
+  Version: 1.18
   File:    index.html (stable filename; do not version the filename)
            Deployed at https://gsgrimoire.github.io/dnm-cc/ — always link the folder,
            never a filename. dnm-character-creator.html has never existed in the repo
@@ -2406,6 +2406,20 @@ body.obr-embedded .tab-only { display: none !important; }
   opacity: 0.4; cursor: not-allowed; box-shadow: none;
 }
 
+/* v1.18: the Damage action and Nanobarrier both present a row of sibling buttons
+   rather than a single confirm. Wrapping keeps six Damage buttons readable in the
+   narrow Owlbear modal, where a single row would overflow. */
+.action-controls-grid {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.action-note {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
 .obr-bar {
   position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; gap: 10px;
@@ -2523,7 +2537,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.17';
+const APP_VERSION = '1.18';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4580,6 +4594,10 @@ function toggleItemDischarged(id) {
   const powered = getPoweredQuality(item);
   if (!entry || !powered?.trackDischarge) return;
   entry.discharged = !entry.discharged;
+  // v1.18: discharging moves no shared pool, so it needs an explicit flush rather
+  // than riding along with a Threat or Momentum write like the other logged actions.
+  logAction(`${item.name}`, entry.discharged ? 'discharged' : 'recharged');
+  logActionNow();
   saveCharacterLocal(true);
   renderAll();
   showToast(`${item.name} is now ${entry.discharged ? 'discharged' : 'charged'}.`, entry.discharged ? 'warning' : 'success');
@@ -4613,6 +4631,16 @@ function takeRest(key) {
   const refreshedAbilities = resetLimitedUseOnRest(rest.tier);
   saveCharacterLocal(true);
   renderAll();
+  // One line for the whole rest, not one per item. A Bed rest can recharge every
+  // Powered item a character owns, and posting each separately would bury the rest
+  // of the log under a single button press.
+  const restDetail = [
+    `regained ${gained} Spirit`,
+    recharged.length ? `recharged ${recharged.length} ${recharged.length === 1 ? 'item' : 'items'}` : '',
+    refreshedAbilities.length ? `refreshed ${refreshedAbilities.length} ${refreshedAbilities.length === 1 ? 'ability' : 'abilities'}` : '',
+  ].filter(Boolean).join(', ');
+  logAction(rest.name, restDetail);
+  logActionNow();
   const rechargeText = recharged.length ? ` Recharged: ${recharged.join(', ')}.` : '';
   const abilityText = refreshedAbilities.length ? ` Refreshed abilities: ${refreshedAbilities.join(', ')}.` : '';
   showToast(`${rest.name}: regained ${gained} Spirit.${rechargeText}${abilityText}`, recharged.length || refreshedAbilities.length ? 'success' : 'info');
@@ -4625,6 +4653,10 @@ function endScene() {
   const refreshed = clearLimitedUseBoundary('scene');
   state.character.oncePerSceneUsed = [];
   state.character.activeSceneEffects = [];
+  // v1.18: Nanobarrier's escalating cost is per scene, so it resets wherever
+  // once-per-scene state does. New Session and New Adventure clear the scene
+  // boundary too, so this lands in all three by sitting next to them.
+  state.character.nanobarrierUses = 0;
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${refreshed.join(', ')}.` : '';
@@ -4638,6 +4670,10 @@ function startNewSession() {
   ];
   state.character.oncePerSceneUsed = [];
   state.character.activeSceneEffects = [];
+  // v1.18: Nanobarrier's escalating cost is per scene, so it resets wherever
+  // once-per-scene state does. New Session and New Adventure clear the scene
+  // boundary too, so this lands in all three by sitting next to them.
+  state.character.nanobarrierUses = 0;
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -4652,6 +4688,10 @@ function startNewAdventure() {
   ];
   state.character.oncePerSceneUsed = [];
   state.character.activeSceneEffects = [];
+  // v1.18: Nanobarrier's escalating cost is per scene, so it resets wherever
+  // once-per-scene state does. New Session and New Adventure clear the scene
+  // boundary too, so this lands in all three by sitting next to them.
+  state.character.nanobarrierUses = 0;
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -6703,6 +6743,59 @@ function markOncePerSceneUsed(key) {
   if (!state.character.oncePerSceneUsed.includes(key)) state.character.oncePerSceneUsed.push(key);
 }
 
+// ============================================================
+// NANOBARRIER (v1.18)
+// ============================================================
+// "The first time you use this ability in a scene, it is free. The second time, it
+// costs 1 Threat. Each time after the second, increase the cost by +1 Threat."
+//
+// So the cost is uses-so-far minus one, floored at zero: 0, 1, 2, 3...
+//
+// This is a COUNTER, not a used flag, which is why it never fitted into
+// LIMITED_USE_FEATURES — that structure records whether something has been used, and
+// Nanobarrier needs to know how many times. It is stored separately and cleared
+// alongside oncePerSceneUsed at every scene boundary.
+//
+// The three modes share one counter. The rules gate the ability, not each option, so
+// using Barrier makes the next Shock cost just as much as the next Barrier would.
+const NANOBARRIER_MODES = [
+  { key: 'barrier', name: 'Barrier', rules: 'Add +1 to the Difficulty of attacks against you or one nearby ally until the start of your next action.' },
+  { key: 'shock', name: 'Shock', rules: 'Until the start of your next action, anyone who fails a melee attack against you suffers a shocked 2 Injury.' },
+  { key: 'display', name: 'Display', rules: 'Until the start of your next turn, any NPC attacking someone other than you must spend 1 Threat to do so.' },
+];
+
+function getNanobarrierUses() {
+  return Math.max(0, Math.round(Number(state.character.nanobarrierUses) || 0));
+}
+
+// Cost equals uses-so-far: 0 uses means the next is free, 1 use means the next costs
+// 1, 2 uses means 2, and so on upward without a ceiling.
+function getNanobarrierNextCost() {
+  return getNanobarrierUses();
+}
+
+function useNanobarrier(modeKey) {
+  if (!hasTalent('nanobarrier')) return;
+  const mode = NANOBARRIER_MODES.find(m => m.key === modeKey);
+  if (!mode) return;
+  const cost = getNanobarrierNextCost();
+  state.character.nanobarrierUses = getNanobarrierUses() + 1;
+
+  if (cost > 0) {
+    // addThreat announces to the shared log with this reason, so no separate
+    // logAction here — that would post the same activation twice.
+    addThreat(cost, `Nanobarrier — ${mode.name}`);
+  } else {
+    logAction(`Nanobarrier — ${mode.name}`, 'first use this scene, free');
+    logActionNow();
+  }
+
+  saveCharacterLocal(true);
+  renderAll();
+  const costText = cost > 0 ? ` Added ${cost} Threat.` : ' First use this scene, free.';
+  showToast(`Nanobarrier: ${mode.name}.${costText} Next use costs ${getNanobarrierNextCost()} Threat.`, 'success');
+}
+
 function isSceneEffectActive(key) {
   return (state.character.activeSceneEffects || []).includes(key);
 }
@@ -6887,6 +6980,33 @@ function activateSpearsBlend() {
   showToast(`Spear's Blend administered. Adrenaline Rush restores +1 additional Spirit this scene.`, 'success');
 }
 
+// The group Momentum pool caps at 6, so there is never a seventh button worth
+// offering. Named rather than inlined because Nanobarrier and the Damage grid both
+// reason about the pool ceiling.
+const MAX_DAMAGE_MOMENTUM = 6;
+
+// c.talent is the archetype pick and may be a single key or an array; growth can add
+// more. Both shapes appear in saved characters, so both are flattened here rather
+// than at each call site.
+function getCharacterTalentKeys() {
+  const c = state.character || {};
+  const base = Array.isArray(c.talent) ? c.talent : [c.talent];
+  return [...base, ...(c.growthExtraTalents || [])].filter(Boolean);
+}
+
+function hasTalent(key) {
+  return getCharacterTalentKeys().includes(key);
+}
+
+// Precision Firepower doubles Momentum-to-damage, but only on a ranged attack with a
+// breaker weapon. The sheet cannot know which weapon is being swung at the moment the
+// button is pressed, so this reports the talent's ceiling and the button labels say
+// which talent is responsible. Getting this wrong in the other direction — quietly
+// showing the base numbers — would have the player under-spending without knowing why.
+function getDamagePerMomentum() {
+  return hasTalent('precisionFirepower') ? 2 : 1;
+}
+
 function actionConfirmButton(label, command, armedLabel, disabled = false) {
   return `<button class="confirm-btn" type="button" ${disabled ? 'disabled' : ''} onclick="confirmClick(this, () => ${command}, '${armedLabel}')">${label}</button>`;
 }
@@ -6921,7 +7041,28 @@ function renderActionControls(action) {
     return `<div class="action-controls">${actionConfirmButton('Spend 1 Momentum', `spendMomentumForAction('askQuestion', 1)`, 'Spend 1?', momentum < 1)}</div>`;
   }
   if (action.key === 'damage') {
-    return `<div class="action-controls">${actionConfirmButton('Spend 1 for +1 Damage', `spendMomentumForAction('damage', 1)`, 'Spend 1?', momentum < 1)}</div>`;
+    // v1.18: one button per Momentum, up to the 6 the group pool can hold.
+    //
+    // The label carries both numbers because they are not always the same. Precision
+    // Firepower makes each Momentum worth +2 damage on a breaker weapon, so a flat
+    // "3 Damage" would be wrong for that character. Naming both sides means the
+    // button stays honest whichever talent is in play, and the multiplier is visible
+    // rather than something the player has to remember to double in their head.
+    const perMomentum = getDamagePerMomentum();
+    const buttons = [];
+    for (let cost = 1; cost <= MAX_DAMAGE_MOMENTUM; cost++) {
+      const dmg = cost * perMomentum;
+      buttons.push(actionConfirmButton(
+        `${cost} Momentum : ${dmg} Damage`,
+        `spendMomentumForAction('damage', ${cost})`,
+        `Spend ${cost}?`,
+        momentum < cost
+      ));
+    }
+    const note = perMomentum > 1
+      ? `<div class="action-note">Precision Firepower: each Momentum is +${perMomentum} damage with a breaker weapon.</div>`
+      : '';
+    return `<div class="action-controls action-controls-grid">${buttons.join('')}</div>${note}`;
   }
   if (action.key === 'reduceTime') {
     return `<div class="action-controls">${actionConfirmButton('Spend 2 to Halve Time', `spendMomentumForAction('reduceTime', 2)`, 'Spend 2?', momentum < 2)}</div>`;
@@ -6995,7 +7136,47 @@ function renderLimitedUseControls(key) {
   return `<div class="action-controls">${limitedUseConfirmButton(label, `useLimitedFeature('${key}')`, key === 'ambush' || key === 'tough' ? 'Trigger?' : 'Use?', false, `Marks ${feature.name} used until ${resetText}.`)}</div>`;
 }
 
+// v1.18. The four render sites used to ask LIMITED_USE_FEATURES directly, which meant
+// anything not in that table fell through to plain description text. Nanobarrier is
+// tracked but is not a limited-use feature — it counts uses rather than recording one
+// — so the question those sites actually want to ask is "does this render controls",
+// not "is this in that specific table".
+function isTrackedFeature(key) {
+  return !!LIMITED_USE_FEATURES[key] || key === 'nanobarrier';
+}
+
+function renderNanobarrierCard(feature, options = {}) {
+  const cost = getNanobarrierNextCost();
+  const uses = getNanobarrierUses();
+  const tag = options.tag ? `<span class="limited-feature-source">${escHtml(options.tag)}</span>` : '';
+  const costLabel = cost === 0 ? 'FREE' : `${cost} THREAT`;
+  const usedText = uses === 0
+    ? 'Not yet used this scene.'
+    : `Used ${uses} ${uses === 1 ? 'time' : 'times'} this scene. Resets at End Scene.`;
+
+  // All three modes share the counter, so they all show the same cost and all
+  // relabel together after any one of them is pressed.
+  const buttons = NANOBARRIER_MODES.map(mode => actionConfirmButton(
+    `${mode.name} · ${cost === 0 ? 'Free' : cost + ' Threat'}`,
+    `useNanobarrier('${mode.key}')`,
+    cost === 0 ? 'Activate?' : `Add ${cost} Threat?`,
+    false
+  )).join('');
+
+  return `<div class="limited-feature-card ${options.tone || ''}">
+    <div class="limited-feature-head">
+      <div class="limited-feature-name">${escHtml(feature.name)} ${tag}</div>
+      <span class="action-badge">NEXT: ${costLabel}</span>
+    </div>
+    <div class="action-description">${escHtml(feature.description)}</div>
+    <div class="action-controls action-controls-grid">${buttons}</div>
+    <div class="action-note">${escHtml(usedText)}</div>
+    ${NANOBARRIER_MODES.map(m => `<div class="owned-description"><strong>${escHtml(m.name)}:</strong> ${escHtml(m.rules)}</div>`).join('')}
+  </div>`;
+}
+
 function renderTrackedFeature(key, feature, options = {}) {
+  if (key === 'nanobarrier') return renderNanobarrierCard(feature, options);
   const limited = LIMITED_USE_FEATURES[key];
   if (!limited) return '';
   const used = isLimitedFeatureUsed(key);
@@ -7018,7 +7199,7 @@ function renderActionsTalentsAbilitiesSection(c, archetypeData, abilities) {
   if (abilities.length) {
     right += `<div class="sheet-section">
       <div class="sheet-section-title">Origin Abilities</div>
-      ${abilities.map(ab => LIMITED_USE_FEATURES[ab.key]
+      ${abilities.map(ab => isTrackedFeature(ab.key)
         ? renderTrackedFeature(ab.key, ab, { tone: 'origin' })
         : `<div style="margin-bottom:12px;">
             <div style="font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--text-bright);margin-bottom:4px;">${escHtml(ab.name)}</div>
@@ -7032,7 +7213,7 @@ function renderActionsTalentsAbilitiesSection(c, archetypeData, abilities) {
 
   if (archetypeData.forcedTalent && archetypeData.talents[archetypeData.forcedTalent]) {
     const t = archetypeData.talents[archetypeData.forcedTalent];
-    right += LIMITED_USE_FEATURES[archetypeData.forcedTalent]
+    right += isTrackedFeature(archetypeData.forcedTalent)
       ? renderTrackedFeature(archetypeData.forcedTalent, t, { tone: 'forced', tag: 'AUTO' })
       : `<div style="margin-bottom:14px;padding:12px;background:rgba(255,107,53,0.05);border-left:2px solid var(--accent);">
       <div style="font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--text-bright);margin-bottom:4px;">${t.name} <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent);">AUTO</span></div>
@@ -7046,7 +7227,7 @@ function renderActionsTalentsAbilitiesSection(c, archetypeData, abilities) {
       const allTalents = {...archetypeData.talents, ...DM_DATA.generalTalents};
       const t = allTalents[tKey];
       if (t && !t.forced) {
-        right += LIMITED_USE_FEATURES[tKey]
+        right += isTrackedFeature(tKey)
           ? renderTrackedFeature(tKey, t, { tone: 'talent' })
           : `<div style="margin-bottom:14px;padding:12px;background:var(--teal-faint);border-left:2px solid var(--teal);">
           <div style="font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--text-bright);margin-bottom:4px;">${t.name}</div>
@@ -7063,7 +7244,7 @@ function renderActionsTalentsAbilitiesSection(c, archetypeData, abilities) {
     Object.assign(allTalents, DM_DATA.generalTalents);
     const t = allTalents[tKey];
     if (t) {
-      right += LIMITED_USE_FEATURES[tKey]
+      right += isTrackedFeature(tKey)
         ? renderTrackedFeature(tKey, t, { tone: 'growth', tag: 'GROWTH' })
         : `<div style="margin-bottom:14px;padding:12px;background:rgba(255,209,102,0.04);border-left:2px solid var(--warning);">
         <div style="font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--text-bright);margin-bottom:4px;">${t.name} <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--warning);">GROWTH</span></div>
