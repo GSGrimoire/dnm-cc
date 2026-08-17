@@ -3,7 +3,7 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.18
+  Version: 1.19
   File:    index.html (stable filename; do not version the filename)
            Deployed at https://gsgrimoire.github.io/dnm-cc/ — always link the folder,
            never a filename. dnm-character-creator.html has never existed in the repo
@@ -2537,7 +2537,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.18';
+const APP_VERSION = '1.19';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -6806,6 +6806,103 @@ function activateSceneEffect(key) {
 }
 
 // ============================================================
+// TABLE BOUNDARY CATCH-UP (v1.19)
+// ============================================================
+// The GM pushes a rest or a scene boundary to the whole table by incrementing a
+// counter in room metadata. This is the character's half: compare what the room has
+// reached against what this character has already applied, and make up the difference.
+//
+// WHY LAZY RECONCILIATION RATHER THAN A BROADCAST:
+// A broadcast only reaches sheets that are open, and at any moment nearly every sheet
+// is closed. Applying on open means a player who was offline, or who simply had not
+// opened their sheet, still gets the rest the GM called. It also keeps the extension
+// out of the DM1 format entirely — it increments integers and knows nothing else.
+//
+// CATCHING UP APPLIES ONCE, NOT N TIMES.
+// If the GM pressed Bed three times while a sheet was closed, that sheet takes one Bed
+// rest, not three. Rests clamp to maxima and boundary resets clear flags, so replaying
+// them would change nothing except spamming the log.
+//
+// A character with no appliedEpochs at all — newly built, or attached to a token for
+// the first time — SYNCS SILENTLY without applying anything. Otherwise every new
+// character would arrive and immediately run a rest it was never present for.
+const EPOCH_KEYS_CC = ['scene', 'session', 'adventure', 'breather', 'break', 'bed'];
+
+// Highest wins. New Adventure subsumes New Session subsumes End Scene, and a Bed rest
+// subsumes a Break subsumes a Breather, so only the strongest pending one is applied.
+// Ordered strongest first; the first match wins and the rest are just synced.
+const BOUNDARY_ORDER = ['adventure', 'session', 'scene'];
+const REST_ORDER = ['bed', 'break', 'breather'];
+
+let suppressActionLog = false;
+
+// Catching up must not write to the shared log. The GM's press was already logged
+// once, by the GM. Without this, every player reconciling the same press would post
+// their own copy and one button would produce an entry per character at the table.
+function withActionLogSuppressed(fn) {
+  const previous = suppressActionLog;
+  suppressActionLog = true;
+  try { return fn(); }
+  finally { suppressActionLog = previous; }
+}
+
+function readAppliedEpochs() {
+  const stored = state.character.appliedEpochs;
+  if (!stored || typeof stored !== 'object') return null;
+  const out = {};
+  EPOCH_KEYS_CC.forEach(k => { out[k] = Math.max(0, Math.round(Number(stored[k]) || 0)); });
+  return out;
+}
+
+function writeAppliedEpochs(roomEpochs) {
+  const out = {};
+  EPOCH_KEYS_CC.forEach(k => { out[k] = Math.max(0, Math.round(Number(roomEpochs[k]) || 0)); });
+  state.character.appliedEpochs = out;
+}
+
+// Returns a short description of what was applied, or '' if nothing was.
+function catchUpToRoomEpochs(roomEpochs) {
+  if (!roomEpochs || !state.character || !state.character.finalized) return '';
+  const applied = readAppliedEpochs();
+
+  // First contact: adopt the room's position without acting on it.
+  if (!applied) {
+    writeAppliedEpochs(roomEpochs);
+    return '';
+  }
+
+  const behind = k => (Number(roomEpochs[k]) || 0) > (applied[k] || 0);
+  const done = [];
+
+  const boundary = BOUNDARY_ORDER.find(behind);
+  const rest = REST_ORDER.find(behind);
+
+  withActionLogSuppressed(() => {
+    // Boundary before rest: a new scene then a rest reads correctly in that order,
+    // and a rest's ability refresh should not be undone by a boundary reset applied
+    // immediately after it.
+    if (boundary === 'adventure') { startNewAdventure(); done.push('New Adventure'); }
+    else if (boundary === 'session') { startNewSession(); done.push('New Session'); }
+    else if (boundary === 'scene') { endScene(); done.push('End Scene'); }
+    if (rest) { takeRest(rest); done.push(REST_TYPES[rest] ? REST_TYPES[rest].name : rest); }
+  });
+
+  writeAppliedEpochs(roomEpochs);
+  if (done.length) saveCharacterLocal(true);
+  return done.join(' + ');
+}
+
+// Mirrors readEpochs() in dnm.js. Rooms written before extension 0.8.0 have no
+// epochs key at all, so this defaults rather than assuming presence — a missing key
+// must read as zero, not undefined, or every comparison below silently fails.
+function readRoomEpochs(roomState) {
+  const src = (roomState && roomState.epochs) || {};
+  const out = {};
+  EPOCH_KEYS_CC.forEach(k => { out[k] = Math.max(0, Math.round(Number(src[k]) || 0)); });
+  return out;
+}
+
+// ============================================================
 // THE ROLLS AND ACTIONS LOG (v1.17)
 // ============================================================
 // Rolls have travelled to the shared log since v1.12. Everything else a player
@@ -6833,6 +6930,9 @@ let suppressPoolLog = false;
 // Call immediately BEFORE the mutation, so the accessor sees the label in the same
 // tick and does not also emit a bare entry for the same spend.
 function logAction(label, detail) {
+  // Suppressed while reconciling a GM-pushed boundary: that press was logged once by
+  // the GM, and every character catching up must not each post their own copy.
+  if (suppressActionLog) return;
   pendingActionLabel = { label, detail: detail || '' };
 }
 
@@ -8683,10 +8783,19 @@ function adoptRoom(meta) {
   const changed = next !== roomMomentum || nextThreat !== obrThreat;
   roomMomentum = next;
   obrThreat = nextThreat;
-  if (!changed || !ready) return;
-  if (state.character.__setMomentumFromRoom) state.character.__setMomentumFromRoom(next);
-  else state.character.currentMomentum = next;
+  // v1.19: epochs are reconciled before the early return, because a room whose
+  // pools happen to be unchanged can still have moved a boundary forward.
+  let caughtUp = '';
+  if (ready && found) caughtUp = catchUpToRoomEpochs(readRoomEpochs(found));
+
+  if (!changed && !caughtUp) return;
+  if (!ready) return;
+  if (changed) {
+    if (state.character.__setMomentumFromRoom) state.character.__setMomentumFromRoom(next);
+    else state.character.currentMomentum = next;
+  }
   renderAll();
+  if (caughtUp) showToast(`The GM called ${caughtUp}. Your sheet has caught up.`, 'success');
 }
 
 // -------------------------------------------------------------
