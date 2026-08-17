@@ -2,7 +2,165 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
-Current release: **v1.17**.
+# v1.18 — Nanobarrier, damage buttons, charge logging
+
+Append to `UPGRADE_NOTES.md`. Creator-only release; `dnm-obr` is unchanged and stays
+at 0.7.0.
+
+---
+
+## Nanobarrier
+
+Shipped at last. The blocker was never the escalating cost — that was in the rulebook
+text carried in `DM_DATA` all along — it was the **reset boundary**, which the source
+text does not state. Ruled: **scene**.
+
+Because `startNewSession()` and `startNewAdventure()` both clear scene state, the
+counter resets at all three boundaries without special-casing. The reset line was added
+next to the existing `oncePerSceneUsed = []` in each, so a future boundary that copies
+that pattern picks it up for free.
+
+### Why it is not in LIMITED_USE_FEATURES
+
+That table records **whether** something has been used. Nanobarrier needs **how many
+times**, because the cost is derived from the count. Forcing it into a used-flag
+structure would have been mechanically wrong, which is why it was excluded for so long
+rather than approximated.
+
+State lives in `character.nanobarrierUses`. Cost is simply the count:
+
+| Uses so far | Next activation costs |
+|---|---|
+| 0 | Free |
+| 1 | 1 Threat |
+| 2 | 2 Threat |
+| n | n Threat |
+
+No ceiling. The rules do not state one.
+
+### Three modes, one counter
+
+Barrier, Shock and Display are separate buttons but share `nanobarrierUses`. The rules
+gate the ability, not each option, so using Barrier makes the next Shock cost exactly
+what the next Barrier would. All three relabel together after any activation.
+
+### Logging
+
+Paid activations go through `addThreat(cost, 'Nanobarrier — <Mode>')` and are logged by
+the Threat bridge with that reason. A **free** activation moves no pool, so it uses
+`logAction()` + `logActionNow()` instead. The two paths are mutually exclusive — a paid
+use deliberately does **not** also call `logAction()`, which would post the same button
+press to the shared log twice. There is a regression test for this.
+
+### isTrackedFeature()
+
+The four render sites gated on `LIMITED_USE_FEATURES[key]` directly, so anything absent
+from that table fell through to plain description text with no controls. They now ask
+`isTrackedFeature(key)`, because the question those sites actually want to answer is
+"does this render controls", not "is this in that one table". Nanobarrier is the first
+tracked feature that is not a limited-use feature; it will not be the last.
+
+---
+
+## Damage buttons
+
+One button became six, one per Momentum, capped at 6 because the group pool cannot hold
+more.
+
+### Label format
+
+`3 Momentum : 3 Damage`. Both numbers are named because they are not always equal.
+**Precision Firepower** makes each Momentum worth +2 damage on a ranged attack with a
+breaker weapon, so a flat "3 Damage" label would be wrong for that character — it is 6.
+
+When the talent is present the damage side doubles and a note names the talent, so the
+multiplier is visible rather than something the player has to remember to apply.
+
+**Known limitation, accepted deliberately:** the talent only applies to *ranged* attacks
+with a *breaker* weapon, and the sheet cannot know which weapon is being swung when the
+button is pressed. It therefore reports the talent's ceiling. Overstating is the safer
+error — the alternative is a player quietly under-spending because the sheet showed base
+numbers for a case where the talent applied.
+
+### Talent lookup
+
+`c.talent` is sometimes a single key and sometimes an array, and growth adds more via
+`growthExtraTalents`. Both shapes exist in saved characters. `getCharacterTalentKeys()`
+flattens them once so no call site has to know, and `hasTalent()` reads from it.
+
+---
+
+## Charge/discharge logging
+
+Ruled in, and straightforward: `toggleItemDischarged()` moves no shared pool, so it uses
+an explicit `logAction()` + `logActionNow()` flush rather than riding along with a pool
+write.
+
+### The rest flood
+
+Flagged before building, and real. `rechargePoweredItems()` recharges every eligible
+Powered item at once, so a Bed rest on a well-equipped character could have posted six
+or more entries from a single button press and buried the rest of the log.
+
+`takeRest()` therefore posts **one** summary line: `Bed — regained 5 Spirit, recharged 2
+items`. Individual item names still appear in the local toast, where they cost nobody
+else anything. There is a test asserting exactly one entry from a bulk rest.
+
+---
+
+## Correction to the v1.17 notes
+
+The backlog item **"log does not backfill on connect" was wrong** and has been removed.
+
+`load()` in `roller.js` reads room metadata and seeds `state` from it, log included, and
+`renderLog` merges that. A client connecting mid-session already receives the full log.
+
+The original claim came from the v1.16 handoff and referred to **Ro's server feed** in
+the standalone Shared Roll Room — the feature disabled in v1.17. It was propagated into
+the v1.17 notes and into task tracking without being checked against the Owlbear path.
+Worth confirming in play, but no code is expected.
+
+This is the same failure the handoff warns about repeatedly: a claim written from a
+prior description rather than from the code.
+
+---
+
+## Testing
+
+jsdom, module block stripped. Four harnesses, all passing:
+
+- Cost ladder 0/1/2/3; reset verified independently at `endScene`, `startNewSession` and
+  `startNewAdventure`; modes confirmed to share one counter; no-op without the talent.
+- Activation paths: free use logs once and adds no Threat; paid use adds the right Threat
+  with the mode in the reason and does **not** double-log.
+- Damage grid: six buttons, correct labels at base and with the talent, momentum side
+  unchanged when damage doubles, affordability disabling at a given pool.
+- Discharge logs one line each way; bulk rest logs exactly one summarised line.
+- Regression: v1.17 features intact — room still disabled, `postRoll` still inert, five
+  item actions, clamp suppression, section order, and the four other Momentum actions.
+
+**Unchanged jsdom limits.** `OBR.isAvailable` is false, so the broadcast path and the
+GM's metadata write are still only verifiable live. The harnesses reproduce the bridge's
+logic; they do not exercise `OBR.broadcast`.
+
+---
+
+## Next: v1.19 with dnm-obr 0.8.0
+
+The GM control panel. Rest and scene state lives inside each character's DM1 code, and
+the extension deliberately never interprets character data. Broadcasting a reset reaches
+only sheets that are currently open, which is almost none of them.
+
+Agreed approach: the GM's press increments `epochs.scene` / `epochs.session` /
+`epochs.adventure` in room metadata. Each character stores the epoch it last applied and
+catches up when its sheet next opens. The reset becomes lazy and idempotent, the
+extension stays ignorant of character internals, and a player who was offline still gets
+their reset.
+
+This changes the room metadata schema, so it needs `applyEvent` and `trimState` work in
+`dnm.js` alongside the creator changes.
+
+# **v1.17**.
 
 ## Deployment
 
