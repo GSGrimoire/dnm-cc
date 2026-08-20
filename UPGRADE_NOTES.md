@@ -2,6 +2,160 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.21 — Attach persistence, and an editable sheet in play
+
+Creator **v1.21**. `dnm-obr` is unchanged and stays at **0.9.0**.
+
+Both items were found in play on the v1.20 release, which was rolled back to v1.19B for
+that session and is redeployed here with these fixes on top.
+
+---
+
+## A new character never reached its token
+
+Reported as three separate faults. They were one.
+
+`commit()` is the only thing that writes `metadata[CHAR_KEY]`, and `queueSave()` guards
+it with `if (!ready) return`. `ready` was set in exactly two places: `loadIntoCreator()`,
+for a token that already holds a code, and the `hookImport()` patch, for a pasted code.
+
+**Nothing set it for a character built from scratch on an attached token.** The wizard's
+Finalize button calls `finalizeCharacter()`, which calls `renderAll()`, which
+`hookRenderAll()` has wrapped to call `queueSave()` since v1.13 — and that call returned
+at the guard every time. The sheet rendered, played, rolled and logged correctly, and the
+token stayed empty. Closing the modal lost the character entirely.
+
+The two symptoms that did not look related:
+
+- **Party panel empty.** `refreshParty()` lists tokens by `metadata[CHAR_KEY]?.code`. A
+  character that was never written is not on a token to be listed. The panel was correct.
+- **GM rests not arriving.** Same cause. Catch-up reconciles a character found on a
+  token; there was none.
+
+`hookFinalize()` mirrors `hookImport()`: on the first finalize it binds the Momentum
+accessor, sets `ready`, inserts the on-token bar, commits, and reconciles.
+
+**Worth keeping:** there are now three legitimate ways a sheet becomes live — open an
+existing token, paste a code, finalize a new build — and each needs its own hook because
+each is a different entry point into the same state. A fourth will need one too. The
+guard is right; the coverage was not.
+
+---
+
+## Editing a finished character in play
+
+A GM granting Growth mid-session had nowhere to spend it.
+
+The wizard was never gated. `editCharacter()` has never been `tab-only`, and `goToStep()`
+accepts any index without validation. What was missing was the way in: embedded mode hid
+`.progress-bar`, grouped in the CSS with `.site-header` and `.hex-bg` as page chrome a
+modal does not need.
+
+That grouping is the mistake. `renderProgress()` **already** hides the bar whenever
+`character.finalized` is true, so embedded the bar could only ever have appeared *after*
+Edit Character was pressed — precisely the moment its step links are the entire point.
+Hiding it left the steps reachable only by walking backwards through `wrapStep()`'s Back
+button, with nothing on screen suggesting that was possible.
+
+Three changes:
+
+- The bar renders embedded, with a tighter margin for the modal. It already wraps, so it
+  costs two rows at 1280px. The finalized gate stays in `renderProgress()`, where it
+  belongs — moving that gate into CSS is what caused this.
+- `renderGrowthSummarySection()` carries a **Spend Growth** button. It resolves the step
+  by name via `STEPS.indexOf('growth')`, so reordering `STEPS` cannot silently aim it at
+  Bonds.
+- `wrapStep()` offers **Done — back to play** while a finished character is being edited.
+
+### The resume flag
+
+`resumingFinishedCharacter` is a module binding, not a field on the character. It
+describes this visit to the wizard rather than the character, and a field would serialise
+into the share code and the token. `goToStep()` latches it before clearing `finalized` —
+that is the only moment that still knows the edit began from a finished sheet — and
+`finalizeCharacter()` clears it.
+
+This is what separates the two cases that otherwise look identical to `renderStep()`,
+both being `finalized === false`: a new character walks forward to Summary and finalizes
+there, and must **not** be offered a shortcut past its own remaining steps. There is a
+test for that.
+
+`editCharacter()` now delegates to `goToStep()` rather than repeating its three lines, so
+the latch cannot be bypassed by the one entry point that predates it.
+
+### Re-finalizing mid-session is not destructive
+
+`finalizeCharacter()` calls `seedResourcesOnFinalize()`, which reads as alarming on a
+character in play. It only fills `currentSpirit` and `currentSupply` when they are
+`null`, so a character that has spent anything is untouched. Asserted rather than assumed.
+
+---
+
+## Catch-up on every finalize, not only the first
+
+`catchUpToRoomEpochs()` opens with `!state.character.finalized` and returns null. Once a
+sheet could be put into edit mode deliberately, that became reachable in play: a rest
+pushed while a player was part-way through spending Growth was skipped.
+
+It was skipped **safely** — `writeAppliedEpochs()` sits behind the same early return, so
+the boundary stayed pending rather than being marked applied. But it would then wait for
+the next room metadata change or the next sheet open, which from the player's seat is the
+v1.19B "the rest arrives at random" bug wearing a different hat.
+
+`hookFinalize()` therefore calls `reconcileOnOpen()` on every finalize, not only the
+first. Finalizing is the moment the character can accept a boundary, so that is where it
+is applied.
+
+---
+
+## Deploy order
+
+Creator-only. `dnm-obr` is untouched at 0.9.0 and needs no redeploy beyond restoring the
+0.9.0 files that the session rollback reverted.
+
+1. **`dnm-obr`** back to 0.9.0 — `dnm.js`, `roller.js`, `index.html`, `style.css`,
+   `manifest.json`, `README.md`. Unchanged from the 0.9.0 that shipped with v1.20.
+2. **`dnm-cc/index.html`**
+3. Docs
+4. Full room reload
+
+No reinstall. Schema stays at v2; no metadata migration.
+
+---
+
+## Testing
+
+94 creator assertions and 14 party assertions, all passing.
+
+14 are new: the embedded CSS no longer hides the progress bar and the finalized gate is
+still in `renderProgress()`; `editGrowth()` lands on the growth step and latches the
+resume flag; the growth step renders the back-to-play button; a Growth purchase made this
+way survives the code round trip; re-finalizing does not reset Spirit; the play view
+carries the Growth route; and a first-time build is **not** offered back-to-play.
+
+The Growth round-trip assertion is the one that matters most. An edit that cannot reach
+the token is the v1.20 attach bug again in a different place, and asserting the purchase
+is in `state.character` would not have caught it — the assertion goes through
+`buildCharacterCode()` and `parseCharacterCode()`, which is the path the token actually
+uses.
+
+**Unchanged jsdom limits.** `OBR.isAvailable` is false, so `hookFinalize()` itself is
+**not** exercised here: the module block is stripped by the harness. The bug it fixes and
+the fix for it both live in that block. What the tests cover is that the creator-side
+functions it calls behave correctly when called.
+
+### Live checks
+
+- Attach a fresh token, build a character, press Finalize, **close the sheet, reopen it**.
+  The character should still be there. This is the whole of the first fix.
+- With that character attached, confirm it appears in the GM's Party panel.
+- GM presses Bed; confirm it reaches the newly built character.
+- On a finished sheet, press Edit Character and confirm the step bar appears.
+- Press Spend Growth from the play view, add a purchase, press Done — back to play, and
+  confirm the purchase is on the sheet and survives a close and reopen.
+- GM presses Bed while a player sits in edit mode; the player presses Done and the rest
+  should land immediately.
+
 
 ## Release index
 
