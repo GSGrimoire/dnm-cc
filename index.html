@@ -633,6 +633,19 @@ body::after {
   gap: 12px;
 }
 
+/* Keeps Continue in its usual place at the right edge when the v1.21 "Done — back
+   to play" button sits beside it, rather than letting space-between push the pair
+   apart. Wraps so the two do not overflow the modal at narrow widths. */
+.btn-row-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.growth-edit-row { margin-top: 14px; }
+
 .btn {
   font-family: var(--font-display);
   font-size: 0.95rem;
@@ -2368,11 +2381,21 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
    none of this matches and the page looks exactly as it always has.
    ============================================================ */
 body.obr-embedded .site-header,
-body.obr-embedded .progress-bar,
 body.obr-embedded .hex-bg { display: none !important; }
 body.obr-embedded #app { padding-top: 0; }
 body.obr-embedded .obr-only { display: block; }
 .obr-only { display: none; }
+
+/* The progress bar was hidden here until v1.21, grouped with the site header and
+   the background as page chrome the modal does not need. That was wrong, and it is
+   what made an attached sheet read as uneditable: renderProgress() already hides
+   the bar whenever the character is finalized, so embedded it was only ever going
+   to appear AFTER Edit Character was pressed — exactly the moment the step links
+   are the point. Hiding it left the wizard reachable only by walking backwards
+   through wrapStep()'s Back button, with no indication that was even possible.
+   A GM granting Growth mid-session is the ordinary case that hits this.
+   The bar already wraps, so it costs two rows at modal width. */
+body.obr-embedded .progress-bar { margin: 0 0 20px; }
 
 /* The inverse of .obr-only: present in a browser tab, gone inside Owlbear.
    Start Over belongs to the tab only — embedded, the character lives on the
@@ -3682,6 +3705,17 @@ const STEPS = [
   'growth',
   'summary'
 ];
+
+// v1.21: true while a FINISHED character is being edited, as opposed to a new one
+// being built for the first time. The two look identical to renderStep() — both are
+// `finalized === false` — but they want different exits: a new character walks
+// forward to Summary and finalizes there, while a finished one being touched up
+// mid-session wants to go straight back to play from wherever it is.
+//
+// Deliberately a module binding rather than a field on the character: it describes
+// this visit to the wizard, not the character, and putting it on the object would
+// serialise it into the share code and the token.
+let resumingFinishedCharacter = false;
 
 
 // ============================================================
@@ -5694,6 +5728,9 @@ function importCharacter() {
 
 function goToStep(idx) {
   if (idx < 0 || idx >= STEPS.length) return;
+  // Latch before the flag is cleared: this is the only moment that still knows the
+  // edit started from a finished sheet rather than mid-build.
+  if (state.character.finalized) resumingFinishedCharacter = true;
   state.character.finalized = false;
   state.currentStep = idx;
   renderAll();
@@ -7593,22 +7630,41 @@ function renderShareCodeSection(code) {
   </details>`;
 }
 
+// v1.21: the block carries its own way in. Growth is the one part of a finished
+// character that routinely changes mid-session — the GM grants it at the table — and
+// reaching it meant pressing Edit Character and then guessing that Back leads
+// somewhere useful. This is the same goToStep() the progress bar calls, aimed at the
+// step by name rather than by index so reordering STEPS cannot silently point it
+// at Bonds.
+function renderGrowthEditButton() {
+  return `<div class="growth-edit-row no-print">
+    <button class="btn btn-secondary" onclick="editGrowth()">Spend Growth</button>
+  </div>`;
+}
+
 function renderGrowthSummarySection() {
   const c = state.character;
   if (!((c.growthPool || 0) > 0 || (c.growthPurchases || []).length)) {
     return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
       <div class="sheet-section-title">Available: 0 / Max: 10</div>
       <div style="font-size:0.8rem;color:var(--text-dim);">No Growth available or spent.</div>
+      ${renderGrowthEditButton()}
     </div>`;
   }
   return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
     <div class="sheet-section-title">Available: ${getGrowthRemaining()} / Max: 10 / Spent: ${getGrowthSpent()}</div>
     ${(c.growthPurchases || []).map(p => `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">◆ ${p.label}${p.detail ? ': ' + p.detail : ''} <span style="color:var(--warning);">(${p.cost}g)</span></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-dim);">No Growth spent.</div>'}
+    ${renderGrowthEditButton()}
   </div>`;
+}
+
+function editGrowth() {
+  goToStep(STEPS.indexOf('growth'));
 }
 
 function finalizeCharacter() {
   state.character.finalized = true;
+  resumingFinishedCharacter = false;
   state.currentStep = STEPS.indexOf('summary');
   // v1.09: seed before normalize so the clamp has real values to work with.
   seedResourcesOnFinalize();
@@ -7619,10 +7675,7 @@ function finalizeCharacter() {
 }
 
 function editCharacter() {
-  state.character.finalized = false;
-  state.currentStep = STEPS.indexOf('summary');
-  renderAll();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  goToStep(STEPS.indexOf('summary'));
 }
 
 // ============================================================
@@ -7630,6 +7683,14 @@ function editCharacter() {
 // ============================================================
 function wrapStep(title, desc, content, { showNext = true, showPrev = true, nextLabel = 'Continue →' } = {}) {
   const valid = canProceed();
+  // v1.21: an already-finished character being edited gets a direct way back to the
+  // play view. Without it the only exit is Continue, repeatedly, until Summary comes
+  // round again — fine when building a character in order, needless when the whole
+  // visit was to spend two Growth. finalizeCharacter() is safe to call from any step
+  // here: it re-seeds only resources that are still null, so nothing in play is reset.
+  const backToPlay = resumingFinishedCharacter
+    ? '<button class="btn btn-primary" onclick="finalizeCharacter()">Done — back to play</button>'
+    : '';
   return `<div class="step-card active">
     <div class="step-card-inner">
       <div class="step-number">// Step ${state.currentStep + 1} of ${STEPS.length}</div>
@@ -7638,7 +7699,10 @@ function wrapStep(title, desc, content, { showNext = true, showPrev = true, next
       ${content}
       <div class="btn-row no-print">
         ${showPrev ? '<button class="btn btn-secondary" onclick="prevStep()">← Back</button>' : '<div></div>'}
-        ${showNext ? `<button class="btn btn-primary ${!valid ? 'btn-secondary' : ''}" onclick="handleStepAdvance()">${nextLabel}</button>` : ''}
+        <div class="btn-row-end">
+          ${backToPlay}
+          ${showNext ? `<button class="btn btn-primary ${!valid ? 'btn-secondary' : ''}" onclick="handleStepAdvance()">${nextLabel}</button>` : ''}
+        </div>
       </div>
     </div>
   </div>`;
@@ -8927,8 +8991,16 @@ function hookFinalize() {
       ready = true;
       insertBar(state.character.name);
       commit();
-      reconcileOnOpen();
     }
+    // Reconcile on every finalize, not only the first. catchUpToRoomEpochs() refuses
+    // to act on an unfinalized character, so a rest the GM pushed while a player was
+    // part-way through spending Growth is skipped and — because writeAppliedEpochs()
+    // sits behind the same early return — correctly left pending rather than lost.
+    // Without this it would stay pending until the room next changed or the sheet was
+    // reopened, which from the player's seat is the v1.19B "rest arrives at random"
+    // bug wearing a different hat. Finalizing is the moment the character can accept
+    // it, so that is where it is applied.
+    reconcileOnOpen();
     return out;
   };
 }
