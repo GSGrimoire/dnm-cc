@@ -3,11 +3,13 @@
 <!--
   ============================================================
   Dreams & Machines — Character Creator
-  Version: 1.19B
+  Version: 1.20
   File:    index.html (stable filename; do not version the filename)
            Deployed at https://gsgrimoire.github.io/dnm-cc/ — always link the folder,
-           never a filename. dnm-character-creator.html has never existed in the repo
-           and 404s; that stale reference lived in this comment until v1.17.
+           never a filename. Nothing should link dnm-character-creator.html: that was
+           the v1.13 embedded-mode spike, it lived only in beta/, it was never the
+           deployed sheet, and beta/ was deleted in v1.20. A stale link to it in this
+           comment cost a debugging round once already.
   Docs:    CHANGELOG.html (player-facing) / UPGRADE_NOTES.md (cumulative technical log)
 
   Versioning policy (from v1.09 onward):
@@ -630,6 +632,19 @@ body::after {
   margin-top: 28px;
   gap: 12px;
 }
+
+/* Keeps Continue in its usual place at the right edge when the v1.21 "Done — back
+   to play" button sits beside it, rather than letting space-between push the pair
+   apart. Wraps so the two do not overflow the modal at narrow widths. */
+.btn-row-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.growth-edit-row { margin-top: 14px; }
 
 .btn {
   font-family: var(--font-display);
@@ -1490,40 +1505,44 @@ body::after {
 .dice-summary .succ { color: var(--teal); }
 .dice-summary .comp { color: var(--accent); }
 
-/* Room / shared feed */
-.room-bar {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.room-status {
-  font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.1em;
-  text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--border);
-  color: var(--text-dim);
-}
-.room-status.online { color: var(--teal); border-color: var(--teal-dim); }
-.room-status.offline { color: var(--accent); border-color: var(--accent-dim); }
-.room-feed {
-  margin-top: 12px;
-  max-height: 220px;
-  overflow-y: auto;
+/* --- Sheet blocks (v1.20) -----------------------------------
+   The play sheet used to run on as one continuous column: fifteen-odd
+   .sheet-section panels separated only by a hairline rule, so finding Growth meant
+   scrolling and reading titles. Five top-level blocks now group them by what you
+   are doing — resources and rolling, what you can do, what you carry, what you have
+   earned, and the code — each on a lighter ground so the breaks are visible at a
+   glance rather than read.
+
+   The band is background and border only. Nothing inside a block is restyled, so
+   every existing .sheet-section keeps the appearance it has had since v1.09. --- */
+.sheet-block {
+  background: var(--bg2);
   border: 1px solid var(--border);
-  background: var(--bg);
-  padding: 8px;
+  border-radius: 6px;
+  padding: 4px 20px 20px;
+  margin-bottom: 22px;
 }
-.feed-entry {
-  font-size: 0.78rem;
-  padding: 7px 10px;
-  border-left: 2px solid var(--teal-dim);
+.sheet-block-title {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--teal);
+  padding: 14px 0 10px;
   margin-bottom: 6px;
-  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
 }
-.feed-entry.mine { border-left-color: var(--accent); }
-.feed-who { font-family: var(--font-display); font-weight: 600; color: var(--text-bright); }
-.feed-detail { color: var(--text-dim); }
-.feed-result .s { color: var(--teal); font-weight: 600; }
-.feed-result .c { color: var(--accent); font-weight: 600; }
-.feed-time { font-family: var(--font-mono); font-size: 0.55rem; color: var(--text-dim); opacity: 0.6; float: right; }
-.feed-empty { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dim); text-align: center; padding: 16px; }
+/* The first .sheet-section inside a block would otherwise draw a second rule
+   immediately under the block title. */
+.sheet-block > .sheet-section:first-of-type { border-top: none !important; padding-top: 8px !important; }
+
+@media print {
+  .sheet-block { background: none; border: none; padding: 0; margin-bottom: 12px; page-break-inside: auto; }
+  .sheet-block-title { color: #000; border-bottom: 1px solid #999; }
+}
+body.print-light .sheet-block { background: none; border-color: #ccc; }
+body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
 
 /* --- Collapsible code on sheet (#7) --- */
 .code-collapse { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
@@ -1550,7 +1569,7 @@ body::after {
 
 /* Print: keep dice roller / catalogue UI off the PDF; show code expanded */
 @media print {
-  .dice-panel, .catalogue-block, .room-feed, .cat-add-btn, .owned-qty button { display: none !important; }
+  .dice-panel, .catalogue-block, .cat-add-btn, .owned-qty button { display: none !important; }
   .code-collapse[open] .code-string, .code-collapse .code-string { display: block !important; }
   .code-collapse summary { color: #555 !important; }
 }
@@ -2362,12 +2381,21 @@ body::after {
    none of this matches and the page looks exactly as it always has.
    ============================================================ */
 body.obr-embedded .site-header,
-body.obr-embedded .progress-bar,
-body.obr-embedded .hex-bg,
-body.obr-embedded .dm-room-block { display: none !important; }
+body.obr-embedded .hex-bg { display: none !important; }
 body.obr-embedded #app { padding-top: 0; }
 body.obr-embedded .obr-only { display: block; }
 .obr-only { display: none; }
+
+/* The progress bar was hidden here until v1.21, grouped with the site header and
+   the background as page chrome the modal does not need. That was wrong, and it is
+   what made an attached sheet read as uneditable: renderProgress() already hides
+   the bar whenever the character is finalized, so embedded it was only ever going
+   to appear AFTER Edit Character was pressed — exactly the moment the step links
+   are the point. Hiding it left the wizard reachable only by walking backwards
+   through wrapStep()'s Back button, with no indication that was even possible.
+   A GM granting Growth mid-session is the ordinary case that hits this.
+   The bar already wraps, so it costs two rows at modal width. */
+body.obr-embedded .progress-bar { margin: 0 0 20px; }
 
 /* The inverse of .obr-only: present in a browser tab, gone inside Owlbear.
    Start Over belongs to the tab only — embedded, the character lives on the
@@ -2537,7 +2565,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.19B';
+const APP_VERSION = '1.21';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -3657,7 +3685,6 @@ function getDefaultCharacter() {
     momentumMax: 6,
     activeExhaustion: [],
     localSaveId: null,
-    roomCode: '', // shared dice-roll room
   };
 }
 
@@ -3678,6 +3705,17 @@ const STEPS = [
   'growth',
   'summary'
 ];
+
+// v1.21: true while a FINISHED character is being edited, as opposed to a new one
+// being built for the first time. The two look identical to renderStep() — both are
+// `finalized === false` — but they want different exits: a new character walks
+// forward to Summary and finalizes there, while a finished one being touched up
+// mid-session wants to go straight back to play from wherever it is.
+//
+// Deliberately a module binding rather than a field on the character: it describes
+// this visit to the wizard, not the character, and putting it on the object would
+// serialise it into the share code and the token.
+let resumingFinishedCharacter = false;
 
 
 // ============================================================
@@ -4050,8 +4088,72 @@ function removeTruthField(index) {
 // v1.09: injuries now run on the shared auto-list system. These wrappers are kept so
 // that any older inline handler still in the wild resolves rather than throwing.
 function updateInjury(index, value) { updateAutoList('injuries', index, value); }
-function removeInjuryField(index) { removeAutoList('injuries', index); }
 function compactInjuryList() { compactAutoList('injuries'); }
+
+// ============================================================
+// INJURY LOGGING (v1.20)
+// ------------------------------------------------------------
+// Damage is the core of combat and until now it was the one consequential thing at
+// the table that happened silently. Momentum spends were logged, item discharges
+// were logged, rests were logged — someone getting hurt was a player quietly typing
+// into a box that nobody else could see.
+//
+// An Injury has no mechanical effect of its own. Gus ruled this directly, and the
+// rulebook text carried in INJURY_RULE_INFO agrees: an Injury is a Truth
+// representing harm, and first aid treats it by RENAMING it — Bleeding becomes
+// Bandaged Wound. The Spirit spend that avoids an Injury is where the mechanics
+// live, and that is already logged through the resource path. So this feature is
+// announcement only. Nothing here touches a pool, alters a stat, or invents a rule.
+//
+// WHY THESE HOOK THE INJURY LIST SPECIFICALLY AND NOT updateAutoList():
+// Injuries share the auto-list machinery with Custom Items and Knowledge Fragments.
+// Logging inside the shared functions would post an entry every time somebody edited
+// a Knowledge Fragment, which is not an event the table needs announced.
+//
+// WHY onchange AND NOT oninput:
+// oninput fires per keystroke. Typing "Bleeding" would post eight entries. onchange
+// fires once, on blur or Enter, which is the moment the edit is actually finished.
+// The value at focus is captured so a rename can name both halves; oninput has
+// already written the new value into state by the time onchange runs, so the old one
+// has to come from somewhere else.
+let injuryEditFrom = null;
+
+function beginInjuryEdit(value) {
+  injuryEditFrom = String(value || '').trim();
+}
+
+function announceInjury(label, detail) {
+  logAction(label, detail);
+  // No pool moves on any of these, so nothing downstream will consume the pending
+  // label. Without the explicit flush it would sit there and mislabel the next real
+  // spend — the same reason discharge and Nanobarrier's free use flush by hand.
+  logActionNow();
+}
+
+function commitInjury(index, value) {
+  const before = injuryEditFrom;
+  const after = String(value || '').trim();
+  injuryEditFrom = null;
+
+  if (before !== null && before !== after) {
+    if (!before && after) announceInjury('Took an injury', after);
+    // Emptying the field is how an injury gets deleted by hand. It is the same act
+    // as pressing Remove, so it reads the same way in the log.
+    else if (before && !after) announceInjury('Removed injury', before);
+    else if (before && after) announceInjury('Changed injury', `${before} to ${after}`);
+  }
+  renderAll();
+}
+
+// Remove is its own act, distinct from healing: it says the injury was never real,
+// where Heal says it got better. Left unlogged, the table would see a Took entry and
+// then nothing, and assume the character was still carrying it.
+function removeInjuryField(index) {
+  normalizeEditableLists();
+  const injury = String(state.character.injuries[index] || '').trim();
+  if (injury) announceInjury('Removed injury', injury);
+  removeAutoList('injuries', index);
+}
 
 // v1.10: the tooltip used to print the type label twice ("Archetype / Archetype"),
 // which told the reader nothing they could not already see on the tag. It now carries
@@ -4087,7 +4189,7 @@ function renderEditableInjuries() {
   const activeRows = visible.map((entry, i) => {
     const isBlank = i >= entries.length;
     return `<div class="editable-line-row injury-line-row">
-      <input class="dm-input inline-sheet-input" value="${escHtml(entry || '')}" placeholder="${isBlank ? 'Add Injury or treated Injury...' : 'Injury ' + (i + 1)}" oninput="updateInjury(${i}, this.value)" onchange="renderAll()">
+      <input class="dm-input inline-sheet-input" value="${escHtml(entry || '')}" placeholder="${isBlank ? 'Add Injury or treated Injury...' : 'Injury ' + (i + 1)}" oninput="updateInjury(${i}, this.value)" onfocus="beginInjuryEdit(this.value)" onchange="commitInjury(${i}, this.value)">
       ${!isBlank ? `<button class="mini-btn heal-btn no-print" onclick="confirmClick(this, () => healInjury(${i}), 'Heal?')">Heal</button>
       <button class="mini-btn danger no-print" onclick="removeInjuryField(${i})">Remove</button>` : ''}
     </div>`;
@@ -4114,6 +4216,9 @@ function healInjury(index) {
   if (!injury) return;
   state.character.injuries.splice(index, 1);
   state.character.healedInjuries.push(injury);
+  // Heal and Treat are the same control. The rules treat an Injury by renaming it;
+  // moving it to the healed list is the point at which it stops being carried.
+  announceInjury('Healed injury', injury);
   saveCharacterLocal(true);
   renderAll();
   showToast(`${injury} moved to Healed Injuries.`, 'success');
@@ -4125,6 +4230,7 @@ function reopenHealedInjury(index) {
   if (!injury) return;
   state.character.healedInjuries.splice(index, 1);
   state.character.injuries.push(injury);
+  announceInjury('Reopened injury', injury);
   saveCharacterLocal(true);
   renderAll();
   showToast(`${injury} returned to active Injuries.`, 'warning');
@@ -5515,7 +5621,7 @@ function summarizeCharacterForLibrary(c) {
 //
 // This navigates rather than resetting state in place. A reload is the only thing
 // that reliably clears every module-level variable the creator accumulates during a
-// build — diceUI, roomState, the scroll-restore scope map, the pending Threat holder.
+// build — diceUI, the scroll-restore scope map, the pending Threat holder.
 // Resetting state.character alone would leave those behind and has been a source of
 // odd behaviour in other single-page tools. location.pathname drops any query string
 // while staying on this deployment, so it works from a subfolder or a local file.
@@ -5622,6 +5728,9 @@ function importCharacter() {
 
 function goToStep(idx) {
   if (idx < 0 || idx >= STEPS.length) return;
+  // Latch before the flag is cleared: this is the only moment that still knows the
+  // edit started from a finished sheet rather than mid-build.
+  if (state.character.finalized) resumingFinishedCharacter = true;
   state.character.finalized = false;
   state.currentStep = idx;
   renderAll();
@@ -7391,7 +7500,7 @@ function renderActionsTalentsAbilitiesSection(c, archetypeData, abilities) {
   const left = renderActionsColumn();
 
   return `<details class="sheet-collapse" id="actionsTalentsBlock" open>
-    <summary class="sheet-collapse-summary">Actions, Talents &amp; Abilities</summary>
+    <summary class="sheet-collapse-summary">Show all</summary>
     <div class="sheet-cols">
       <div>${left}</div>
       <div>${right}</div>
@@ -7435,9 +7544,9 @@ function renderSummaryStep() {
   html += `<div class="char-sheet" id="charSheet">`;
 
   // ============================================================
-  // SHEET LAYOUT (rebuilt in v1.09)
+  // SHEET LAYOUT (order set in v1.09, grouped into blocks in v1.20)
   // ------------------------------------------------------------
-  // Reading order now follows how the sheet is actually used at the table:
+  // Reading order follows how the sheet is used at the table:
   //   1. Identity band      — name, Goals & Archetype, Tech Level, play controls
   //   2. Bonds / Temperament — who you are to other people
   //   3. Exhaustion          — four cards, mirroring the four Attributes below
@@ -7450,33 +7559,45 @@ function renderSummaryStep() {
   // The Goals block used to sit near the bottom, below the two-column region, which
   // buried the one piece of text a player rereads every session. Promoting it into
   // the header band puts it beside the name where it reads as part of the identity.
+  //
+  // v1.20 groups that same order into five blocks. The sequence of sections is
+  // UNCHANGED — nothing has moved relative to anything else — but the run-on column
+  // of fifteen panels now reads as five things instead of one long one. Share Code
+  // was already the last top-level element rather than being nested in another
+  // section, so promoting it is a matter of giving it the same frame as its
+  // neighbours rather than moving it.
   // ============================================================
 
-  html += renderSheetIdentityBand(c, stats, originData, archetypeData, temperamentData, sheetPortrait);
-  html += renderSheetBondsTemperamentRow(c, temperamentData);
-  html += renderSheetExhaustionSection(c);
-  html += renderSheetTruthsInjuriesRow();
-  html += renderSheetAttributesSection(stats);
-  html += renderSheetSkillsSection(stats);
-  html += renderSheetResourcesSection(c);
+  const block = (title, body) =>
+    `<div class="sheet-block"><div class="sheet-block-title">${title}</div>${body}</div>`;
 
-  // ---- Dice Roller ----
-  // v1.14: promoted from near the bottom to sit directly under the numbers it rolls
-  // against. Attributes and Skills are clickable now and select into this panel, so a
-  // long scroll between picking a stat and rolling it defeated the point. Actions
-  // follow, because what you can do comes after how you test.
-  html += renderDicePanel();
+  // ---- Block 1: identity through the roller ----
+  // Everything you consult before and during a roll, ending with the roller itself.
+  // v1.14 promoted the dice panel here so that clicking an Attribute or Skill does
+  // not scroll the roll controls off the screen; that adjacency is what defines the
+  // block's lower edge.
+  html += block('Character', [
+    renderSheetIdentityBand(c, stats, originData, archetypeData, temperamentData, sheetPortrait),
+    renderSheetBondsTemperamentRow(c, temperamentData),
+    renderSheetExhaustionSection(c),
+    renderSheetTruthsInjuriesRow(),
+    renderSheetAttributesSection(stats),
+    renderSheetSkillsSection(stats),
+    renderSheetResourcesSection(c),
+    renderDicePanel(),
+  ].join(''));
 
-  html += renderActionsTalentsAbilitiesSection(c, archetypeData, abilities);
+  // ---- Block 2: what you can do with those numbers ----
+  html += block('Actions, Talents &amp; Abilities', renderActionsTalentsAbilitiesSection(c, archetypeData, abilities));
 
-  // ---- Inventory: owned catalogue items (#3) ----
-  html += renderInventorySection();
+  // ---- Block 3: what you carry ----
+  html += block('Items and Equipment', renderInventorySection());
 
-  // ---- Growth summary: second to last ----
-  html += renderGrowthSummarySection();
+  // ---- Block 4: what you have earned ----
+  html += block('Growth', renderGrowthSummarySection());
 
-  // ---- Character Share Code: final section ----
-  html += renderShareCodeSection(code);
+  // ---- Block 5: the code ----
+  html += block('Share Code', renderShareCodeSection(code));
 
   html += '</div>'; // end char-sheet
 
@@ -7498,7 +7619,7 @@ function renderFinalizedCharacterView() {
 // now in a fixed-height scroller rather than an unbounded wall of text.
 function renderShareCodeSection(code) {
   return `<details class="code-collapse" id="shareCodeBlock">
-    <summary>Character Share Code</summary>
+    <summary>Show the code</summary>
     <div class="share-actions no-print">
       <button class="btn btn-secondary" onclick="copyCode()">Copy Code</button>
       <button class="btn btn-secondary" onclick="saveCharacterLocal(false)">Save Local</button>
@@ -7509,22 +7630,41 @@ function renderShareCodeSection(code) {
   </details>`;
 }
 
+// v1.21: the block carries its own way in. Growth is the one part of a finished
+// character that routinely changes mid-session — the GM grants it at the table — and
+// reaching it meant pressing Edit Character and then guessing that Back leads
+// somewhere useful. This is the same goToStep() the progress bar calls, aimed at the
+// step by name rather than by index so reordering STEPS cannot silently point it
+// at Bonds.
+function renderGrowthEditButton() {
+  return `<div class="growth-edit-row no-print">
+    <button class="btn btn-secondary" onclick="editGrowth()">Spend Growth</button>
+  </div>`;
+}
+
 function renderGrowthSummarySection() {
   const c = state.character;
   if (!((c.growthPool || 0) > 0 || (c.growthPurchases || []).length)) {
     return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
-      <div class="sheet-section-title">Growth — Available: 0 / Max: 10</div>
+      <div class="sheet-section-title">Available: 0 / Max: 10</div>
       <div style="font-size:0.8rem;color:var(--text-dim);">No Growth available or spent.</div>
+      ${renderGrowthEditButton()}
     </div>`;
   }
   return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
-    <div class="sheet-section-title">Growth — Available: ${getGrowthRemaining()} / Max: 10 / Spent: ${getGrowthSpent()}</div>
+    <div class="sheet-section-title">Available: ${getGrowthRemaining()} / Max: 10 / Spent: ${getGrowthSpent()}</div>
     ${(c.growthPurchases || []).map(p => `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">◆ ${p.label}${p.detail ? ': ' + p.detail : ''} <span style="color:var(--warning);">(${p.cost}g)</span></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-dim);">No Growth spent.</div>'}
+    ${renderGrowthEditButton()}
   </div>`;
+}
+
+function editGrowth() {
+  goToStep(STEPS.indexOf('growth'));
 }
 
 function finalizeCharacter() {
   state.character.finalized = true;
+  resumingFinishedCharacter = false;
   state.currentStep = STEPS.indexOf('summary');
   // v1.09: seed before normalize so the clamp has real values to work with.
   seedResourcesOnFinalize();
@@ -7535,10 +7675,7 @@ function finalizeCharacter() {
 }
 
 function editCharacter() {
-  state.character.finalized = false;
-  state.currentStep = STEPS.indexOf('summary');
-  renderAll();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  goToStep(STEPS.indexOf('summary'));
 }
 
 // ============================================================
@@ -7546,6 +7683,14 @@ function editCharacter() {
 // ============================================================
 function wrapStep(title, desc, content, { showNext = true, showPrev = true, nextLabel = 'Continue →' } = {}) {
   const valid = canProceed();
+  // v1.21: an already-finished character being edited gets a direct way back to the
+  // play view. Without it the only exit is Continue, repeatedly, until Summary comes
+  // round again — fine when building a character in order, needless when the whole
+  // visit was to spend two Growth. finalizeCharacter() is safe to call from any step
+  // here: it re-seeds only resources that are still null, so nothing in play is reset.
+  const backToPlay = resumingFinishedCharacter
+    ? '<button class="btn btn-primary" onclick="finalizeCharacter()">Done — back to play</button>'
+    : '';
   return `<div class="step-card active">
     <div class="step-card-inner">
       <div class="step-number">// Step ${state.currentStep + 1} of ${STEPS.length}</div>
@@ -7554,7 +7699,10 @@ function wrapStep(title, desc, content, { showNext = true, showPrev = true, next
       ${content}
       <div class="btn-row no-print">
         ${showPrev ? '<button class="btn btn-secondary" onclick="prevStep()">← Back</button>' : '<div></div>'}
-        ${showNext ? `<button class="btn btn-primary ${!valid ? 'btn-secondary' : ''}" onclick="handleStepAdvance()">${nextLabel}</button>` : ''}
+        <div class="btn-row-end">
+          ${backToPlay}
+          ${showNext ? `<button class="btn btn-primary ${!valid ? 'btn-secondary' : ''}" onclick="handleStepAdvance()">${nextLabel}</button>` : ''}
+        </div>
       </div>
     </div>
   </div>`;
@@ -8060,13 +8208,12 @@ function renderInventorySection() {
     }).join('');
   }
   return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
-    <div class="sheet-section-title inventory-section-title">Inventory & Equipment</div>
-    <details class="collapsible-section" open>
+    <details class="collapsible-section">
       <summary>Starting Equipment</summary>
       <div style="font-size:0.82rem;color:var(--text-dim);">${archetypeData ? archetypeData.equipment : '—'}</div>
       ${originData && originData.specialNote ? `<div style="font-size:0.82rem;color:var(--warning);margin-top:8px;">⚠ ${originData.specialNote}</div>` : ''}
     </details>
-    <details class="collapsible-section no-print" open>
+    <details class="collapsible-section no-print">
       <summary>Item Catalogue</summary>
       ${renderCatalogueBlock()}
     </details>
@@ -8094,58 +8241,18 @@ function refreshInventory() {
 }
 
 // ============================================================
-// DICE ROLLER + SHARED ROOM (#5 / #6)
-// Wire format aligned with Ro's /api/roll contract:
-//   POST { from, room, d20count, attribute, skill, attrValue, skillValue, dice, successes, complications }
+// DICE ROLLER
+// ------------------------------------------------------------
+// v1.20: the Shared Roll Room was removed from this file. It posted rolls to a
+// /api/roll endpoint on a server that was never stood up, and had been dormant
+// behind a flag since v1.17. Rolls travel to the table through the Owlbear
+// extension's broadcast channel instead, which needs no server at all — see
+// installRollBridge() in the module block at the end of this file.
 // ============================================================
 const ATTR_KEYS = ['might','quickness','insight','resolve'];
 const SKILL_KEYS = ['fight','move','operate','sneak','study','survive','talk'];
 
-// Configurable API base. Empty string = same origin as the page.
-const DM_API_BASE = ''; // e.g. 'https://ro-server.example.com'
-
-// ============================================================
-// SHARED ROLL ROOM — DISABLED IN v1.17
-// ============================================================
-// The Shared Roll Room posts to /api/roll, /api/stream and /api/tail relative to
-// DM_API_BASE. That endpoint was to be hosted by Ro; it is not going to be stood up,
-// so with DM_API_BASE empty every request resolves against gsgrimoire.github.io and
-// 404s. The panel offered a Connect button that could only ever fail.
-//
-// Turned off with a flag rather than deleted. The wire format below is a real, worked
-// design — the POST contract, the SSE stream with a polling tail as fallback, the feed
-// renderer — and rebuilding it from nothing later would be worse than carrying a few
-// hundred dormant lines. Setting this to true and pointing DM_API_BASE at a live host
-// is the whole of the work to bring it back.
-//
-// Note this is a separate thing from the Rolls and Actions log inside Owlbear, which
-// needs no server at all: it rides the extension's broadcast channel and is persisted
-// to room metadata by the GM's background page. Embedded mode hid this panel anyway
-// via body.obr-embedded .dm-room-block, so nothing changes there.
-const SHARED_ROOM_ENABLED = false;
-
-function renderSharedRoomBlock(c) {
-  return `<div class="dm-room-block" style="margin-top:18px;">
-      <div class="sheet-section-title">Shared Roll Room</div>
-      <div class="room-bar">
-        <div class="dice-field" style="flex:1;min-width:160px;">
-          <label>Room Code (share with party)</label>
-          <input class="dm-input" id="roomCodeInput" placeholder="e.g. our-tuesday-game" value="${escHtml(c.roomCode||'')}"
-            oninput="state.character.roomCode=this.value;">
-        </div>
-        <button class="btn btn-secondary" onclick="joinRoom()" style="align-self:flex-end;">Connect</button>
-        <span class="room-status ${roomState.connected?'online':'offline'}" id="roomStatus">${roomState.connected?'● Connected':'○ Offline'}</span>
-      </div>
-      <div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-dim);line-height:1.5;margin-bottom:4px;">
-        Everyone who connects with the same room code shares a roll feed. Rolls also post to the server log.
-        A standalone view is available at <span class="teal">/room/&lt;code&gt;</span>.
-      </div>
-      <div class="room-feed" id="roomFeed">${renderFeed()}</div>
-    </div>`;
-}
-
 const diceUI = { attr: 'might', skill: 'fight', count: 2, difficulty: 1, lastResult: null };
-const roomState = { connected: false, source: null, feed: [] };
 
 function rollDie() { return 1 + Math.floor(Math.random() * 20); }
 
@@ -8204,7 +8311,6 @@ function renderDicePanel() {
       <div id="diceResultArea">${diceUI.lastResult ? renderDiceResult(diceUI.lastResult) : ''}</div>
     </div>
 
-    ${SHARED_ROOM_ENABLED ? renderSharedRoomBlock(c) : ''}
   </div>`;
 }
 
@@ -8275,165 +8381,18 @@ function doRoll() {
   const area = document.getElementById('diceResultArea');
   if (area) area.innerHTML = renderDiceResult(res);
 
-  // Add to local feed immediately (optimistic)
-  const from = state.character.name || 'Unnamed';
-  pushFeedEntry({ from, ...res, mine: true, time: Date.now() });
-
-  // Post to server (Ro's /api/roll)
-  postRoll(from, res);
+  // postRoll() is a no-op here and is REPLACED by the module block in embedded
+  // mode, which is what carries the roll to the shared log. Keeping the call site
+  // rather than deleting it is deliberate: the bridge overwrites the function, so
+  // removing this line would silently stop rolls reaching the table in Owlbear
+  // while the sheet carried on looking correct.
+  postRoll(state.character.name || 'Unnamed', res);
 }
 
-// ---- Networking ----
-function postRoll(from, res) {
-  // v1.17: the panel is hidden, but a character saved before v1.17 can still be
-  // carrying a roomCode in its share code. Without this guard those characters would
-  // fire a failing POST on every roll for a server that is never coming up. The
-  // module block replaces this whole function in embedded mode, so Owlbear is
-  // unaffected either way.
-  if (!SHARED_ROOM_ENABLED) return;
-  const room = (state.character.roomCode || '').trim();
-  if (!room) return; // not in a room; local-only roll
-  const payload = {
-    from,
-    room,
-    d20count: res.d20count,
-    attribute: res.attrName,
-    skill: res.skillName,
-    attrValue: res.attrValue,
-    skillValue: res.skillValue,
-    dice: res.dice,
-    successes: res.successes,
-    complications: res.complications
-  };
-  fetch(DM_API_BASE + '/api/roll', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).catch(err => console.warn('Roll post failed (server offline?):', err));
-}
-
-function joinRoom() {
-  const room = (state.character.roomCode || '').trim();
-  const statusEl = document.getElementById('roomStatus');
-  if (!room) {
-    if (statusEl) { statusEl.textContent = '○ Enter a room code'; statusEl.className = 'room-status offline'; }
-    return;
-  }
-  // Close any existing stream
-  if (roomState.source) { try { roomState.source.close(); } catch(e){} roomState.source = null; }
-
-  // Try Server-Sent Events first (Ro can implement /api/stream?room=CODE).
-  try {
-    const es = new EventSource(DM_API_BASE + '/api/stream?room=' + encodeURIComponent(room));
-    roomState.source = es;
-    es.onopen = () => { roomState.connected = true; updateRoomStatus(); };
-    es.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        // Don't double-show our own optimistic entries: server may echo; mark mine by name match within 2s
-        pushFeedEntry({ ...normalizeIncoming(data), mine: false, time: data.time || Date.now() });
-      } catch(e) { /* plain-text line fallback */ pushFeedEntryRaw(ev.data); }
-    };
-    es.onerror = () => {
-      roomState.connected = false; updateRoomStatus();
-      // SSE failed — fall back to polling the tail endpoint
-      startPolling(room);
-    };
-  } catch(e) {
-    startPolling(room);
-  }
-}
-
-let pollTimer = null;
-let lastTailLength = 0;
-function startPolling(room) {
-  if (pollTimer) clearInterval(pollTimer);
-  roomState.connected = true; updateRoomStatus();
-  const poll = () => {
-    fetch(DM_API_BASE + '/api/tail?room=' + encodeURIComponent(room) + '&since=' + lastTailLength)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(data => {
-        // Expect { lines: [...], length: N } or { entries: [...] }
-        if (Array.isArray(data.entries)) {
-          data.entries.forEach(e => pushFeedEntry({ ...normalizeIncoming(e), mine:false, time:e.time||Date.now() }));
-        } else if (Array.isArray(data.lines)) {
-          data.lines.forEach(line => pushFeedEntryRaw(line));
-        }
-        if (data.length != null) lastTailLength = data.length;
-      })
-      .catch(() => { roomState.connected = false; updateRoomStatus(); });
-  };
-  poll();
-  pollTimer = setInterval(poll, 2500);
-}
-
-function normalizeIncoming(data) {
-  // Accept either structured roll objects or Ro's string format
-  if (typeof data === 'string') return parseRollString(data);
-  return {
-    from: data.from || '?',
-    attrName: data.attribute || data.attrName || '',
-    attrValue: data.attrValue,
-    skillName: data.skill || data.skillName || '',
-    skillValue: data.skillValue,
-    d20count: data.d20count,
-    dice: data.dice || [],
-    successes: data.successes,
-    complications: data.complications
-  };
-}
-
-function parseRollString(line) {
-  // Best-effort parse of Ro's format:
-  // "{from}: {AttrName} {AttrVal} ({SkillName} {SkillVal}) {n}d20 => {successes} ({d1} {d2}...)"
-  const m = line.match(/^(.*?):\s*(\w+)\s+(\d+)\s*\(([\w\s]+?)\s+(\d+)\)\s*(\d+)d20\s*=>\s*(\d+)\s*\(([\d\s]+)\)/);
-  if (!m) return { from: 'feed', raw: line };
-  return {
-    from: m[1], attrName: m[2], attrValue: +m[3], skillName: m[4].trim(), skillValue: +m[5],
-    d20count: +m[6], successes: +m[7], dice: m[8].trim().split(/\s+/).map(Number), complications: 0
-  };
-}
-
-function updateRoomStatus() {
-  const el = document.getElementById('roomStatus');
-  if (el) { el.textContent = roomState.connected ? '● Connected' : '○ Offline'; el.className = 'room-status ' + (roomState.connected?'online':'offline'); }
-}
-
-function pushFeedEntry(entry) {
-  roomState.feed.push(entry);
-  if (roomState.feed.length > 60) roomState.feed.shift();
-  redrawFeed();
-}
-function pushFeedEntryRaw(line) {
-  if (!line || !line.trim()) return;
-  roomState.feed.push({ raw: line.trim(), time: Date.now(), mine: false });
-  if (roomState.feed.length > 60) roomState.feed.shift();
-  redrawFeed();
-}
-
-function renderFeed() {
-  if (!roomState.feed.length) return `<div class="feed-empty">No rolls yet. Connect to a room and roll the dice.</div>`;
-  return roomState.feed.slice().reverse().map(e => {
-    const t = new Date(e.time || Date.now());
-    const time = t.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    if (e.raw) return `<div class="feed-entry ${e.mine?'mine':''}"><span class="feed-time">${time}</span>${escHtml(e.raw)}</div>`;
-    const diceStr = (e.dice||[]).join(' ');
-    const comp = e.complications > 0 ? ` <span class="c">+${e.complications} comp</span>` : '';
-    const succ = e.successes != null ? `<span class="s">${e.successes} success${e.successes===1?'':'es'}</span>${comp}` : '';
-    return `<div class="feed-entry ${e.mine?'mine':''}">
-      <span class="feed-time">${time}</span>
-      <span class="feed-who">${escHtml(e.from)}</span>
-      <span class="feed-detail"> — ${escHtml(e.attrName||'')} ${e.attrValue!=null?e.attrValue:''} (${escHtml(e.skillName||'')} ${e.skillValue!=null?e.skillValue:''}) ${e.d20count!=null?e.d20count+'d20':''}</span>
-      <div class="feed-result">${succ}${diceStr?` <span class="feed-detail">[${diceStr}]</span>`:''}</div>
-    </div>`;
-  }).join('');
-}
-
-function redrawFeed() {
-  const el = document.getElementById('roomFeed');
-  if (el) el.innerHTML = renderFeed();
-}
-
+// Standalone this does nothing: a single browser tab has no table to announce to,
+// and the result is already on screen. installRollBridge() in the module block
+// replaces it when the sheet is running inside Owlbear.
+function postRoll(from, res) {}
 
 function copyCode() {
   const code = document.getElementById('charCode').textContent;
@@ -9016,6 +8975,36 @@ function hookImport() {
   };
 }
 
+// Building a brand-new character directly on an attached token needs the same
+// write-through pasting a code gets. Without this hook, finalizeCharacter() leaves
+// `ready` false, so queueSave() (wired into every renderAll() by hookRenderAll())
+// silently no-ops and the token never receives CHAR_KEY. The sheet looks fully
+// built right up until the modal is closed, at which point the token turns out to
+// have nothing on it — and the party panel, which reads CHAR_KEY off every token,
+// never saw this character either.
+function hookFinalize() {
+  const original = window.finalizeCharacter;
+  window.finalizeCharacter = function patchedFinalizeCharacter(...args) {
+    const out = original.apply(this, args);
+    if (!ready) {
+      bindMomentumToRoom(state.character);
+      ready = true;
+      insertBar(state.character.name);
+      commit();
+    }
+    // Reconcile on every finalize, not only the first. catchUpToRoomEpochs() refuses
+    // to act on an unfinalized character, so a rest the GM pushed while a player was
+    // part-way through spending Growth is skipped and — because writeAppliedEpochs()
+    // sits behind the same early return — correctly left pending rather than lost.
+    // Without this it would stay pending until the room next changed or the sheet was
+    // reopened, which from the player's seat is the v1.19B "rest arrives at random"
+    // bug wearing a different hat. Finalizing is the moment the character can accept
+    // it, so that is where it is applied.
+    reconcileOnOpen();
+    return out;
+  };
+}
+
 // -------------------------------------------------------------
 // Start
 // -------------------------------------------------------------
@@ -9024,6 +9013,7 @@ async function startEmbedded() {
 
   hookRenderAll();
   hookImport();
+  hookFinalize();
   installRollBridge();
   installThreatBridge();
   installActionBridge();

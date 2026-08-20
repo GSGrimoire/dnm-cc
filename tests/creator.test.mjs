@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.20", g("APP_VERSION") === "1.20");
+ok("APP_VERSION is 1.21", g("APP_VERSION") === "1.21");
 
 // -------------------------------------------------------------
 // Fixture
@@ -355,6 +355,70 @@ const reset = () => g("window.__cap.length = 0;");
     g(`DM_DATA.items.filter(function(i){ return i.itemActions; }).length`) === 5);
   ok("Combat Medkit is one of them (it spends Momentum, so it is easy to miss)",
     g(`DM_DATA.items.filter(function(i){ return i.itemActions; }).map(function(i){ return i.name; }).indexOf('Combat Medkit') >= 0`));
+}
+
+// -------------------------------------------------------------
+// Editing a finished character in play (v1.21)
+// -------------------------------------------------------------
+// A GM granting Growth mid-session is the case that exposed this. The wizard was
+// always reachable — editCharacter() has never been tab-only — but embedded, the
+// progress bar was hidden as page chrome, which left the steps navigable only by
+// walking backwards through wrapStep()'s Back button with nothing on screen saying
+// so. These assert the route exists, that an edit made through it reaches the token,
+// and that returning to play costs nothing.
+{
+  // The CSS assertion is on the stylesheet text because jsdom applies the rule but
+  // the class is only added by the module block, which is stripped here.
+  ok("embedded mode no longer hides the progress bar",
+    !/body\.obr-embedded\s+\.progress-bar\s*,/.test(html));
+  // The bar must still disappear during play. That gate belongs to renderProgress(),
+  // and moving it to CSS is what broke this in the first place.
+  ok("the finalized gate on the progress bar is still in renderProgress",
+    /state\.character\.finalized\)\s*\{\s*bar\.style\.display\s*=\s*'none'/.test(html));
+
+  buildCharacter();
+  g("finalizeCharacter()");
+  ok("finalize clears the resume latch", g("resumingFinishedCharacter") === false);
+
+  g("editGrowth()");
+  ok("editGrowth lands on the growth step", g("STEPS[state.currentStep]") === "growth");
+  ok("editing a finished character latches the resume flag", g("resumingFinishedCharacter") === true);
+  ok("the growth step offers a way back to play",
+    g("renderGrowthStep()").includes("Done — back to play"));
+
+  // Spend it the way the UI does: the pool input, then a purchase button.
+  g("setResource('growth', 3)");
+  g("addGrowthSimple('increaseSpirit','Increase Maximum Spirit +1',1,'spirit')");
+  ok("the purchase is recorded", g("state.character.growthPurchases.length") === 1);
+  ok("remaining Growth drops after a purchase", g("getGrowthRemaining()") === 2);
+
+  // The edit is worthless if it cannot reach the token, and the token holds a code.
+  ok("the code still builds while unfinalized",
+    typeof g("buildCharacterCode()") === "string");
+  ok("the purchase survives the code round trip", g(`(function(){
+    var r = parseCharacterCode(buildCharacterCode());
+    return !r.error && (r.character.growthPurchases || []).length === 1;
+  })()`) === true);
+
+  // Re-finalizing mid-session must not re-seed anything already in play. It is
+  // safe because seedResourcesOnFinalize() only fills nulls, and this is the
+  // assertion that keeps it that way.
+  const spiritBefore = g("state.character.currentSpirit");
+  g("finalizeCharacter()");
+  ok("back to play re-finalizes", g("state.character.finalized") === true);
+  ok("returning to play does not reset Spirit",
+    g("state.character.currentSpirit") === spiritBefore);
+  ok("the play view carries the Growth route",
+    g("renderFinalizedCharacterView()").includes("Spend Growth"));
+}
+
+{
+  // The button is for resuming a finished character. A character being built for
+  // the first time must not be offered a shortcut past its own remaining steps.
+  g(`(function(){ state.character = getDefaultCharacter(); state.currentStep = 0; })()`);
+  g("resumingFinishedCharacter = false");
+  ok("a new build is not offered back-to-play",
+    !g("renderOriginStep()").includes("Done — back to play"));
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);

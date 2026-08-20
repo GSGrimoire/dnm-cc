@@ -1,3 +1,575 @@
+# Dreams & Machines character creator: cumulative upgrade notes
+
+This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
+
+# v1.21 — Attach persistence, and an editable sheet in play
+
+Creator **v1.21**. `dnm-obr` is unchanged and stays at **0.9.0**.
+
+Both items were found in play on the v1.20 release, which was rolled back to v1.19B for
+that session and is redeployed here with these fixes on top.
+
+---
+
+## A new character never reached its token
+
+Reported as three separate faults. They were one.
+
+`commit()` is the only thing that writes `metadata[CHAR_KEY]`, and `queueSave()` guards
+it with `if (!ready) return`. `ready` was set in exactly two places: `loadIntoCreator()`,
+for a token that already holds a code, and the `hookImport()` patch, for a pasted code.
+
+**Nothing set it for a character built from scratch on an attached token.** The wizard's
+Finalize button calls `finalizeCharacter()`, which calls `renderAll()`, which
+`hookRenderAll()` has wrapped to call `queueSave()` since v1.13 — and that call returned
+at the guard every time. The sheet rendered, played, rolled and logged correctly, and the
+token stayed empty. Closing the modal lost the character entirely.
+
+The two symptoms that did not look related:
+
+- **Party panel empty.** `refreshParty()` lists tokens by `metadata[CHAR_KEY]?.code`. A
+  character that was never written is not on a token to be listed. The panel was correct.
+- **GM rests not arriving.** Same cause. Catch-up reconciles a character found on a
+  token; there was none.
+
+`hookFinalize()` mirrors `hookImport()`: on the first finalize it binds the Momentum
+accessor, sets `ready`, inserts the on-token bar, commits, and reconciles.
+
+**Worth keeping:** there are now three legitimate ways a sheet becomes live — open an
+existing token, paste a code, finalize a new build — and each needs its own hook because
+each is a different entry point into the same state. A fourth will need one too. The
+guard is right; the coverage was not.
+
+---
+
+## Editing a finished character in play
+
+A GM granting Growth mid-session had nowhere to spend it.
+
+The wizard was never gated. `editCharacter()` has never been `tab-only`, and `goToStep()`
+accepts any index without validation. What was missing was the way in: embedded mode hid
+`.progress-bar`, grouped in the CSS with `.site-header` and `.hex-bg` as page chrome a
+modal does not need.
+
+That grouping is the mistake. `renderProgress()` **already** hides the bar whenever
+`character.finalized` is true, so embedded the bar could only ever have appeared *after*
+Edit Character was pressed — precisely the moment its step links are the entire point.
+Hiding it left the steps reachable only by walking backwards through `wrapStep()`'s Back
+button, with nothing on screen suggesting that was possible.
+
+Three changes:
+
+- The bar renders embedded, with a tighter margin for the modal. It already wraps, so it
+  costs two rows at 1280px. The finalized gate stays in `renderProgress()`, where it
+  belongs — moving that gate into CSS is what caused this.
+- `renderGrowthSummarySection()` carries a **Spend Growth** button. It resolves the step
+  by name via `STEPS.indexOf('growth')`, so reordering `STEPS` cannot silently aim it at
+  Bonds.
+- `wrapStep()` offers **Done — back to play** while a finished character is being edited.
+
+### The resume flag
+
+`resumingFinishedCharacter` is a module binding, not a field on the character. It
+describes this visit to the wizard rather than the character, and a field would serialise
+into the share code and the token. `goToStep()` latches it before clearing `finalized` —
+that is the only moment that still knows the edit began from a finished sheet — and
+`finalizeCharacter()` clears it.
+
+This is what separates the two cases that otherwise look identical to `renderStep()`,
+both being `finalized === false`: a new character walks forward to Summary and finalizes
+there, and must **not** be offered a shortcut past its own remaining steps. There is a
+test for that.
+
+`editCharacter()` now delegates to `goToStep()` rather than repeating its three lines, so
+the latch cannot be bypassed by the one entry point that predates it.
+
+### Re-finalizing mid-session is not destructive
+
+`finalizeCharacter()` calls `seedResourcesOnFinalize()`, which reads as alarming on a
+character in play. It only fills `currentSpirit` and `currentSupply` when they are
+`null`, so a character that has spent anything is untouched. Asserted rather than assumed.
+
+---
+
+## Catch-up on every finalize, not only the first
+
+`catchUpToRoomEpochs()` opens with `!state.character.finalized` and returns null. Once a
+sheet could be put into edit mode deliberately, that became reachable in play: a rest
+pushed while a player was part-way through spending Growth was skipped.
+
+It was skipped **safely** — `writeAppliedEpochs()` sits behind the same early return, so
+the boundary stayed pending rather than being marked applied. But it would then wait for
+the next room metadata change or the next sheet open, which from the player's seat is the
+v1.19B "the rest arrives at random" bug wearing a different hat.
+
+`hookFinalize()` therefore calls `reconcileOnOpen()` on every finalize, not only the
+first. Finalizing is the moment the character can accept a boundary, so that is where it
+is applied.
+
+---
+
+## Deploy order
+
+Creator-only. `dnm-obr` is untouched at 0.9.0 and needs no redeploy beyond restoring the
+0.9.0 files that the session rollback reverted.
+
+1. **`dnm-obr`** back to 0.9.0 — `dnm.js`, `roller.js`, `index.html`, `style.css`,
+   `manifest.json`, `README.md`. Unchanged from the 0.9.0 that shipped with v1.20.
+2. **`dnm-cc/index.html`**
+3. Docs
+4. Full room reload
+
+No reinstall. Schema stays at v2; no metadata migration.
+
+---
+
+## Testing
+
+94 creator assertions and 14 party assertions, all passing.
+
+14 are new: the embedded CSS no longer hides the progress bar and the finalized gate is
+still in `renderProgress()`; `editGrowth()` lands on the growth step and latches the
+resume flag; the growth step renders the back-to-play button; a Growth purchase made this
+way survives the code round trip; re-finalizing does not reset Spirit; the play view
+carries the Growth route; and a first-time build is **not** offered back-to-play.
+
+The Growth round-trip assertion is the one that matters most. An edit that cannot reach
+the token is the v1.20 attach bug again in a different place, and asserting the purchase
+is in `state.character` would not have caught it — the assertion goes through
+`buildCharacterCode()` and `parseCharacterCode()`, which is the path the token actually
+uses.
+
+**Unchanged jsdom limits.** `OBR.isAvailable` is false, so `hookFinalize()` itself is
+**not** exercised here: the module block is stripped by the harness. The bug it fixes and
+the fix for it both live in that block. What the tests cover is that the creator-side
+functions it calls behave correctly when called.
+
+### Live checks
+
+- Attach a fresh token, build a character, press Finalize, **close the sheet, reopen it**.
+  The character should still be there. This is the whole of the first fix.
+- With that character attached, confirm it appears in the GM's Party panel.
+- GM presses Bed; confirm it reaches the newly built character.
+- On a finished sheet, press Edit Character and confirm the step bar appears.
+- Press Spend Growth from the play view, add a purchase, press Done — back to play, and
+  confirm the purchase is on the sheet and survives a close and reopen.
+- GM presses Bed while a player sits in edit mode; the player presses Done and the rest
+  should land immediately.
+
+
+## Release index
+
+Newest first. Each entry records rationale, deliberate exclusions and known limitations, not just what shipped.
+
+| Version | Extension | What it was |
+|---|---|---|
+| **v1.20** | 0.9.0 | Injuries in the log, GM party panel, sheet in five blocks, Shared Roll Room removed |
+| v1.19B | 0.8.1 | Nanobarrier fix, eager catch-up, visible reconciliation |
+| v1.19 | 0.8.0 | GM table controls |
+| v1.18 | 0.7.0 | Nanobarrier, damage buttons, charge logging |
+| v1.17 | 0.7.0 | the Rolls and Actions log |
+| v1.16 | — | one file, and the SDK comes in-house |
+| v1.15 | — | Threat reaches the table |
+| v1.14 | — | rolling from the sheet |
+| v1.13 | — | snapshot v3, and the static/computed split |
+| v1.12 | — | Snapshot v2: abilities, descriptions, exhaustion |
+| v1.11 | — | Owlbear Rodeo snapshot (`SN` segment) |
+| v1.10 | — | see entry |
+| v1.09 | — | see entry |
+| v1.08 | — | see entry |
+| v1.07 | — | see entry |
+| v1.06 | — | see entry |
+| v1.05 | — | see entry |
+| v1.04 | — | see entry |
+| v1.03 | — | see entry |
+
+---
+
+*Standing reference, not a release note. This section was written at **v1.17** and is kept current; it sat orphaned between the v1.18 and v1.17 entries until v1.20 moved it here.*
+
+## Deployment
+
+The project lives in two GitHub Pages repos under the `gsgrimoire` account.
+
+| Repo | File | Purpose |
+|---|---|---|
+| `dnm-cc` | `index.html` | The whole application. Character creator in a browser tab, in-play sheet inside Owlbear Rodeo |
+| `dnm-cc` | `CHANGELOG.html` | Player-facing release history |
+| `dnm-cc` | `UPGRADE_NOTES.md` | This file |
+| `dnm-obr` | `dnm.js`, `roller.js`, `index.html`, `style.css`, `background.js`, `manifest.json` | The Owlbear Rodeo extension: roller popover, shared log, background page |
+
+**The deployed filename is always `index.html`.** Earlier releases used versioned names, then `dnm-character-creator.html`. Neither exists in the repo now, and links to them 404. Versioned filenames have caused recurring confusion and should not come back: the release number lives in `APP_VERSION`, in the file's header comment, in `CHANGELOG.html`, and here.
+
+From v1.17 the header comment on line 7 was corrected; earlier builds carried a stale reference to `dnm-character-creator.html`.
+
+### Deploy order
+
+From v1.17 onward, **extension files first, then the creator**. The creator broadcasts event types the extension has to understand. A creator-first deploy drops the new events silently and looks like it worked.
+
+1. `dnm-obr` files to that repo's root
+2. `dnm-cc/index.html`
+3. `CHANGELOG.html` and `UPGRADE_NOTES.md`
+4. Wait for Pages, hard-refresh, confirm the header version link before opening Owlbear
+5. Full room reload. The background page is cached per room session
+
+
+---
+
+# v1.20 + dnm-obr 0.9.0 — injuries in the log, party panel, sheet layout
+
+Creator **v1.20**, extension **0.9.0**. Deploy the extension first. No manifest filename
+or `background_url` change, so **nobody has to reinstall**.
+
+---
+
+## Corrections to the v1.20 handoff document
+
+The handoff was read as a description and checked against source before anything was
+built. Three of its claims were wrong.
+
+| Handoff claim | Source says |
+|---|---|
+| `dnm-character-creator.html` "has never existed in the repo" | It existed at `dnm-cc/beta/dnm-character-creator.html`, v1.13-beta, 468 kB. It was never the *deployed* sheet, so the operative rule held, but the file was real. Gus deleted `beta/` during this run, so the claim is true from v1.20 onward and was not true before it. |
+| "Bundle the OBR SDK from npm" applies to the project | It applies to **`dnm-cc` only**. `dnm-obr/roller.js` and `dnm-obr/background.js` both still `import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0"`, and no bundled SDK exists anywhere in `dnm-obr`. See the section below. |
+| Share Code "sits at the bottom of another section; promote it" | It was already the last top-level call in `renderSummaryStep()`, a direct child of `.char-sheet`. What it lacked was section *styling*, not promotion. |
+
+Two of the handoff's claims were confirmed against source and are worth restating
+because they are load-bearing:
+
+- Its correction to the project instructions is **right**. `parseCode()` lives in
+  `dnm.js`, `refreshSelection()` in `roller.js` has called it since v1.12, and
+  `shutDownAttrs(snap, char)` reads `char.activeExhaustion`. The roller *does* read
+  character data. The accurate rule is narrower: the **background page** never
+  interprets character data, the **sheet** is the only thing that writes it, and the
+  **roller may read** it. The party panel below depends on that being allowed.
+- Five catalogue items carry `itemActions`, not four. Walked with a Node script over
+  the 118-item array rather than eyeballed: Combat Automed, Combat Medkit, Communicator,
+  Emergency Trauma Kit, Tactical Lens. Combat Medkit is the one that gets missed, because
+  it spends Momentum where the other four add Threat.
+
+A prior session note claimed the live install was `manifest-embed.json`, that
+`manifest.json` was partially broken, and that consolidating the two was outstanding.
+**That was stale.** `dnm-obr` has exactly one manifest. There is nothing to consolidate
+and no reinstall-forcing change pending.
+
+## The OBR SDK is bundled in one repo, not both
+
+`dnm-cc/index.html` carries the SDK inline, bundled from npm with esbuild — the v1.16 fix,
+and the reasoning in the comment above the bundle still stands: a remote import fails
+*silently* under a CSP, a corporate proxy, a CDN outage or simply being offline, and the
+page then loads looking correct while having quietly forgotten the character.
+
+`dnm-obr` does **not**. Both `roller.js` and `background.js` fetch from `esm.sh` at load.
+
+This was left alone in v1.20, deliberately, on two grounds. It has worked in live play,
+plausibly because the extension only ever runs *inside* Owlbear where the network is
+already known-good, whereas the creator also gets opened as a bare tab on whatever
+machine a player has. And changing how the extension loads is exactly the class of change
+that fails for one player and nobody else — a bad thing to discover mid-session.
+
+**If it is hardened later it should be its own release with its own live check, not a
+rider on a feature release.** Until then: do not write extension code that assumes a
+local SDK is present.
+
+---
+
+## Party panel (extension 0.9.0)
+
+GM-only section in the roller, between Table Controls and the log. Per character: name,
+Spirit current/max, and a status badge.
+
+### Why no creator change was needed
+
+The v1.20 handoff flagged this as a risk — that a needed field might be missing from the
+snapshot, making it a creator change plus a share-code round trip. It is not. Everything
+required already crosses the wire:
+
+| Field | Segment | Note |
+|---|---|---|
+| `name` | `SN` | snapshot |
+| `spiritMax` | `SN` | snapshot |
+| `currentSpirit` | `CP` | `applyChar()` in `roller.js` already reads exactly this for the banner |
+| `appliedEpochs` | `CP` | written by `writeAppliedEpochs()` in the creator |
+
+`buildOwlbearSnapshot()`'s own comment explains why: live session values — current
+Spirit, injuries, equipped and discharged state — are deliberately **not** duplicated
+into `SN`, because they ride in `CP` and keeping mutable state in exactly one place is
+what makes an Owlbear round trip lossless. That decision, made in v1.11, is what made
+this feature cheap in v1.20.
+
+### Three states, not two
+
+`epochStatus()` in `dnm.js` returns `unsynced`, `behind` or `current`.
+
+The distinction that matters is **null vs all-zeros**. `readAppliedEpochs()` returns
+`null` when the character has no `appliedEpochs` at all — newly built, or attached to a
+token for the first time. The creator's `catchUpToRoomEpochs()` adopts the room's
+position for that character and applies **nothing**, on purpose, so a new character does
+not arrive and immediately run a rest it was never present for.
+
+Reading that as zeros would report it as behind by however many boundaries the table has
+been through, and send the GM chasing a player who has nothing to catch up on — the exact
+failure the panel exists to prevent. So it reads **Not synced**, styled distinctly from
+Behind. A `behind` row also names what it is waiting on (`Waiting on Bed, End Scene`),
+which turns the panel from a yes/no into something actionable.
+
+`readAppliedEpochs()` deliberately **mirrors** the creator function of the same name:
+same six keys, same coercion, same null semantics. Two implementations of this would
+drift the first time either side changed.
+
+### Cost control
+
+`scene.items.onChange` fires on every drag frame, and parsing a character is a base64
+decode plus two `JSON.parse`. Two guards:
+
+1. **Parse cache** keyed on the code string. A token that moved but was not edited is a
+   cache hit. Bounded at 60 entries and cleared wholesale past that, because every edit
+   writes a new code and an unbounded cache would grow per save.
+2. **Render signature** over `[codes, roomEpochs]`. Dragging changes neither, so a drag
+   costs one string comparison and returns before touching the DOM.
+
+`onChange` hands us the item list already, so it is passed straight through rather than
+triggering a second fetch.
+
+### Bug fixed in passing
+
+`refreshSelection()` was only ever called inside `OBR.player.onChange`. Opening the
+popover with a token **already selected** showed no character banner until you clicked
+something else. One line at startup. Pre-existing since v1.12; unrelated to this feature
+but found while reading the file.
+
+---
+
+## Injuries in the Rolls and Actions log (creator v1.20)
+
+### The ruling
+
+**An Injury has no mechanical effect of its own. Gus ruled this directly: it is flavour.**
+
+The rulebook text carried in `INJURY_RULE_INFO` agrees — an Injury is a Truth
+representing harm, and first aid treats one by *renaming* it, Bleeding becoming Bandaged
+Wound. The mechanics live in the Spirit spent to *avoid* an Injury, and that path is
+already logged. So this feature is **announcement only**. Nothing added here touches a
+pool, alters a stat, or invents a rule, and there is a test asserting exactly that.
+
+That ruling is what unblocked the item. The handoff had it marked as blocked pending
+rulebook mechanics; there were none to find.
+
+### Entry format
+
+| Act | Label | Detail |
+|---|---|---|
+| new injury typed | `Took an injury` | the text |
+| text changed | `Changed injury` | `old to new` |
+| Heal pressed | `Healed injury` | the text |
+| Reopen pressed | `Reopened injury` | the text |
+| Remove pressed, or field emptied | `Removed injury` | the text |
+
+Label and detail are split rather than concatenated, matching every other action entry —
+`renderActionEntry()` in `roller.js` puts the label in the head and the detail on its own
+line.
+
+**Remove was not in the original spec and is a deliberate addition.** Removing is a
+different act from healing: it says the injury was never real, where Heal says it got
+better. Left unlogged, the table would see a `Took an injury` entry and then nothing, and
+assume the character was still carrying it. Emptying the field by hand is the same act
+and reads the same way.
+
+### Why `onchange` and not `oninput`
+
+`oninput` fires per keystroke — typing "Bleeding" would post eight entries. `onchange`
+fires once, on blur or Enter, which is when the edit is actually finished. `beginInjuryEdit()`
+captures the value at focus, because `oninput` has already written the new value into
+state by the time `onchange` runs, so the old half of a rename has to come from somewhere.
+
+Focus-then-blur with no change logs nothing, or reading your own sheet would spam the table.
+
+### Why this hooks the injury handlers and not `updateAutoList()`
+
+Injuries share the auto-list machinery with **Custom Items and Knowledge Fragments**.
+Logging inside the shared function would post an entry every time somebody edited a
+Knowledge Fragment. There is a test asserting those two stay silent.
+
+`removeInjuryField()` is no longer a thin wrapper around `removeAutoList()` for the same
+reason — it needs to read the text before the splice in order to name it.
+
+### Flush
+
+`announceInjury()` calls `logAction()` then `logActionNow()`. No pool moves on any of
+these, so nothing downstream would consume the pending label; without the explicit flush
+it would sit in `pendingActionLabel` and mislabel the next real spend. Same pattern as
+item discharge (v1.18) and Nanobarrier's free first use (v1.19B).
+
+---
+
+## Shared Roll Room removed (creator v1.20)
+
+Dormant behind `SHARED_ROOM_ENABLED = false` since v1.17. Ro's server is not being stood
+up, so with `DM_API_BASE` empty every request resolved against `gsgrimoire.github.io` and
+404'd. Roughly 10 kB of JS and CSS removed:
+
+`renderSharedRoomBlock`, `joinRoom`, `startPolling`, `normalizeIncoming`,
+`parseRollString`, `updateRoomStatus`, `pushFeedEntry`, `pushFeedEntryRaw`, `renderFeed`,
+`redrawFeed`, `roomState`, `SHARED_ROOM_ENABLED`, `DM_API_BASE`, the `roomCode` field, and
+the `.room-*` / `.feed-*` CSS including the `body.obr-embedded .dm-room-block` hide and
+the `.room-feed` print exclusion.
+
+### `postRoll()` is kept as an empty stub. Do not delete it.
+
+`installRollBridge()` in the module block does `window.postRoll = ...`. That is what
+carries a roll to the shared log in Owlbear. Deleting the standalone function and its
+call site in `doRoll()` would **silently stop rolls reaching the table** while the sheet
+carried on looking correct. The seam is commented at both ends.
+
+### Share-code round trip
+
+The handoff warned of a base64 padding bug that once dropped state on import for certain
+payload lengths. Checked rather than assumed: `b64decodeSafe()` re-pads every case
+including the invalid `pad === 1`, and `parseCharacterCode()` imports via
+`Object.assign(c, getDefaultCharacter(), payload)` with no fixed offsets. Removing a
+field changes the payload length arbitrarily, which already happens every time a
+character is renamed.
+
+Tested across **sixteen payload length classes** rather than one, and a synthetic
+pre-v1.20 code still carrying `roomCode` imports cleanly.
+
+---
+
+## Sheet layout (creator v1.20)
+
+Five top-level `.sheet-block` bands, on a lighter ground:
+
+1. **Character** — identity, Bonds/Temperament, Exhaustion, Truths/Injuries, Attributes,
+   Skills, Resources, Dice Roller
+2. **Actions, Talents & Abilities**
+3. **Items and Equipment**
+4. **Growth**
+5. **Share Code**
+
+**Section order inside the blocks is unchanged.** Nothing moved relative to anything
+else; the v1.09 reading order and the v1.14 roller promotion are both intact. What
+changed is that a run-on column of fifteen panels separated by hairline rules now reads
+as five things.
+
+### Collapse defaults
+
+Starting Equipment and Item Catalogue are now closed on open; Owned Items and Custom
+Items stay open, being what a player actually consults in play. **Starting Equipment
+keeps its position above Item Catalogue**, where v1.17 put it.
+
+Note the interaction with the v1.10 re-render continuity logic: `restoreDetailsState()`
+restores *both* directions, so a panel a player deliberately opens stays open through
+re-renders. The default only governs a fresh render, which is what was wanted.
+
+### `.sheet-block` was deliberately NOT added to `SCOPE_SELECTOR`
+
+`detailsStateKey()` builds its key from `scope | className | label`, where scope is the
+nearest `.sheet-section` ancestor's title. Adding `.sheet-block` to `SCOPE_SELECTOR`
+would change the key of every `<details>` that currently resolves to no scope — the Share
+Code block among them — and silently reset remembered open/closed state once for every
+player. Leaving the selector alone keeps every existing key byte-identical. There is a
+test asserting keys stay unique after wrapping.
+
+### Duplicate titles removed
+
+The block headings made three inner labels redundant: the inventory section's
+`Inventory & Equipment` title, the word `Growth` in the growth section title (the live
+`Available / Max / Spent` counts are kept), and the Actions collapse summary, now
+`Show all`. The Share Code collapse summary is now `Show the code`.
+
+---
+
+## Testing
+
+Two harnesses, 94 assertions, both green.
+
+`tests/party.test.mjs` — 14 assertions against the **real exported helpers** in `dnm.js`,
+not a reimplementation. Covers all three states, the null-vs-all-zeros distinction, the
+pending list, legacy rooms with no `epochs` key, applied-ahead-of-room, partial
+`appliedEpochs` objects, and junk coercion.
+
+`tests/creator.test.mjs` — 80 assertions in jsdom.
+
+**Access note for whoever picks this up cold:** the creator is one classic `<script>`, so
+`const state` and `const DM_DATA` are global *lexical* bindings and are **not** properties
+of `window`. `window.state` is undefined even when the app has booted fine. Everything is
+reached through indirect eval in global scope. Function declarations *do* land on
+`window`, which is why overwriting `window.logActionNow` genuinely intercepts the app's
+own internal calls — the same seam the module block uses.
+
+Fixtures drive the construction path — an origin, archetype and temperament that exist in
+`DM_DATA`, then `computeStats()` — and the fixture **throws** rather than passing quietly
+if the character does not compute. It resolves archetypes from `DM_DATA.archetypes ||
+DM_DATA.advancedArchetypes`, and it deliberately does **not** write a forced talent into
+`c.talent`, because that is precisely the lie that masked the Nanobarrier bug through a
+full release.
+
+Two assertions failed on first run. **Both were defects in the tests, not the code** —
+checking the fixture before the code, as the rule says. One asserted `/api/` appeared
+nowhere, but it appears in the comment explaining the removal, which is worth keeping;
+narrowed to assert no live `fetch()`. The other asserted the Bonds row renders, but the
+fixture had no bonds and a character without bonds correctly renders no Bonds row; the
+fixture now has a bond.
+
+### Live checks — none of the below is verified locally
+
+`OBR.isAvailable` is false in jsdom, so the module block never runs. **Nothing** in this
+list was tested: every broadcast (rolls, actions, pool events, injury entries reaching the
+log), every room-metadata read and write, the Momentum accessor, the `addThreat()`
+replacement, epoch catch-up on sheet open, role gates, modal behaviour, and **the entire
+party panel**, which is extension code and has no jsdom coverage at all.
+
+Extension 0.9.0, before touching the creator:
+
+1. GM opens the roller. Party panel visible, listing every character on a token, with
+   Spirit matching each sheet.
+2. **Player opens the roller. Party panel must NOT be visible.**
+3. GM presses Bed, confirms. Every row flips to Behind, naming Bed.
+4. One player opens their sheet. That row alone returns to Caught up. The others stay
+   Behind.
+5. Attach a freshly built character to a token. It reads **Not synced**, not Behind.
+   Open its sheet once; it becomes Caught up without having taken a rest.
+6. Drag a token around the map for several seconds. The panel must not flicker or
+   visibly re-render.
+7. Select a token, close the popover, reopen it. The character banner appears
+   immediately — this is the `refreshSelection()` fix.
+8. Empty scene, or scene with no attached characters: the panel says so rather than
+   erroring.
+
+Creator v1.20, after 0.9.0 is confirmed:
+
+9. Type an injury, click away. One `Took an injury` line in the log, on both browsers.
+10. Rename it. One `Changed injury: old to new` line. Confirm **no entry per keystroke**.
+11. Click into the field and out again without editing. **No entry.**
+12. Heal it. `Healed injury`. Reopen it. `Reopened injury`. Remove one. `Removed injury`.
+13. Edit a Knowledge Fragment and a Custom Item. **No injury entries.**
+14. Confirm no pool moved during any of the above.
+15. Roll from the sheet in Owlbear and confirm it still reaches the log — this is the
+    `postRoll` stub seam.
+16. Open the sheet in the Owlbear modal at 1280×940 and check the five bands, the scroll
+    length, and that Starting Equipment and Item Catalogue start closed.
+17. Open the Catalogue, then press something that re-renders (Equip, Discharge). It must
+    stay open and the viewport must not jump.
+18. Export a character and re-import it in a fresh tab. Confirm nothing was lost.
+19. Import a character code saved **before** v1.20.
+
+## Still open
+
+Nothing is blocking.
+
+- The `dnm-obr` SDK import, above. A standalone job between sessions if it is ever done.
+- `GLIF-Pattern Clothing` stays excluded from tracked features: its limit is per machine,
+  not per character.
+- Timed effect tracking remains **out of scope by ruling**. Nanobarrier's "until the start
+  of your next action", scene effect durations and similar: *"that is too much bookkeeping
+  on the sheet. As long as the activation is broadcast in the log it's fine."* Do not
+  build it and do not re-propose it.
+- `HANDOFF-v1_20.md` should be deleted now that v1.20 has shipped. It is a third
+  description of the system, three of its claims were wrong, and the corrections are
+  recorded above. `beta/` was deleted during this run and must not come back.
+
+---
+
 # v1.19B — Nanobarrier fix, eager catch-up, visible reconciliation
 
 Creator **v1.19B**, extension **0.8.1**. Fix release on top of v1.19.
@@ -157,10 +729,6 @@ confirm are **not** verified. They need a live room.
 - Confirm exactly one catch-up entry per character, carrying Spirit/item detail.
 - GM panel: first press shows `Confirm?`, wait 4 s, confirm it disarms itself.
 - Nudge Threat from the roller and confirm it appears in the log with a name.
-
-# Dreams & Machines character creator: cumulative upgrade notes
-
-This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
 # v1.19 + dnm-obr 0.8.0 — GM table controls
 
@@ -490,46 +1058,18 @@ their reset.
 This changes the room metadata schema, so it needs `applyEvent` and `trimState` work in
 `dnm.js` alongside the creator changes.
 
-# **v1.17**.
 
-## Deployment
-
-The project lives in two GitHub Pages repos under the `gsgrimoire` account.
-
-| Repo | File | Purpose |
-|---|---|---|
-| `dnm-cc` | `index.html` | The whole application. Character creator in a browser tab, in-play sheet inside Owlbear Rodeo |
-| `dnm-cc` | `CHANGELOG.html` | Player-facing release history |
-| `dnm-cc` | `UPGRADE_NOTES.md` | This file |
-| `dnm-obr` | `dnm.js`, `roller.js`, `index.html`, `style.css`, `background.js`, `manifest.json` | The Owlbear Rodeo extension: roller popover, shared log, background page |
-
-**The deployed filename is always `index.html`.** Earlier releases used versioned names, then `dnm-character-creator.html`. Neither exists in the repo now, and links to them 404. Versioned filenames have caused recurring confusion and should not come back: the release number lives in `APP_VERSION`, in the file's header comment, in `CHANGELOG.html`, and here.
-
-From v1.17 the header comment on line 7 was corrected; earlier builds carried a stale reference to `dnm-character-creator.html`.
-
-### Deploy order
-
-From v1.17 onward, **extension files first, then the creator**. The creator broadcasts event types the extension has to understand. A creator-first deploy drops the new events silently and looks like it worked.
-
-1. `dnm-obr` files to that repo's root
-2. `dnm-cc/index.html`
-3. `CHANGELOG.html` and `UPGRADE_NOTES.md`
-4. Wait for Pages, hard-refresh, confirm the header version link before opening Owlbear
-5. Full room reload. The background page is cached per room session
-
----
-
-## v1.17 — the Rolls and Actions log
+# v1.17 — the Rolls and Actions log
 
 The player write test **passed** before this release: a player edited a sheet in an incognito window and the change was visible from the GM window. That clears the blocker recorded at v1.16.
 
-### What this release is for
+## What this release is for
 
 Rolls have travelled to the shared log since v1.12. Nothing else did. A player spent Momentum on a Counterattack, pushed Threat to send a Communicator message, or burned a once-per-scene ability, and the pools moved with no record of who moved them or why. The GM saw a number change.
 
 v1.17 puts abilities, item uses and every pool change into the same log as rolls.
 
-### Attribution, and why the accessor could not do it alone
+## Attribution, and why the accessor could not do it alone
 
 The Momentum accessor bound in embedded mode catches all six write paths. That is why it cannot label them: it sits underneath the call sites and observes a number changing, not a reason. The property that made it correct in v1.15 is the property that makes it anonymous.
 
@@ -551,7 +1091,7 @@ Wired call sites, verified against source rather than from memory:
 | `useAdrenalineRush` | Adrenaline Rush |
 | `useItemAction` (new) | *item name* — *action label* |
 
-### The clamp had to be silenced
+## The clamp had to be silenced
 
 `normalizeCurrentValues()` clamps `currentMomentum`, and embedded that field is an accessor bound to the room pool. Every clamp is a pool write. Loading a sheet whose Momentum sits above its current maximum would have announced a spend to the whole table that no player made.
 
@@ -559,17 +1099,17 @@ Wired call sites, verified against source rather than from memory:
 
 `withPoolLogSuppressed` saves and restores the previous flag value rather than setting it to `false` on exit, so nesting cannot clear a suppression it did not set.
 
-### Threat already carried its reason
+## Threat already carried its reason
 
 `addThreat(amount, reason)` has taken a reason since v1.15 and every call site passes a real one. The embedded bridge computed it, used it for the local toast, and dropped it from the broadcast. Carrying it through is most of what makes the Threat half of the log readable, and it cost one field.
 
 Manual counter nudges log, by ruling. Their reason string changed from `'manual'` to `'manual adjustment'` so the entry reads properly on its own line.
 
-### `logActionNow()`
+## `logActionNow()`
 
 For actions that announce but move no pool, a limited-use ability with no cost, nothing downstream is coming to consume the parked label. Without an explicit flush it would sit in `pendingActionLabel` and mislabel the next real spend. `logActionNow()` flushes and clears; standalone it only clears.
 
-### Log entry shape
+## Log entry shape
 
 Action entries share `state.log` with rolls. Same dedupe by `id`, same `MAX_LOG_ENTRIES` cap, same `trimState` byte budget.
 
@@ -585,7 +1125,7 @@ This was not cosmetic. `renderEntry` read `e.detail.length`, `e.succ` and `e.dif
 
 `who` prefers the character name and falls back to `OBR.player.getName()`, resolved once at start. A failed name lookup is non-fatal and never blocks an action.
 
-### Item actions became buttons
+## Item actions became buttons
 
 Five items carry an `itemActions` entry, not four. The v1.16 handoff listed four because it described them as "the Threat items"; **Combat Medkit** spends Momentum rather than adding Threat and fell outside that phrasing.
 
@@ -603,7 +1143,7 @@ Found by walking `DM_DATA.items` programmatically. All five are `type: "manualRe
 
 An unaffordable Momentum action renders disabled rather than hidden: the item still has the ability, the character just cannot pay right now. The rules text stays below the button, because the button says what it costs but not when you may press it.
 
-### Shared Roll Room disabled
+## Shared Roll Room disabled
 
 `DM_API_BASE` is `''`, so `/api/roll`, `/api/stream` and `/api/tail` resolved against `gsgrimoire.github.io` and 404'd. The endpoint was to be hosted by Ro and is not going to be stood up. The panel offered a Connect button that could only ever fail.
 
@@ -613,7 +1153,7 @@ Turned off behind `SHARED_ROOM_ENABLED = false`, **not deleted**. The wire forma
 
 This is unrelated to the in-Owlbear log, which needs no server: it rides the broadcast channel and is persisted to room metadata by the GM's background page.
 
-### Start Over
+## Start Over
 
 There was no way out of a finished sheet except reloading the tab by hand.
 
@@ -625,16 +1165,16 @@ The confirm text differs depending on whether the character is already in the lo
 
 The button carries `.tab-only`, a new inverse of `.obr-only`: visible by default, hidden under `body.obr-embedded`. Embedded, the character lives on the token and "start over" would mean something destructive and unintended.
 
-### Other changes
+## Other changes
 
 - Starting Equipment moved above the Item Catalogue in Inventory & Equipment.
 - `CHANGELOG.html` rebuilt in the graphical v1.08 layout. Its back link points at `./` rather than a filename, because the old `./1.10.html` target 404s.
 
-### Rulings settled
+## Rulings settled
 
 **New Adventure clears I Know a Guy, already true.** `startNewAdventure()` clears the `scene`, `session` and `adventure` boundaries, and `iKnowAGuy` is `reset: 'adventure'`. The v1.16 handoff carried this as an open question; the code answered it. No change shipped and the backlog item is closed.
 
-### Still open
+## Still open
 
 **Nanobarrier.** Deliberately still absent from `LIMITED_USE_FEATURES`. The escalating cost is in the rulebook text carried in `DM_DATA`: first use free, second 1 Threat, each subsequent +1. So the counter is straightforward. What does not exist anywhere in the source is a **reset boundary**. Treating it as a binary used flag would be mechanically wrong, and inventing a boundary would be worse. Blocked on a ruling: scene, session, or Bed.
 
@@ -644,7 +1184,7 @@ The button carries `.tab-only`, a new inverse of `.obr-only`: visible by default
 
 **Discharge is not logged.** `toggleItemDischarged()` moves no shared pool, so it sat outside the "changes Momentum or Threat" scope this release was built to. Ruled afterwards that it should log; not yet built.
 
-### Testing
+## Testing
 
 `applyEvent` was tested directly for action handling, dedupe, ordering and legacy roll entries lacking `kind`.
 
@@ -654,11 +1194,11 @@ The creator was booted in jsdom with the module block stripped, and the accessor
 
 ---
 
-## v1.16 — one file, and the SDK comes in-house
+# v1.16 — one file, and the SDK comes in-house
 
 `APP_VERSION` and the header comment moved to `1.16`. Two things happened in this release: the Owlbear sheet and the character creator became one file, and the Owlbear SDK was bundled in.
 
-### One file instead of two
+## One file instead of two
 
 Until v1.15 the extension carried its own character sheet (`sheet.html`, `sheet.js`, `sheet.css`, plus a generated `rules.js`), rebuilt from the code's snapshot. That sheet and the creator's own finished sheet were two implementations of the same thing, and they drifted. The bug that opened this session was exactly that: `sheet.js` wrote to a `#char-sub` element that `sheet.html` no longer had, which threw on the third line of `render()` and silently killed every section below it.
 
@@ -673,7 +1213,7 @@ Mechanism:
 
 The five files supporting the old duplicate-sheet approach (`sheet.js`, `sheet.html`, `sheet.css`, `rules.js`, `build-rules.mjs`) were quarantined pending deletion rather than removed immediately.
 
-### Why the SDK is bundled
+## Why the SDK is bundled
 
 Embedded mode was silently dead before this release. The symptom was misleading: the modal opened, the creator rendered, the import screen offered the local library, and edits persisted across a close and reopen, so it looked like a working sheet that had merely forgotten which character it was on. The persistence was `localStorage`, not the token. Nothing in the module block was running at all.
 
@@ -687,29 +1227,29 @@ This also restores what the lazy import was for. There is now no request at all,
 
 Cost: the file grows from about 485 kB to 529 kB. One cached request, against a dependency that could not be relied on.
 
-### Difficulty in roll entries, again
+## Difficulty in roll entries, again
 
 The roll bridge had been sending `diff: 0` with a faked verdict. It was fixed at v1.14, but the fix was applied to the *generated* file, and the next rebuild overwrote it, so `diff: 0` shipped for two versions. The fix now lives in `embed-block.html`, which is the source.
 
 **Rule worth keeping: anything patched into a generated file is temporary.** Fixes go into the source or the build script.
 
-### Verified, and not verified
+## Verified, and not verified
 
 Confirmed live: rolls reach the shared log, Momentum and Threat sync with the group pools, once-per-scene tracking holds, and the embedded sheet opens directly to the character.
 
 Not verifiable in jsdom, and recorded as such at the time: frame detection, `OBR.isAvailable` behaviour, and whether a player's writes persist to the token in a way the GM can see. That last one was the release's open blocker, and it passed live before v1.17.
 
-### Debugging note
+## Debugging note
 
 When reading the console, set the context dropdown to the **extension frame** (the `gsgrimoire.github.io` entry), not the top Owlbear page. Two separate debugging rounds were lost to CSP errors that belonged to Owlbear's own page.
 
 ---
 
-## v1.15 — Threat reaches the table
+# v1.15 — Threat reaches the table
 
 `APP_VERSION` and the header comment moved to `1.15`.
 
-### What changed
+## What changed
 
 New function `addThreat(amount, reason)`. Every Threat change in the app goes through it. Standalone it shows a toast, which is all it ever did; embedded, the module block replaces it to broadcast a `pool` event on the extension channel.
 
@@ -720,7 +1260,7 @@ Wired to it:
 
 New `renderThreatCounter()` in the Resources grid, carrying `.obr-only` so it is present in the DOM always and visible only when embedded.
 
-### Why a funnel rather than two call sites
+## Why a funnel rather than two call sites
 
 Threat appears in this file about thirty times, and nearly all of it is rules prose in item and ability descriptions rather than a control the app drives: the Communicator's message, the Tactical Lens signal, Combat Automed's self-revive, Nanobarrier's escalating cost, several talents. Only two places are interactive.
 
@@ -730,7 +1270,7 @@ The funnel also means a Threat source added later is wired in both contexts by c
 
 Five of those prose sources became buttons at v1.17.
 
-### Momentum as a group pool, via an accessor
+## Momentum as a group pool, via an accessor
 
 `DM_DATA` calls Momentum a group pool in two places: the Momentum resource text says the group can save up to 6, and the Circumspect drive refers to the group pool explicitly. Confirmed with the table: there is no personal pool, except that Momentum generated by a roll may be spent immediately by the roller.
 
@@ -740,11 +1280,11 @@ The first attempt overrode `adjustResource()`, which is what the counter's + and
 
 Defining `currentMomentum` as an accessor property on the character object catches all of them, including any added later, because there is no way to write the field that does not go through the setter. `JSON.stringify` reads accessors normally, so `buildCharacterCode()` still serialises a plain number.
 
-### Not applied locally, unlike Momentum
+## Not applied locally, unlike Momentum
 
 The Momentum accessor applies the change immediately and then broadcasts, because the player is spending their own resource and watching the counter respond. Threat waits for the GM's metadata update. It is announced to the table rather than spent by the player, the round trip is a few hundred milliseconds, and waiting keeps a single writer.
 
-### Verified
+## Verified
 
 Standalone: `addThreat` present, toast reads "Add 3 Threat — Adrenaline Rush", the Threat counter is in the DOM but carries `.obr-only`, and no network call is made on load.
 
@@ -752,36 +1292,36 @@ Embedded: the counter reads the room's Threat on open; Adrenaline Rush at 2 Spir
 
 ---
 
-## v1.14 — rolling from the sheet
+# v1.14 — rolling from the sheet
 
 `APP_VERSION` and the header comment moved to `1.14`.
 
-### What changed
+## What changed
 
 - Attributes and Skills became pickable. Clicking one selects it for a test and highlights it. An Attribute shut down by Exhaustion cannot be picked.
 - The Dice Roller moved up to sit directly beneath Attributes, Skills and Resources instead of near the bottom of the sheet.
 - A Difficulty selector (D0–D5) was added beside the Roll button. The result now reports the verdict and the Momentum gained: "4 successes · Passed vs D2 · +2 Momentum".
 - The share code block leads with Copy Code and Save Local, with the code itself in a small scrolling box below rather than filling the page.
 
-### Why Difficulty mattered more than it looks
+## Why Difficulty mattered more than it looks
 
 Momentum gained is successes beyond the Difficulty. Without a Difficulty the sheet could not report the one number a player acts on immediately after a test, and the roll bridge had been sending `diff: 0` with a faked verdict (passed on one or more successes, which matches D1, the commonest case). With the selector in place the embedded sheet and the roller popover produce identical log entries.
 
 That fix was applied to the generated beta file and lost on the next rebuild. See v1.16.
 
-### Build structure
+## Build structure
 
 From this release the live file is built from the previous live file, and the Owlbear beta is derived from the live file by appending the embed block. The beta is the live creator plus Owlbear support, by construction, so the two cannot drift during testing.
 
-### The SDK import regression
+## The SDK import regression
 
 v1.14 changed the SDK import from static to lazy `import()` behind a `window.self === window.top` frame check, to spare tab users a CDN fetch. The frame check could not be tested in jsdom and the lazy import inherited the same silent-failure mode as the static one. Both were replaced at v1.16 by a bundled SDK and `OBR.isAvailable`.
 
 ---
 
-## v1.13 — snapshot v3, and the static/computed split
+# v1.13 — snapshot v3, and the static/computed split
 
-### What changed
+## What changed
 
 `buildOwlbearSnapshot()` extended again. Snapshot payload version raised from `2` to `3`. `APP_VERSION` and the file header comment moved to `1.13`.
 
@@ -799,7 +1339,7 @@ New fields in the `SN` segment:
 | `resourceBreakdown` | `getResourceModifierSources()` | The "equipped +N" footnote, resolved |
 | `items[].powered` | `getPoweredQuality()` | Recharge tier, so a consumer can tell Breather from Bed |
 
-### The decision this release turned on
+## The decision this release turned on
 
 The obvious way to finish the Owlbear sheet was to put everything it displays into `SN`. That was built, measured, and reversed.
 
@@ -820,11 +1360,11 @@ Measured before choosing: 26.7 kB `SN` with inline tooltips, 19.2 kB with tag ke
 
 **Superseded at v1.16.** When the creator itself became the Owlbear sheet, the consumer gained direct access to `DM_DATA` and `rules.js` stopped being needed. It is quarantined with the other duplicate-sheet files. The `SN` segment and the split it produced remain in force, because the code still has to be readable by a consumer that is not the creator.
 
-### Deliberately not resolved statically
+## Deliberately not resolved statically
 
 `getEquipmentTraitInfo()` composes the Powered trait's text from the item it sits on: a powered weapon, a powered armor and the Illuminator each read differently. No flat table can answer that, so `snapshotTraitTag()` compares the resolved text against the static table entry and inlines it only when they differ. Every other trait travels as a key.
 
-### Verified
+## Verified
 
 Booted the edited file in jsdom, built a Spear/Tech/Stubborn character with three catalogue items chosen for coverage (a Powered weapon, an armor with equip effects, a multi-quality thrown weapon), generated a code, and confirmed snapshot `v: 3`, all new fields populated, and `parseCharacterCode()` reading its own output without error.
 
@@ -832,9 +1372,9 @@ Round trip confirmed: edited exhaustion, quantity, equipped and discharged state
 
 ---
 
-## v1.12 — Snapshot v2: abilities, descriptions, exhaustion
+# v1.12 — Snapshot v2: abilities, descriptions, exhaustion
 
-### What changed
+## What changed
 
 `buildOwlbearSnapshot()` extended. Snapshot payload version raised from `1` to `2`.
 `APP_VERSION` and the file header comment moved to `1.12`.
@@ -849,7 +1389,7 @@ New fields in the `SN` segment:
 | `exhaustionTypes[]` | `DM_DATA.exhaustionTypes` + `attributeInfo` | Four fixed types with the attribute each shuts down |
 | `bonds[]` | now resolved through `DM_DATA.bondInfo` | Was raw `{name, type}`; now carries `typeName` and `desc` |
 
-### Why this way
+## Why this way
 
 Exhaustion editing was deliberately withheld in v1.11. `activeExhaustion` holds keys
 into `DM_DATA.exhaustionTypes`, and a consumer that cannot read that table has no safe
@@ -862,14 +1402,14 @@ in v1.11: it duplicates rules data and guarantees drift.
 `getAbilities()` is called defensively via `typeof getAbilities === 'function'`, so
 reordering the script block cannot break code generation.
 
-### Consequences
+## Consequences
 
 - Codes grow to roughly 9.4 kB, up from about 5.6 kB at v1.11. Still copy-paste safe.
 - Snapshot `v` is now `2`. Consumers should treat a missing `exhaustionTypes` as
   "exhaustion unsupported" rather than an error, so v1 codes keep working.
 - No change to `CP`, so the round trip is unaffected.
 
-### Verified
+## Verified
 
 Generated a code from a built character and confirmed `v: 2`, four exhaustion types
 mapped to their attributes, abilities resolved with descriptions, and origin and
@@ -878,9 +1418,9 @@ stripped degrades to "no exhaustion" without throwing.
 
 ---
 
-## v1.11 — Owlbear Rodeo snapshot (`SN` segment)
+# v1.11 — Owlbear Rodeo snapshot (`SN` segment)
 
-### What changed
+## What changed
 
 Added `buildOwlbearSnapshot()` and appended an `SN` segment to every character code.
 `APP_VERSION` moved to `1.11`.
@@ -889,7 +1429,7 @@ The segment carries computed, read-only values: `attrs`, `skills`, `techLevel`,
 `spiritMax`, `supplyMax`, resolved `talents`, resolved catalogue `items`, plus name,
 pronouns, portrait, truths, bonds and goals.
 
-### Why this exists
+## Why this exists
 
 A consumer outside this file cannot compute a character's stats. Deriving Might from
 origin + archetype + temperament + growth needs `DM_DATA`, which is roughly 214 kB of a
@@ -900,7 +1440,7 @@ The creator already computes all of this in `computeStats()`. Writing the finish
 numbers into the code lets a consumer read values without knowing the rules that
 produced them, and keeps this file the single source of truth.
 
-### Design constraints
+## Design constraints
 
 **Derived only.** Live session values (`currentSpirit`, `injuries`, equipped and
 discharged flags) are *not* duplicated into `SN`. They already ride in `CP`. Keeping
@@ -914,13 +1454,13 @@ earlier. Forwards and backwards compatible.
 **`fullDescription` dropped** from items. It is the largest field per item and a play
 aid does not need the full rules text.
 
-### Consequences
+## Consequences
 
 - Codes roughly doubled in length, from about 2.8 kB to 5.6 kB.
 - Base64-of-URI-encoded inflates the payload about 2.1x. Kept anyway for consistency
   with the existing `CP` convention.
 
-### Verified
+## Verified
 
 Built a character in a stubbed browser, generated a code, decoded `SN` and confirmed
 attributes, skills, spirit and supply maxima, tech level, talents by name and items
@@ -930,10 +1470,10 @@ segment byte-identical.
 
 ---
 
-## v1.10
+# v1.10
 Released against v.1.09.
 
-### Setup and deployment
+## Setup and deployment
 
 1. Replace `dnm-character-creator.html` in place. Filenames do not change.
 2. `CHANGELOG.html` and `UPGRADE_NOTES.md` are updated in the same release and belong in the same directory.
@@ -941,7 +1481,7 @@ Released against v.1.09.
 4. `DM1` share codes from v.1.09 import without loss. Characters saved in v.1.10 carry one new field, `limitedUseAbilities`, which older builds ignore.
 5. From this release the version number is written once, in `APP_VERSION`, and stamped into the header link at load. Earlier releases carried it as literal markup in two places, which had already drifted: the link read `Version v.1.09` while the constant read `v.1.10`. Do not hard-code it again.
 
-### Limited-use abilities
+## Limited-use abilities
 
 Five abilities and talents have an explicit use limit in the rules and are now tracked rather than described. Each has a Use control, a used state, and a boundary that clears it.
 
@@ -968,7 +1508,7 @@ Two features take an argument rather than a plain Use:
 
 All of these use the existing three-second, two-click confirmation pattern.
 
-### Boundary controls
+## Boundary controls
 
 `Boundaries & Rest` in the sheet header now holds six controls. The three rest controls behave as in v.1.09.
 
@@ -980,7 +1520,7 @@ All of these use the existing three-second, two-click confirmation pattern.
 
 New Session and New Adventure exist because those boundaries have no automatic trigger. A rest does not imply either one, and neither substitutes for a rest: New Adventure does not restore Spirit or recharge Powered items.
 
-### Identity header layout
+## Identity header layout
 
 Tech Level moved from the right-hand play-controls column into the name row, right-aligned opposite the character name. It is a single number that does not change during play, so it reads as identity rather than as a play control, and moving it lets the Rest buttons sit directly under the portrait instead of being pushed down by a 3rem numeral.
 
@@ -988,13 +1528,13 @@ Its tooltip opens downward. On the top line of the panel an upward tooltip is cl
 
 Origin, Archetype, and Temperament tags now stack vertically, each hugging its own text, matching the Rest button column. The identity column is sized to its content instead of holding a 150px minimum, so the three Goals boxes absorb the freed width.
 
-### Identity tag tooltips
+## Identity tag tooltips
 
 These tooltips previously printed the type label in both the title and the body, so hovering the Archetype tag produced "Archetype / Archetype". The body now carries the description from `DM_DATA`, which exists for every Origin, Archetype, and Temperament. Where no description exists the body is omitted rather than rendered empty, so the tooltip degrades to a bare title.
 
 Two supporting changes were required. The tooltip box widened from 180px to 300px, because a 300-character description at 180px renders as a tall thin column; and it anchors to the tag's left edge instead of its midpoint, because a centred 300px box on a short tag such as `RIVER` hangs off the left of the sheet.
 
-### Re-render continuity
+## Re-render continuity
 
 `renderStep()` rebuilds the active view by assigning `innerHTML`. That keeps rendering a pure function of state and is worth keeping, but it cost continuity: every `<details>` reverted to its markup default and the document got shorter, so any button that triggered a re-render collapsed the panels the player had open and jumped the viewport. Equip and Discharge were the most visible cases, but the behaviour affected every re-render, including rests and confirmations.
 
@@ -1007,7 +1547,7 @@ Implementation points worth knowing before editing this code:
 - Scroll is restored only when the view is unchanged. Moving between steps, or finalizing, legitimately changes what the player is looking at, and those paths scroll to top themselves.
 - An element's class list is part of its key, because a card's classes encode its state. Two cards with the same name but different state are different rows and must not inherit each other's open flag.
 
-### Exhaustible feature coverage
+## Exhaustible feature coverage
 
 `EXHAUSTIBLE_FEATURE_INVENTORY.md` audited version 1.09 and split its findings into features that need a binary used flag and features that need a richer state shape. Version 1.10 implements the binary set in full. The rest remain deliberately untracked, and are recorded here so that a later release does not rediscover them.
 
@@ -1039,10 +1579,10 @@ The Powered equipment tier counts are unchanged from the v1.09 audit and were re
 
 ---
 
-## v1.09
+# v1.09
 Released against v.1.08.
 
-### Setup and deployment
+## Setup and deployment
 
 1. Upload `dnm-character-creator.html`, `CHANGELOG.html`, and `UPGRADE_NOTES.md` to the same directory.
 2. Replace links to `1.08.html` or earlier versioned creator filenames with `dnm-character-creator.html`.
@@ -1050,7 +1590,7 @@ Released against v.1.08.
 4. Browser local saves continue to use the existing `dm_character_creator_library_v1` storage key.
 5. Existing `DM1` share codes remain the import format. The full payload now carries the new v.1.09 fields.
 
-### Actions, Talents & Abilities
+## Actions, Talents & Abilities
 
 The finished sheet now includes a default-open `Actions, Talents & Abilities` section. The left column contains expandable action cards. The right column retains Origin Abilities and Talents.
 
@@ -1087,7 +1627,7 @@ Second Wind's Ally controls spend Momentum without changing the owning character
 
 Threat remains a gamemaster-held pool and is not tracked by this creator. Adrenaline Rush and Complications therefore display Threat changes without modifying a Threat counter.
 
-### Once-per-scene state
+## Once-per-scene state
 
 Adrenaline Rush becomes unavailable after use. `End Scene` clears:
 
@@ -1098,7 +1638,7 @@ End Scene does not change Spirit, Supply Points, Momentum, Coin, Growth, Truths,
 
 The once-per-scene and active scene-effect arrays are included in local saves and share codes. This prevents reloading the page from refreshing an action unintentionally.
 
-### Spear's Blend and automatic Spirit bonuses
+## Spear's Blend and automatic Spirit bonuses
 
 Characters with the `spearsBlend` Origin Ability receive an additional expandable action card.
 
@@ -1110,7 +1650,7 @@ This activation step is required because Spear's Blend is administered at the st
 
 The `Bold` talent is also applied automatically when Adrenaline Rush is used. A momentary notification explains any bonus from Bold or Spear's Blend. If the character has a Rivalry Bond, the notification also reminds the player that the bonded ally gains 1 Spirit.
 
-### Rest and recovery
+## Rest and recovery
 
 The finished sheet header contains confirmed controls for:
 
@@ -1132,7 +1672,7 @@ Rest controls also recharge owned Powered item stacks according to this cascade:
 
 Powered (Special) is never cleared by a rest. It must be toggled manually when its special recharge condition has been met.
 
-### Powered item state
+## Powered item state
 
 Catalogue item stacks now store a `discharged` Boolean value. The value applies to the whole stack, as agreed for v.1.09.
 
@@ -1150,7 +1690,7 @@ Powered tooltips now depend on item category:
 
 There is no `made with Supply Points` flag in v.1.09. A Powered item that was created with Supply Points will therefore follow its displayed recharge tag unless the players handle that exception manually.
 
-### Spirit and Supply Point initialization fix
+## Spirit and Supply Point initialization fix
 
 Version v.1.08 could set current Spirit and Supply Points to zero during the first render. At that point no Origin or Archetype existed, so the computed maximum was zero. Once zero was written, later renders treated it as a real value.
 
@@ -1171,7 +1711,7 @@ It intentionally excludes direct Growth purchases that increase Supply Points an
 
 Existing v.1.08 saves containing zero cannot be migrated safely because zero may represent either the old initialization fault or a legitimate in-play value. The application does not guess. Use Bed to restore Spirit and the Supply reset control to restore Supply Points when repairing an affected save.
 
-### Custom Items
+## Custom Items
 
 Custom Items is a separate subsection under Owned Items. It stores plain single-line text for story objects and module-specific possessions that are not catalogue items.
 
@@ -1180,7 +1720,7 @@ Custom Items is a separate subsection under Owned Items. It stores plain single-
 - Entries are included in local saves and share codes.
 - Custom Items have no quantity, equipped state, or automated rules.
 
-### Knowledge Fragments
+## Knowledge Fragments
 
 Knowledge Fragments are tracked as an auto-growing free-text list inside Resources.
 
@@ -1189,7 +1729,7 @@ Knowledge Fragments are tracked as an auto-growing free-text list inside Resourc
 - There is no Remove button. Clearing a field removes the empty entry.
 - Entries are included in local saves and share codes.
 
-### Truths
+## Truths
 
 `Character Truths` is relabeled `Truths` because location, situation, personal, and equipment Truths may all be relevant on the sheet.
 
@@ -1198,7 +1738,7 @@ Knowledge Fragments are tracked as an auto-growing free-text list inside Resourc
 - Define Truth can add a field without a Momentum cost.
 - Create Truth spends 2 Momentum and adds a field.
 
-### Finished sheet layout
+## Finished sheet layout
 
 The finished sheet reading order is now:
 
@@ -1217,7 +1757,7 @@ The finished sheet reading order is now:
 
 Temperament expands to full width when the character has no Bonds. The redundant finished-sheet version label and duplicate `TL` value were removed. End Scene, Breather, Break, and Bed are vertically stacked. The Supply reset control and Knowledge Fragment inputs were widened.
 
-### Persistence fields added or extended
+## Persistence fields added or extended
 
 ```javascript
 customItems: []
@@ -1229,7 +1769,7 @@ items: [{ id, qty, equipped, discharged }]
 
 Older saves and share codes default missing arrays to empty arrays and missing discharge state to `false`.
 
-### Verification performed
+## Verification performed
 
 - JavaScript syntax validation of the complete inline script
 - Fifty-eight automated state and rendered-markup assertions
@@ -1248,10 +1788,10 @@ Older saves and share codes default missing arrays to empty arrays and missing d
 
 ---
 
-## v1.08
+# v1.08
 Released against v.1.07.
 
-### Features and fixes
+## Features and fixes
 
 - Added equipped state to owned catalogue items.
 - Added structured equipped resource modifiers, situational reminders, and manual item actions.
@@ -1263,16 +1803,16 @@ Released against v.1.07.
 - Improved catalogue scrolling, floating tooltip placement, clear-search behavior, and section layout.
 - Improved dark and light printable sheet output.
 
-### Compatibility note
+## Compatibility note
 
 The v.1.08 Spirit and Supply Point initialization fault is repaired in v.1.09 but is not retroactively guessed for existing zero values. See the v.1.09 migration note above.
 
 ---
 
-## v1.07
+# v1.07
 Released against v.1.06.
 
-### Features and fixes
+## Features and fixes
 
 - Added a Character Portrait Web Address field in Character Info.
 - Added live portrait preview and a fixed portrait frame on the finished sheet.
@@ -1283,7 +1823,7 @@ Released against v.1.06.
 - Removed repeated metadata from expanded owned item content.
 - Fixed Item Catalogue search focus loss by updating only the item grid while typing.
 
-### Implementation notes
+## Implementation notes
 
 - Portrait image bytes are not embedded in character data.
 - Browser-side `object-fit: cover` handles the visible crop.
@@ -1292,10 +1832,10 @@ Released against v.1.06.
 
 ---
 
-## v1.06
+# v1.06
 Released against v.1.05.
 
-### Features and fixes
+## Features and fixes
 
 - Added the standalone player-facing changelog.
 - Linked the header version label to the changelog.
@@ -1304,17 +1844,17 @@ Released against v.1.05.
 - Moved Character Share Code to the bottom.
 - Fixed Item Catalogue sub-filter refresh when the main category changes.
 
-### Implementation notes
+## Implementation notes
 
 - The changelog is static and works when kept beside the creator.
 - Catalogue refresh replaces the full catalogue block when category controls must change.
 
 ---
 
-## v1.05
+# v1.05
 Released against v.1.04.
 
-### Features and fixes
+## Features and fixes
 
 - Exhaustion now disables Dice Roller options that use the shut-down attribute.
 - Exhausted attribute options are visibly struck through.
@@ -1324,10 +1864,10 @@ Released against v.1.04.
 
 ---
 
-## v1.04
+# v1.04
 Released against v.1.03.
 
-### Features and fixes
+## Features and fixes
 
 - Added multiple local character saves using browser local storage.
 - Added finalized character mode with an Edit Character return path.
@@ -1339,16 +1879,16 @@ Released against v.1.03.
 - Added clickable Exhaustion States and visible affected-attribute styling.
 - Made owned inventory entries expandable.
 
-### Save behavior
+## Save behavior
 
 Browser local storage is convenient but tied to the browser and site origin. Share codes remain the portable backup. Clearing site data removes local saves.
 
 ---
 
-## v1.03
+# v1.03
 Released against the earlier creator build.
 
-### Features and fixes
+## Features and fixes
 
 - Added full skill names and attribute and skill tooltips.
 - Added the inlined item catalogue with search, filters, and quantity tracking.
@@ -1359,6 +1899,6 @@ Released against the earlier creator build.
 - Added collapsible Character Share Code output.
 - Fixed character-code base64 padding so names, goals, items, and full-state payloads import reliably.
 
-### Server note
+## Server note
 
 The character creator itself works client-side. Shared roll rooms require the companion server endpoints. With `DM_API_BASE` set to an empty string, the creator expects those endpoints on the same origin.
