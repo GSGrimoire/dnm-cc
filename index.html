@@ -8911,6 +8911,28 @@ function hookImport() {
   };
 }
 
+// Building a brand-new character directly on an attached token needs the same
+// write-through pasting a code gets. Without this hook, finalizeCharacter() leaves
+// `ready` false, so queueSave() (wired into every renderAll() by hookRenderAll())
+// silently no-ops and the token never receives CHAR_KEY. The sheet looks fully
+// built right up until the modal is closed, at which point the token turns out to
+// have nothing on it — and the party panel, which reads CHAR_KEY off every token,
+// never saw this character either.
+function hookFinalize() {
+  const original = window.finalizeCharacter;
+  window.finalizeCharacter = function patchedFinalizeCharacter(...args) {
+    const out = original.apply(this, args);
+    if (!ready) {
+      bindMomentumToRoom(state.character);
+      ready = true;
+      insertBar(state.character.name);
+      commit();
+      reconcileOnOpen();
+    }
+    return out;
+  };
+}
+
 // -------------------------------------------------------------
 // Start
 // -------------------------------------------------------------
@@ -8919,6 +8941,7 @@ async function startEmbedded() {
 
   hookRenderAll();
   hookImport();
+  hookFinalize();
   installRollBridge();
   installThreatBridge();
   installActionBridge();
