@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.21</h1>
-    <p class="lead">A character built straight onto a token now stays there. That one fault was also why the GM&apos;s Party panel could look empty and why rests never arrived. A finished character can now be edited from inside Owlbear too, so Growth granted at the table can actually be spent.</p>
+    <h1>Version v.1.22</h1>
+    <p class="lead">A security release. The GM&apos;s table controls are now actually the GM&apos;s: until this version the check that a rest or a cleared log came from the GM ran only in the sender&apos;s own window, which is no check at all. The extension also no longer loads code from a third party while you play.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -339,7 +339,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.21 needs extension 0.9.0; the install link is unchanged, so nobody needs to reinstall.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.22 needs extension 0.9.1; the install link is unchanged, so nobody needs to reinstall.</div>
   </section>
 
   <section class="panel">
@@ -350,6 +350,24 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.22</span>
+          <span class="version-title">The GM&apos;s controls are the GM&apos;s, and no third-party code at the table</span>
+        </summary>
+        <ul>
+        <li>Rests, scene boundaries and clearing the shared log are now checked against who actually sent them. Before this, the check that you were the GM ran only inside your own window, so anyone at the table with a browser console could call a Bed rest on every character, wipe the Rolls and Actions log, or move Threat. Nothing was wrong with the buttons; there was simply nothing behind them.</li>
+        <li>Nobody needs to have done this for it to have mattered. A forced rest reaches every attached character, including players who are not online, and there is no undo.</li>
+        <li>Momentum is unchanged and stays open to everyone. It is the group&apos;s pool.</li>
+        <li>The extension no longer downloads the Owlbear toolkit from a third-party site each time you open a room. It ships with the extension instead, the way the character creator has done since v1.14. Anything that site served would have run with full access to every character at the table.</li>
+        <li>Entries in the shared log are now bounded before they are stored. An oversized one could previously exceed the room&apos;s storage limit, which is shared with every other extension you have installed, or freeze everyone&apos;s browser as it drew.</li>
+        <li>A character code that has been tampered with can no longer alter how the sheet handles the character object it builds.</li>
+        <li>Requires extension 0.9.1. The install link is unchanged, so no reinstall is needed &mdash; but everyone should reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.21</span>
           <span class="version-title">Characters stay on their tokens, and a sheet in play can be edited</span>

@@ -2,6 +2,247 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.22 / 0.9.1 — Security sweep
+
+Creator **v1.22**, extension **0.9.1**. Both repos change. Deploy the extension first.
+
+A deliberate sweep rather than a response to an incident. Nothing here was observed
+being exploited; the table is five people who know each other. It is written up as if
+that were not the case, because the code cannot tell the difference.
+
+---
+
+## The one that mattered: forged GM events
+
+**Any player at the table could call a rest on every character, wipe the shared log,
+or move Threat.** Not by defeating a check — by making the request the ordinary way.
+
+`pushEpoch()`, `clearLog()` and `stepPool()` each open with a role test:
+
+```js
+if (role !== "GM" || !EPOCH_KEYS.includes(boundary)) return;
+```
+
+Every one of those runs **in the sender's own tab**. `OBR.broadcast` is open to every
+client in the room by design — that is the whole reason the broadcast-then-persist
+shape exists, so a player can announce a roll without write permission on room
+metadata. A player therefore never has to defeat the check; they call
+`OBR.broadcast.sendMessage` from the console and skip the function holding it.
+
+The receiving end was:
+
+```js
+OBR.broadcast.onMessage(CHANNEL, (event) => persist(event.data));
+```
+
+`persist()` hands straight to `applyEvent()`, which applied `epoch`, `clear` and
+`pool` without asking who sent them. The GM's background page is the only writer of
+room metadata, so it was the only place a real check could ever have lived, and it
+did not have one.
+
+### Why this is worse than the README's "convenience, not a boundary"
+
+That line was written for **0.6.0**, when the privileged actions were the Hidden
+toggle, Clear, and Threat, and it was a fair call: "nothing in a roll log is worth
+cheating over." Epochs arrived in **0.8.0** and are a different kind of thing.
+
+A forged `bed`:
+
+- reaches **every attached character**, not the sender's own,
+- applies to players **who are not online**, because catch-up is lazy by design,
+- resets scene flags, refreshes abilities and restores Spirit, and
+- **has no undo.** The counter is monotonic; there is no decrement.
+
+A forged `clear` destroys the shared log permanently — it is the record of the
+session, and it is gone from room metadata.
+
+Neither needs malice. A well-meant script, a shared browser profile, or a future
+sender with a bug does the same thing.
+
+### The fix
+
+`background.js` verifies the sender:
+
+```js
+const GM_ONLY_TYPES = new Set(["epoch", "clear"]);
+// plus pool events where pool === "threat"
+```
+
+against a set of GM **connection ids** — a broadcast identifies its sender by
+connection, not by player id. The set is `OBR.party.getPlayers()` filtered to
+`role === "GM"`, plus `OBR.player.getConnectionId()` for this client, because
+`getPlayers()` lists everyone *else* and this page only relays while it is the GM.
+`OBR.party.onChange` refreshes it.
+
+Three details that are deliberate:
+
+- **Populated before subscribing.** An empty set refuses everything privileged, which
+  is the safe direction, but it would also refuse the GM. `setRelay()` is now `async`
+  and awaits the first refresh.
+- **A failed party read keeps the previous set** rather than clearing it. Clearing on
+  a transient failure would refuse the GM's own controls until the next party change,
+  which at the table reads as the buttons having broken.
+- **The sender-side checks stay.** They stop accidents, which is worth having. They
+  are simply not the control.
+
+Momentum stays open to everyone. It is the group's pool and always was.
+
+**Not verified in the harness.** `OBR.broadcast` has no jsdom stand-in, so the check
+itself needs a live room. See the live checks below.
+
+---
+
+## Unvalidated event payloads
+
+`applyEvent()` took whatever arrived and put it in the log. Every sender clamps
+(`who` 24, `label` 48, `detail` 80) and none of that was worth anything, for the same
+reason as above: the clamp runs in a tab the sender controls.
+
+Two consequences, neither needing malice — a future sender with a bug reaches both:
+
+1. **`trimState()` stops at one entry.** It drops log entries until the state fits,
+   `while (next.log.length > 1 && ...)`. A single entry larger than the budget
+   survives, and the write exceeds the room's **16 kB, which is shared with every
+   other extension installed in that room**, not just this one.
+2. **`renderRollEntry()` builds one DOM node per die.** An entry claiming a hundred
+   thousand dice freezes every client rendering the log, the GM's included.
+
+`sanitizeEntry()` now normalises every entry inside the reducer — the one function
+both sides run — rather than at each call site. A sender that forgets to clamp is
+harmless, and so is one that never meant to. Pools are bounded per event as well: an
+unbounded delta sets a pool to `Number.MAX_SAFE_INTEGER` and every later sum on it is
+meaningless until the room is rebuilt.
+
+Entries already in live rooms were written by clamped senders, so this is idempotent
+on them and nothing in an existing log changes shape. Asserted.
+
+---
+
+## The SDK came from a third party at runtime
+
+```js
+import OBR from "https://esm.sh/@owlbear-rodeo/sdk@3.1.0";
+```
+
+in both `background.js` and `roller.js`. Whatever esm.sh returned ran in the room with
+full access to the SDK: every character code on every token, room metadata, and the
+GM's writes. **An ES module import cannot carry an SRI hash**, so there was no way to
+pin it — the URL names a version and the server decides what that version means.
+
+The creator solved this for itself in **v1.14** by bundling the SDK inline. The
+extension did not follow, and there is no reason for the two halves to disagree about
+whether a third party is inside the trust boundary.
+
+`sdk.js` is now vendored in the repo. It is the same bundle the creator carries,
+differing only in its last line: the creator's inline copy ends `const OBR = Zo;`
+because an inline module cannot import from itself, and this one is a real module so
+it ends `export default Zo;`.
+
+This keeps the project's no-build-step rule. The file is committed, not built.
+
+**Smoke-tested in Chromium**, not just parsed: the popover was served over HTTP and
+loaded, and the vendored module resolved and evaluated, exposing all seven surfaces
+the extension calls (`room`, `player`, `party`, `broadcast`, `scene`, `contextMenu`,
+`modal`). The roller reached its standalone state, and the only off-origin request
+left in the page is Google Fonts, which is unrelated and pre-existing.
+
+---
+
+## Character codes and prototypes
+
+`parseCharacterCode()` does `Object.assign(c, getDefaultCharacter(), payload)` with a
+`JSON.parse`d payload. `JSON.parse` produces `__proto__` as an ordinary **own**
+property, and `Object.assign` copies with `Set` semantics, which invokes the prototype
+setter rather than defining a property. A crafted code could therefore choose the
+character object's prototype.
+
+**Stated honestly: `Object.assign` is shallow, so this cannot reach
+`Object.prototype`.** It is containment, not a live exploit, and it is fixed because a
+code is untrusted input — pasted from a chat window, or read off a token any player
+can write to — and there is no reading under which it should pick an object's
+prototype. `stripUnsafeKeys()` drops `__proto__`, `constructor` and `prototype`.
+
+---
+
+## Swept and found clean
+
+Recorded so the next sweep does not redo it:
+
+- **XSS in the creator.** `escHtml()` is correct and is applied at every site where
+  character-controlled text reaches markup — names, bonds, truths, injuries, custom
+  items, knowledge fragments. Verified rather than assumed.
+- **XSS in the extension.** Every `innerHTML` in `roller.js` is `= ""`. All content is
+  `createElement` plus `textContent`, including the log, the banner and the party
+  panel.
+- **`sanitizeImageUrl()`** rejects `javascript:` and `data:`, and the portrait renders
+  with `referrerpolicy="no-referrer"`. A portrait URL is still an outbound request to
+  a host the code's author chose, which leaks that a sheet was opened; that is
+  inherent to remote images and is accepted.
+- **No `eval`, no `new Function`, no string `setTimeout`** anywhere in either repo.
+- **The role default is `"PLAYER"`**, not `"GM"`. `startStandalone()` sets `"GM"`
+  deliberately, and guards the party panel with `standalone`. A slow role fetch in a
+  real room cannot flash GM controls at a player.
+- **Token metadata** holds only the DM1 code. The extension never interprets it beyond
+  the read the party panel needs.
+
+### Known and accepted
+
+- **Hidden rolls** stay out of room metadata entirely and live only in the GM's open
+  panel. Unchanged, and still the right trade.
+- **Momentum is unauthenticated** on purpose.
+- **A player can still forge a roll or an action entry** attributed to any name. The
+  log is a shared record, not evidence, and locking it down would mean authenticating
+  every entry against a connection id — a much larger change for a table of friends.
+  Worth revisiting only if the log ever becomes something decisions rest on.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `sdk.js` (new), `background.js`, `dnm.js`, `manifest.json`
+   (0.9.1). A creator sending sanitised events to an old relay is harmless; a new
+   relay is what enforces the role check.
+2. **`dnm-cc/index.html`**
+3. Docs
+4. **Full room reload, everyone.** The background page is cached per room session, and
+   the relay check lives there.
+
+No reinstall. Schema stays at v2; no metadata migration.
+
+---
+
+## Testing
+
+**147 assertions, all passing** — creator 94, party 14, security 39.
+
+`tests/security.test.mjs` is new and is written from the attacker's side: forged
+events go straight into the reducer and hostile codes straight into the parser, never
+through a sender, because a sender is what an attacker does not use.
+
+It covers oversized fields, the hundred-thousand-dice freeze, the single oversized
+entry that `trimState()` alone could not contain, entries that are not objects,
+unbounded pool deltas, a 500-event flood against the log cap, dedupe surviving
+sanitising, unknown epoch boundaries, a hostile `__proto__` payload, and the escaping
+and URL sanitising that keep hostile text out of the DOM.
+
+One test bug worth recording: the first draft asserted
+`!("__proto__" in s.epochs)`, which passes vacuously — `"__proto__" in obj` is true
+for **every** object, because it is an inherited accessor on `Object.prototype`. It
+now uses `hasOwnProperty` and checks the prototype directly.
+
+**Not verified here.** The relay's role check needs a live room, as noted above.
+
+### Live checks
+
+- As a **player**, open the console in the Owlbear tab and send a forged epoch:
+  `OBR.broadcast.sendMessage("com.thuknights.dnm-obr/events", {type:"bed"}, {destination:"ALL"})`
+  — nothing should move, and the GM's console should log a refusal.
+- As the **GM**, press Bed normally. It must still work. This is the check that would
+  break if the connection-id set were wrong.
+- Promote a player to GM mid-session and confirm their controls start working.
+- Confirm Momentum still moves for players, and Threat still does not.
+- Confirm the roller loads with the network tab showing **no request to esm.sh**.
+
 # v1.21 — Attach persistence, and an editable sheet in play
 
 Creator **v1.21**. `dnm-obr` is unchanged and stays at **0.9.0**.

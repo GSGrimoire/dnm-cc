@@ -2565,7 +2565,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.21';
+const APP_VERSION = '1.22';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -5404,6 +5404,29 @@ function b64decodeSafe(val) {
   return decodeURIComponent(atob(s));
 }
 
+// v1.22. A character code is untrusted input. It arrives pasted from a chat window,
+// or off a token any player at the table can write to, and its CP payload goes
+// through JSON.parse straight into Object.assign.
+//
+// JSON.parse creates `__proto__` as an ordinary OWN property, and Object.assign
+// copies with Set semantics — which invokes the prototype setter rather than
+// defining a property. A code carrying `"__proto__"` therefore chooses the character
+// object's prototype.
+//
+// Being honest about the severity: Object.assign is shallow, so this cannot reach
+// Object.prototype and is containment rather than a live exploit. It is stripped
+// because there is no reading of a character sheet under which the code being pasted
+// should get to pick an object's prototype, and the fix costs one pass over the keys.
+const UNSAFE_PAYLOAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function stripUnsafeKeys(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  for (const key of Object.keys(payload)) {
+    if (UNSAFE_PAYLOAD_KEYS.has(key)) delete payload[key];
+  }
+  return payload;
+}
+
 function parseCharacterCode(code) {
   try {
     const parts = code.split('-');
@@ -5505,7 +5528,7 @@ function parseCharacterCode(code) {
     if (payloadPart) {
       try {
         const val = payloadPart.substring(2);
-        const payload = JSON.parse(b64decodeSafe(val));
+        const payload = stripUnsafeKeys(JSON.parse(b64decodeSafe(val)));
         Object.assign(c, getDefaultCharacter(), payload);
       } catch (e) {
         // Ignore malformed payload and fall back to older fields.
