@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.23</h1>
-    <p class="lead">Fixes from a full test pass at the table. Sentinel characters were invisible to the Party panel, loading a saved character did not attach it to its token, and last version&apos;s security fix went too far and blocked players from paying Threat. The roller is also rearranged, resizable, and finally themed to match.</p>
+    <h1>Version v.1.24</h1>
+    <p class="lead">The GM can now see a player&apos;s hidden roll &mdash; the GM should know everything, and until now they did not. The character sheet also loses three pieces of furniture it did not need: the Finalized tag, the &quot;Character&quot; heading, and the wall of share code nobody reads.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -339,7 +339,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.23 needs extension 0.9.3; the install link is unchanged, so nobody needs to reinstall.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.24 needs extension 0.9.4; the install link is unchanged, so nobody needs to reinstall.</div>
   </section>
 
   <section class="panel">
@@ -350,6 +350,25 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.24</span>
+          <span class="version-title">The GM sees hidden rolls, and the sheet loses three things it did not need</span>
+        </summary>
+        <ul>
+        <li><strong>A player&apos;s Hidden roll is now visible to the GM.</strong> It is hidden from the other players, not from the GM &mdash; which is how it should have worked from the start. Everyone else still sees only that a roll was made, and the label you typed if you gave one.</li>
+        <li>Worth knowing, and we would rather say it plainly: <em>Hidden</em> conceals a result from other players&apos; screens, not from a player who goes looking in their browser&apos;s developer tools. Owlbear gives extensions no private channel, so a roll that reaches the GM reaches everyone&apos;s browser. <strong>If a result must be unreachable, use Secret</strong> &mdash; that one is never sent anywhere.</li>
+        <li>The mode note under the Roll button now says so, rather than implying the result stays with you.</li>
+        <li>Removed the <em>Finalized</em> tag from a finished character. It labelled a state you can see at a glance.</li>
+        <li>Removed the <em>Character</em> heading and the rule beneath it from the first block of the sheet. Naming that block &quot;Character&quot; on a character sheet said nothing. Every other block keeps its heading.</li>
+        <li>The <em>Share Code</em> section is now just <em>Copy Code</em>, <em>Save Local</em>, the character count and the copied confirmation. The code itself is no longer printed on the page &mdash; nobody read 13&nbsp;kB of it, and showing it cost a fold-out panel and two more rules.</li>
+        <li>Copying still works the same way, and now tells you if your browser blocks it instead of looking like it worked.</li>
+        <li>Requires extension 0.9.4. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">ext 0.9.3</span>
           <span class="version-title">Drag the panel to resize it, and three kinds of roll</span>

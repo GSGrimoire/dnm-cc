@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.23", g("APP_VERSION") === "1.23");
+ok("APP_VERSION is 1.24", g("APP_VERSION") === "1.24");
 
 // -------------------------------------------------------------
 // Fixture
@@ -251,13 +251,28 @@ const reset = () => g("window.__cap.length = 0;");
   const blocks = [...frag.querySelectorAll(".sheet-block")];
   ok("exactly five top-level blocks", blocks.length === 5);
 
+  // v1.24: the first block is deliberately untitled. Labelling it "Character" on a
+  // character sheet said nothing, and the rule under the heading went with it.
   const titles = blocks.map((b) => b.querySelector(".sheet-block-title")?.textContent.trim());
   ok("blocks are in the specified order",
-    JSON.stringify(titles) === JSON.stringify(["Character", "Actions, Talents & Abilities", "Items and Equipment", "Growth", "Share Code"]));
+    JSON.stringify(titles) === JSON.stringify([undefined, "Actions, Talents & Abilities", "Items and Equipment", "Growth", "Share Code"]));
+  ok("the first block carries no title element and no rule under one",
+    !blocks[0].querySelector(".sheet-block-title") && blocks[0].classList.contains("is-untitled"));
+  ok("every other block still names itself",
+    blocks.slice(1).every((b) => !!b.querySelector(".sheet-block-title")));
 
-  const shareBlock = blocks[4] && blocks[4].querySelector("#shareCodeBlock");
-  ok("Share Code is its own block", !!shareBlock);
-  ok("Share Code is not nested inside another sheet-section", !!shareBlock && !shareBlock.closest(".sheet-section"));
+  // v1.24: the Share Code block is the two buttons, the size and the copy message.
+  // The code itself is no longer rendered — nobody read 13 kB of base64, and showing
+  // it cost a disclosure widget and two rules to frame something never looked at.
+  const share = blocks[4];
+  ok("Share Code offers Copy Code and Save Local",
+    /Copy Code/.test(share.textContent) && /Save Local/.test(share.textContent));
+  ok("Share Code still reports the length", /[\d,]+ characters/.test(share.textContent));
+  ok("Share Code keeps a slot for the copied message", !!share.querySelector("#copyMsg"));
+  ok("the character code itself is no longer in the DOM",
+    !share.querySelector("#charCode") && !sheet.includes('id="charCode"'));
+  ok("the code disclosure is gone with it",
+    !share.querySelector("details") && !sheet.includes('id="shareCodeBlock"'));
 
   ok("the dice roller sits in the first block, under the numbers it rolls",
     !!blocks[0].querySelector("#diceAttr, .dice-panel"));
@@ -278,6 +293,9 @@ const reset = () => g("window.__cap.length = 0;");
   for (const marker of ["Attributes", "Skills", "Resources", "Exhaustion", "Truths", "Injuries", "Bonds", "Growth"]) {
     ok(`${marker} survives the regrouping`, sheet.includes(marker));
   }
+  ok("a finalized character shows no Finalized badge",
+    !sheet.includes("finalized-badge") && !/>\s*Finalized\s*</.test(sheet));
+
   ok("the sheet still carries its full set of sections",
     frag.querySelectorAll(".sheet-section").length >= 8);
 }

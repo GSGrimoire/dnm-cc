@@ -2,6 +2,149 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.24 / 0.9.4 — The GM reads hidden rolls; three things off the sheet
+
+Creator **v1.24**, extension **0.9.4**. Both change. Deploy the extension first.
+
+A number on both halves: everything here was deliberate, so nothing takes a letter.
+
+---
+
+## The GM must see a player's hidden roll
+
+Reported plainly: *"The GM should know everything. A player rolling a hidden roll only
+hides it from the other players — not from the GM."* Correct, and 0.9.3 had it wrong.
+
+### Why 0.9.3 could not do it
+
+0.9.3 broadcast a redacted **placeholder** and kept the real result in the roller's own
+browser. That made the result genuinely unreadable by anyone else — including the GM,
+who is the one person who has to read it.
+
+There is no way to have both, and it is worth writing down why rather than
+rediscovering it. **Owlbear has no private channel.**
+
+- `OBR.broadcast.sendMessage` takes `destination: "ALL" | "REMOTE" | "LOCAL"`. There is
+  no per-player target.
+- Every storage surface it offers — room metadata, player metadata, item metadata — is
+  readable by every client in the room.
+
+So a result that reaches the GM reaches every browser at the table. The only question
+is what each client *draws*.
+
+### What shipped
+
+The full entry is broadcast, tagged `conceal: "hidden"` and `by: <playerId>`, and
+**redacted at render**. `canRevealConcealed(entry, viewer)` in `dnm.js` decides:
+
+| Viewer | Sees |
+|---|---|
+| GM | everything |
+| the roller | their own roll |
+| another player | that a roll happened, plus the typed label |
+
+**Be honest about the guarantee.** Hidden now conceals a result from other players'
+*screens*, not from a player who opens devtools. That is a real reduction from 0.9.3,
+and it is the price of the GM being able to read it. Say so in the interface rather
+than letting someone find out later — the mode hint now reads "The GM sees the result",
+and the changelog states the limitation outright.
+
+**Secret is untouched and is now the only absolute mode**: never broadcast, never in
+room metadata, GM only. It exists precisely for the case Hidden no longer covers, which
+is why it was not folded into Hidden when it looked redundant.
+
+### Implementation notes
+
+- The hidden roll is **not** kept in the private log. It returns through room metadata
+  like any other roll, and keeping a local copy too would render it twice.
+- `sanitizeEntry()` carries `conceal` and `by` through the reducer. Stripping them
+  would turn a concealed roll into an ordinary one the moment it round-tripped — the
+  worst available failure for this feature — so both are asserted. `conceal` is
+  constrained to the two known values rather than copied, because an arbitrary string
+  falls through `canRevealConcealed()` as "not concealed".
+- `by` is length-clamped like any other untrusted string.
+
+`concealedPlaceholder()` and its twelve leak assertions are gone with the design they
+served. The replacement assertions cover the visibility rule instead, including that
+concealment survives the reducer.
+
+---
+
+## Sheet furniture removed
+
+Three requests, all the same shape: things drawn on the sheet that told the reader
+nothing.
+
+**The Finalized badge.** It labelled a state visible at a glance from the sheet being a
+sheet.
+
+**The "Character" heading**, and the rule under it. `block()` now takes `null` for a
+title and renders `.sheet-block.is-untitled`; the rule belonged to the heading and went
+with it, so only the padding it reserved had to be taken back. Every other block still
+names itself, because those group genuinely different things.
+
+**The share code itself.** The section is now Copy Code, Save Local, the character
+count and the copied message. Nobody read 13 kB of base64 — they copy it or save it —
+and rendering it cost a disclosure widget, a scroller and two rules to frame something
+never looked at.
+
+That removal had three dependents, which is the interesting part:
+
+- `copyCode()` read `#charCode.textContent`. It now calls `buildCharacterCode()`, which
+  is the better source anyway: an element is only ever as fresh as the last render.
+- `printSheet()` forced the disclosure open so the code reached the PDF, then restored
+  it. Both halves are gone; a printed sheet is for the table, not for re-importing.
+- The module block's clipboard fallback selected the on-page code when the async
+  clipboard API was refused. It now copies from a detached textarea via
+  `execCommand("copy")` — deprecated, but still the only thing that works where the
+  async API is refused, and it needs a real focused selection.
+
+`copyCode()` also reports a blocked copy now instead of failing silently, since the
+visible code that used to serve as the fallback is no longer there.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `dnm.js`, `roller.js`, `manifest.json` (0.9.4).
+2. **`dnm-cc/index.html`**
+3. Docs
+4. **Full room reload, everyone.**
+
+No reinstall. Schema stays at v2.
+
+---
+
+## Testing
+
+**177 assertions, all passing** — creator 103, party 23, security 51.
+
+The layout assertions were **updated rather than deleted**, which matters: three of
+them failed on the first run because they encoded the old sheet, and a failing test
+that describes deliberately removed behaviour should be rewritten to describe the new
+intent, not dropped. They now assert the first block is untitled, that every other
+block still names itself, that no Finalized badge survives, and that the share section
+holds the buttons and the count but no `#charCode` and no disclosure.
+
+Verified in Chromium: all three modes render, the Hidden status names the GM, a Secret
+roll still lands in the private log alone, and the resize grip is intact.
+
+**Not verified here.** Anything needing two clients: that the GM actually reads a
+player's hidden roll, that another player sees only the redacted row, and that Secret
+is unavailable to a player.
+
+### Live checks
+
+- As a **player**, roll Hidden. **As the GM, confirm you see the dice and the result.**
+- As a **second player**, confirm you see only "Hidden roll" with their name.
+- As the **GM**, roll Secret and confirm nothing appears for anyone else.
+- Confirm a player is not offered Secret at all.
+- On the sheet: no Finalized tag, no "Character" heading or rule above the identity
+  band, and a Share Code section with two buttons, a count, and no code.
+- Press Copy Code and confirm the confirmation appears and the code pastes correctly.
+
+
+
 # 0.9.3 — A real resizer, and three kinds of roll
 
 Extension **0.9.3**. The creator is unchanged and stays at **v1.23**.

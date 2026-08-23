@@ -1537,6 +1537,12 @@ body::after {
    immediately under the block title. */
 .sheet-block > .sheet-section:first-of-type { border-top: none !important; padding-top: 8px !important; }
 
+/* v1.24: a block with no title. The rule under the heading went with the heading —
+   both belonged to a label ("Character") that a character sheet does not need — so
+   only the padding it reserved has to be taken back. */
+.sheet-block.is-untitled { padding-top: 14px; }
+.sheet-block.is-untitled > .sheet-section:first-of-type { padding-top: 0 !important; }
+
 @media print {
   .sheet-block { background: none; border: none; padding: 0; margin-bottom: 12px; page-break-inside: auto; }
   .sheet-block-title { color: #000; border-bottom: 1px solid #999; }
@@ -1545,33 +1551,8 @@ body.print-light .sheet-block { background: none; border-color: #ccc; }
 body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
 
 /* --- Collapsible code on sheet (#7) --- */
-.code-collapse { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
-.code-collapse summary {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--teal-dim);
-  cursor: pointer;
-  list-style: none;
-  display: flex; align-items: center; gap: 8px;
-}
-.code-collapse summary::-webkit-details-marker { display: none; }
-.code-collapse summary::before { content: '▸'; color: var(--teal); transition: transform 0.2s; }
-.code-collapse[open] summary::before { transform: rotate(90deg); }
-.code-collapse .code-string {
-  margin-top: 10px; font-size: 0.78rem; word-break: break-all; line-height: 1.7;
-}
-
-@media (max-width: 600px) {
-  .dice-controls { grid-template-columns: 1fr 1fr; }
-}
-
-/* Print: keep dice roller / catalogue UI off the PDF; show code expanded */
-@media print {
-  .dice-panel, .catalogue-block, .cat-add-btn, .owned-qty button { display: none !important; }
-  .code-collapse[open] .code-string, .code-collapse .code-string { display: block !important; }
-  .code-collapse summary { color: #555 !important; }
+/* v1.24: the .code-collapse disclosure was removed with the on-page character
+   code. Its styles went with it. */
 }
 
 
@@ -2565,7 +2546,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.23';
+const APP_VERSION = '1.24';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -7576,7 +7557,7 @@ function renderSummaryStep() {
 
   // Action buttons
   html += `<div class="finalized-toolbar no-print">
-    ${c.finalized ? '<span class="finalized-badge">Finalized</span>' : '<button class="btn btn-primary" onclick="finalizeCharacter()">Finalize Character</button>'}
+    ${c.finalized ? '' : '<button class="btn btn-primary" onclick="finalizeCharacter()">Finalize Character</button>'}
     <button class="btn btn-secondary" onclick="printSheet()">Download Dark PDF</button>
     <button class="btn btn-secondary" onclick="printSheet(true)">Download Light PDF</button>
     <button class="btn btn-secondary" onclick="editCharacter()">Edit Character</button>
@@ -7612,15 +7593,22 @@ function renderSummaryStep() {
   // neighbours rather than moving it.
   // ============================================================
 
+  // v1.24: `title` may be null for a block that carries no header. The first block is
+  // the character themself — name, portrait, stats, dice — and labelling it "Character"
+  // on a character sheet says nothing the reader did not already know, while the rule
+  // beneath it drew a line under a heading that was not earning its space. Every other
+  // block still names what it is, because those genuinely group different things.
   const block = (title, body) =>
-    `<div class="sheet-block"><div class="sheet-block-title">${title}</div>${body}</div>`;
+    title
+      ? `<div class="sheet-block"><div class="sheet-block-title">${title}</div>${body}</div>`
+      : `<div class="sheet-block is-untitled">${body}</div>`;
 
   // ---- Block 1: identity through the roller ----
   // Everything you consult before and during a roll, ending with the roller itself.
   // v1.14 promoted the dice panel here so that clicking an Attribute or Skill does
   // not scroll the roll controls off the screen; that adjacency is what defines the
   // block's lower edge.
-  html += block('Character', [
+  html += block(null, [
     renderSheetIdentityBand(c, stats, originData, archetypeData, temperamentData, sheetPortrait),
     renderSheetBondsTemperamentRow(c, temperamentData),
     renderSheetExhaustionSection(c),
@@ -7661,17 +7649,21 @@ function renderFinalizedCharacterView() {
 // it or save it — so making them scroll past 13 kB of base64 to reach the buttons had
 // the priority backwards. The code is still here for anyone who wants to inspect it,
 // now in a fixed-height scroller rather than an unbounded wall of text.
+// v1.24: the code itself is no longer displayed. Nobody reads 13 kB of base64 — they
+// copy it or save it — and showing it cost a disclosure widget, a scroller and two
+// rules to frame something never looked at. What is left is what the section was
+// always for: get the code out, and confirm it happened.
+//
+// The code is no longer in the DOM, so anything that needs it now calls
+// buildCharacterCode() rather than reading an element. That is the more honest source
+// anyway: the element could only ever be as fresh as the last render.
 function renderShareCodeSection(code) {
-  return `<details class="code-collapse" id="shareCodeBlock">
-    <summary>Show the code</summary>
-    <div class="share-actions no-print">
-      <button class="btn btn-secondary" onclick="copyCode()">Copy Code</button>
-      <button class="btn btn-secondary" onclick="saveCharacterLocal(false)">Save Local</button>
-      <span class="share-size">${code.length.toLocaleString()} characters</span>
-    </div>
-    <div class="validation-msg no-print" id="copyMsg" style="color:var(--teal);"></div>
-    <div class="code-string code-scroll" id="charCode">${code}</div>
-  </details>`;
+  return `<div class="share-actions no-print">
+    <button class="btn btn-secondary" onclick="copyCode()">Copy Code</button>
+    <button class="btn btn-secondary" onclick="saveCharacterLocal(false)">Save Local</button>
+    <span class="share-size">${code.length.toLocaleString()} characters</span>
+    <span class="validation-msg" id="copyMsg" style="color:var(--teal);"></span>
+  </div>`;
 }
 
 // v1.21: the block carries its own way in. Growth is the one part of a finished
@@ -8439,27 +8431,35 @@ function doRoll() {
 function postRoll(from, res) {}
 
 function copyCode() {
-  const code = document.getElementById('charCode').textContent;
+  // Built rather than read: since v1.24 the code is not on the page, and building it
+  // is current by definition where an element is only as fresh as the last render.
+  const code = buildCharacterCode();
   navigator.clipboard.writeText(code).then(() => {
     const msg = document.getElementById('copyMsg');
-    msg.textContent = '✓ Code copied to clipboard!';
-    setTimeout(() => { msg.textContent = ''; }, 3000);
+    if (msg) {
+      msg.textContent = '✓ Code copied to clipboard!';
+      setTimeout(() => { msg.textContent = ''; }, 3000);
+    }
+  }).catch(() => {
+    // Clipboard writes are refused in some framed contexts. Say so rather than
+    // leaving the button looking like it worked.
+    const msg = document.getElementById('copyMsg');
+    if (msg) {
+      msg.textContent = '⚠ Copy was blocked by the browser.';
+      setTimeout(() => { msg.textContent = ''; }, 4000);
+    }
   });
 }
 
 function printSheet(lightBackground = false) {
   document.body.classList.toggle('print-light', lightBackground);
-  // Force the collapsible share code open so it appears on the PDF (#7),
-  // then restore its previous state afterwards.
-  const codeDetails = document.querySelector('.code-collapse');
-  const wasOpen = codeDetails ? codeDetails.open : null;
-  if (codeDetails) codeDetails.open = true;
+  // v1.24: this used to force the collapsible share code open so the base64 landed on
+  // the PDF, then restore it afterwards. The code is no longer rendered at all, and a
+  // printed sheet is for the table rather than for re-importing, so there is nothing
+  // to open and nothing to put back.
   setTimeout(() => {
     window.print();
-    setTimeout(() => {
-      document.body.classList.remove('print-light');
-      if (codeDetails && wasOpen === false) codeDetails.open = false;
-    }, 100);
+    setTimeout(() => document.body.classList.remove('print-light'), 100);
   }, 50);
 }
 
@@ -8943,20 +8943,33 @@ async function copyCodeToClipboard() {
     setSaveState("code copied");
     setTimeout(() => setSaveState("saved"), 2000);
   } catch (err) {
-    // Clipboard writes can be refused inside an iframe. Fall back to opening the
-    // share code block and selecting it, so the player can copy it by hand.
-    const block = document.getElementById("shareCodeBlock");
-    const field = document.getElementById("charCode");
-    if (block) block.open = true;
-    if (field) {
-      field.scrollIntoView({ behavior: "smooth", block: "center" });
-      const range = document.createRange();
-      range.selectNodeContents(field);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+    // Clipboard writes can be refused inside an iframe. The fallback used to open the
+    // share-code block and select the text so it could be copied by hand; since v1.24
+    // the code is not on the page, so there is nothing to select.
+    //
+    // A hidden textarea is used instead of re-rendering the code into the sheet:
+    // execCommand('copy') is deprecated but still the only thing that works where the
+    // async clipboard API is refused, and it needs a real focused selection.
+    let copied = false;
+    try {
+      const scratch = document.createElement("textarea");
+      scratch.value = code;
+      scratch.setAttribute("readonly", "readonly");
+      scratch.style.cssText = "position:fixed;top:0;left:-9999px;opacity:0;";
+      document.body.append(scratch);
+      scratch.select();
+      copied = document.execCommand("copy");
+      scratch.remove();
+    } catch (fallbackErr) {
+      copied = false;
     }
-    setSaveState("copy blocked — code selected below", "dirty");
+    if (copied) {
+      setSaveState("code copied");
+      setTimeout(() => setSaveState("saved"), 2000);
+    } else {
+      setSaveState("copy blocked by the browser", "failed");
+      setTimeout(() => setSaveState("saved"), 4000);
+    }
   }
 }
 

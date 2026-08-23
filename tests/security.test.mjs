@@ -14,7 +14,7 @@ import fs from "fs";
 import { JSDOM } from "jsdom";
 import {
   applyEvent, trimState, sanitizeEntry, EMPTY_STATE,
-  MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS, concealedPlaceholder,
+  MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS, canRevealConcealed,
 } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
@@ -213,43 +213,57 @@ const rollEv = (entry) => ({ type: "roll", entry });
 }
 
 // -------------------------------------------------------------
-// A hidden roll must not leak its result (0.9.3)
+// Who may read a concealed roll (0.9.4)
 // -------------------------------------------------------------
-// This is the assertion the whole feature rests on. The placeholder goes to every
-// client in the room and into room metadata, where anyone can read it out of
-// devtools, so anything it carries is public.
+// 0.9.3 sent a redacted placeholder, which was genuinely unreadable and also meant the
+// GM could not see a player's hidden roll. 0.9.4 sends the whole roll and redacts at
+// render, because Owlbear has no private channel to send a result down.
+//
+// Be clear about what these assert: they cover who the interface DRAWS a result for.
+// A hidden roll is on the wire and in room metadata, so a player with devtools can
+// read one. Secret is the mode that is actually unreachable, and the tests below pin
+// the difference so nobody later "simplifies" the two into one.
 {
-  const roll = {
-    id: "h1", t: 1700000000000, who: "The GM", label: "Spotting the ambush",
-    an: "Insight", av: 11, sn: "Study", sv: 3,
-    detail: [{ d: 2, kind: "crit" }, { d: 19, kind: "fail" }],
-    diff: 2, succ: 2, comp: 0, pass: true, gain: 0,
-  };
-  const ph = concealedPlaceholder(roll);
-  const text = JSON.stringify(ph);
+  const gm = { role: "GM", playerId: "gm-1" };
+  const mine = { role: "PLAYER", playerId: "p-1" };
+  const theirs = { role: "PLAYER", playerId: "p-2" };
+  const hidden = { id: "h1", who: "Kell", conceal: "hidden", by: "p-1", detail: [] };
 
-  ok("the placeholder says who rolled", ph.who === "The GM");
-  ok("the placeholder is an action, not a roll", ph.kind === "action");
-  ok("the placeholder carries the typed label", ph.detail === "Spotting the ambush");
-  ok("an unlabelled roll still says something",
-    concealedPlaceholder({ ...roll, label: "" }).detail === "result not shared");
-  ok("its id derives from the roll so it dedupes", ph.id === "h1-c");
+  ok("an ordinary roll is readable by anyone",
+    canRevealConcealed({ id: "r1", detail: [] }, theirs) === true);
 
-  // The leak checks. Allow-list, so these hold for fields added later too.
-  for (const field of ["detail", "an", "av", "sn", "sv", "diff", "succ", "comp", "pass", "gain"]) {
-    if (field === "detail") continue; // present, but as the label — asserted above
-    ok(`the placeholder omits ${field}`, !(field in ph));
-  }
-  ok("no dice value appears anywhere in the placeholder",
-    !text.includes('"d":2') && !text.includes('"d":19'));
-  ok("the verdict does not appear", !text.includes("true") && !text.includes("pass"));
-  ok("the placeholder has only the six expected keys",
-    Object.keys(ph).sort().join(",") === "detail,id,kind,label,t,who");
+  ok("the GM reads a player's hidden roll — the point of the change",
+    canRevealConcealed(hidden, gm) === true);
+  ok("the roller reads their own hidden roll",
+    canRevealConcealed(hidden, mine) === true);
+  ok("another player does not",
+    canRevealConcealed(hidden, theirs) === false);
+  ok("a viewer with no id does not",
+    canRevealConcealed(hidden, { role: "PLAYER" }) === false);
+  ok("a missing viewer does not throw and reveals nothing",
+    canRevealConcealed(hidden, undefined) === false);
 
-  // And it must survive the reducer without gaining anything.
-  const logged = applyEvent(structuredClone(EMPTY_STATE), { type: "action", entry: ph }).log[0];
-  ok("through the reducer it is still an action with no dice",
-    logged.kind === "action" && !("succ" in logged) && !Array.isArray(logged.detail));
+  // A secret roll only ever exists in its own browser, so whoever holds one may draw
+  // it. The protection is that it was never sent, not that it is filtered on arrival.
+  ok("a secret roll is drawn by whoever holds it",
+    canRevealConcealed({ id: "s1", conceal: "secret", detail: [] }, mine) === true);
+
+  // An unknown conceal value must not become a silent reveal-to-all... it is coerced
+  // away by the reducer, which is the assertion below.
+  ok("an unrecognised conceal value is dropped by the reducer",
+    applyEvent(fresh(), rollEv({ id: "u1", who: "A", detail: [], conceal: "sort-of" }))
+      .log[0].conceal === null);
+
+  // Concealment has to survive the round trip through room metadata, or a hidden roll
+  // becomes an ordinary one the moment it comes back from the GM.
+  const through = applyEvent(fresh(), rollEv(hidden)).log[0];
+  ok("conceal survives the reducer", through.conceal === "hidden");
+  ok("the roller's id survives the reducer", through.by === "p-1");
+  ok("and it is still hidden from another player after the round trip",
+    canRevealConcealed(through, theirs) === false);
+  ok("`by` is length-clamped like any other untrusted string",
+    applyEvent(fresh(), rollEv({ id: "b1", who: "A", detail: [], conceal: "hidden", by: "x".repeat(500) }))
+      .log[0].by.length === FIELD_LIMITS.id);
 }
 
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);
