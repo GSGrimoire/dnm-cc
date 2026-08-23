@@ -14,7 +14,7 @@ import fs from "fs";
 import { JSDOM } from "jsdom";
 import {
   applyEvent, trimState, sanitizeEntry, EMPTY_STATE,
-  MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS,
+  MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS, concealedPlaceholder,
 } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
@@ -210,6 +210,46 @@ const rollEv = (entry) => ({ type: "roll", entry });
     g(`sanitizeImageUrl('data:text/html,<script>alert(1)<\\/script>')`) === "");
   ok("an ordinary https portrait URL is kept",
     g(`sanitizeImageUrl('https://example.com/a.png')`) === "https://example.com/a.png");
+}
+
+// -------------------------------------------------------------
+// A hidden roll must not leak its result (0.9.3)
+// -------------------------------------------------------------
+// This is the assertion the whole feature rests on. The placeholder goes to every
+// client in the room and into room metadata, where anyone can read it out of
+// devtools, so anything it carries is public.
+{
+  const roll = {
+    id: "h1", t: 1700000000000, who: "The GM", label: "Spotting the ambush",
+    an: "Insight", av: 11, sn: "Study", sv: 3,
+    detail: [{ d: 2, kind: "crit" }, { d: 19, kind: "fail" }],
+    diff: 2, succ: 2, comp: 0, pass: true, gain: 0,
+  };
+  const ph = concealedPlaceholder(roll);
+  const text = JSON.stringify(ph);
+
+  ok("the placeholder says who rolled", ph.who === "The GM");
+  ok("the placeholder is an action, not a roll", ph.kind === "action");
+  ok("the placeholder carries the typed label", ph.detail === "Spotting the ambush");
+  ok("an unlabelled roll still says something",
+    concealedPlaceholder({ ...roll, label: "" }).detail === "result not shared");
+  ok("its id derives from the roll so it dedupes", ph.id === "h1-c");
+
+  // The leak checks. Allow-list, so these hold for fields added later too.
+  for (const field of ["detail", "an", "av", "sn", "sv", "diff", "succ", "comp", "pass", "gain"]) {
+    if (field === "detail") continue; // present, but as the label — asserted above
+    ok(`the placeholder omits ${field}`, !(field in ph));
+  }
+  ok("no dice value appears anywhere in the placeholder",
+    !text.includes('"d":2') && !text.includes('"d":19'));
+  ok("the verdict does not appear", !text.includes("true") && !text.includes("pass"));
+  ok("the placeholder has only the six expected keys",
+    Object.keys(ph).sort().join(",") === "detail,id,kind,label,t,who");
+
+  // And it must survive the reducer without gaining anything.
+  const logged = applyEvent(structuredClone(EMPTY_STATE), { type: "action", entry: ph }).log[0];
+  ok("through the reducer it is still an action with no dice",
+    logged.kind === "action" && !("succ" in logged) && !Array.isArray(logged.detail));
 }
 
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);

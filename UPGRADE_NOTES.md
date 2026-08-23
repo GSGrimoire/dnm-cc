@@ -2,6 +2,122 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 0.9.3 — A real resizer, and three kinds of roll
+
+Extension **0.9.3**. The creator is unchanged and stays at **v1.23**.
+
+**Versioning, first application of the new rule.** A number goes up only when something
+changed on purpose; fixing what a release got wrong gets a letter. This release carries both —
+the resizer is a fix to 0.9.2, the roll modes are a deliberate feature — and a release that
+carries a deliberate change is a number. The creator did not change, so it does not move at
+all. The rule now lives in the `gsgrimoire-dnm-vtt` skill.
+
+---
+
+## The resizer
+
+0.9.2 claimed the panel was resizable and shipped `−` and `+` buttons in the log header.
+Reported back as "no resize capability, nowhere to grab and drag" — which is fair on both
+counts. They were not a resizer in the sense anyone means, and after the 0.9.2 reorder the log
+header sits well down a 900px panel, so they were below the fold as well.
+
+`#resizer` is now a sticky strip at the foot of the page standing in for the bottom edge
+Owlbear does not give a popover. Pointer events rather than mouse events, so a trackpad and a
+touch screen behave the same, and `setPointerCapture` so the drag survives the pointer leaving
+a strip only a few pixels tall. Dragging down grows the panel: the strip *is* the bottom edge,
+so the pointer and the edge move together.
+
+The height is written to `localStorage` once at the end of a drag rather than per frame — a
+drag would otherwise write a hundred times on the way down. The `−`/`+` buttons stay, beside
+the grip, because a drag is not keyboard reachable.
+
+---
+
+## Three roll modes
+
+The Hidden tick-box became **Open / Hidden / Secret**, and this is a design change, not a
+rename.
+
+| Mode | The table sees | Who may use it |
+|---|---|---|
+| Open | the roll and the result | everyone |
+| Hidden | that you rolled, and who | everyone |
+| Secret | nothing at all | GM |
+
+**Hidden is open to everyone** because concealing a result is ordinary play, and the table
+still learns a roll happened, so nothing disappears from the record. **Secret stays the GM's**
+deliberately: a player rolling with no trace is the single thing a shared log exists to
+prevent. The role is re-checked in `doRoll()`, not merely in the button's `hidden` attribute —
+a hidden attribute is not a control.
+
+### The placeholder
+
+A Hidden roll broadcasts a placeholder built by `concealedPlaceholder()` in `dnm.js`. It lives
+there rather than in the roller so its contents can be asserted, because the whole feature
+rests on what it does **not** carry: the placeholder goes into room metadata, where anyone can
+read it out of devtools.
+
+Built by **allow-list, never by deleting from the roll**. Spreading the entry and stripping
+`detail`, `succ` and the rest would leak the day someone adds a field, and the leak would be
+silent. Twelve assertions cover it, including that the placeholder holds exactly six keys.
+
+It is shaped as an **action** entry, not a roll. It is not a roll anyone can read, and making
+it one would mean every consumer of a roll entry learning to handle a roll with no dice in it.
+Its id derives from the roll's (`<id>-c`) so it dedupes like anything else.
+
+### The private copy
+
+`hiddenLog` is now everyone's, not the GM's, and holds both kinds with a `conceal` field
+naming which. Entries stored before 0.9.3 are read back as `secret`, which is what they were —
+it was the only kind that existed.
+
+The badges are deliberately different colours: amber **Hidden**, orange **Secret**. Reading
+one as the other is a real misunderstanding about what the table was told, so they never share
+a label.
+
+---
+
+## Deploy order
+
+Extension only.
+
+1. **`dnm-obr`** — `dnm.js`, `roller.js`, `index.html`, `style.css`, `manifest.json` (0.9.3).
+2. Docs in `dnm-cc` (changelog entry and the required-extension line).
+3. **Full room reload, everyone.**
+
+No reinstall. No creator deploy. Schema stays at v2.
+
+---
+
+## Testing
+
+**177 assertions, all passing** — creator 97, party 23, security 57.
+
+Eighteen are new, and all of them are about the placeholder not leaking: no dice value, no
+target, no successes, no verdict, exactly six keys, and the same again after the reducer has
+run.
+
+Browser-verified in Chromium rather than only parsed:
+
+- dragging the grip down 200px took the panel from 900 to 1100, the `−` button then took it to
+  980, the strip computes to `position: sticky`, and the height persisted.
+- all three modes render, the hint text changes with the mode, a Hidden roll and a Secret roll
+  produce correctly-coloured badges, and `localStorage` holds `["secret","hidden"]`.
+
+**Not verified here.** The placeholder actually reaching other clients needs a live room, as
+does Secret being unavailable to a player.
+
+### Live checks
+
+- Drag the strip at the foot of the roller. Close and reopen: the height is remembered.
+- As a **player**, confirm Open and Hidden are offered and **Secret is not**.
+- As a **player**, roll Hidden. Your own log shows the result with an amber badge; the GM and
+  the rest of the table see only "Hidden roll" with your name.
+- As **GM**, roll Secret. Nobody else sees anything at all.
+- Close the roller and reopen: concealed rolls are still there, still badged.
+
+
+
 # v1.23 / 0.9.2 — QA pass from the table
 
 Creator **v1.23**, extension **0.9.2**. Both repos change. Deploy the extension first.
