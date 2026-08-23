@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.22</h1>
-    <p class="lead">A security release. The GM&apos;s table controls are now actually the GM&apos;s: until this version the check that a rest or a cleared log came from the GM ran only in the sender&apos;s own window, which is no check at all. The extension also no longer loads code from a third party while you play.</p>
+    <h1>Version v.1.23</h1>
+    <p class="lead">Fixes from a full test pass at the table. Sentinel characters were invisible to the Party panel, loading a saved character did not attach it to its token, and last version&apos;s security fix went too far and blocked players from paying Threat. The roller is also rearranged, resizable, and finally themed to match.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -339,7 +339,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.22 needs extension 0.9.1; the install link is unchanged, so nobody needs to reinstall.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.23 needs extension 0.9.2; the install link is unchanged, so nobody needs to reinstall.</div>
   </section>
 
   <section class="panel">
@@ -350,6 +350,28 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.23</span>
+          <span class="version-title">Sentinels rejoin the party, saved characters attach, and the roller gets rearranged</span>
+        </summary>
+        <ul>
+        <li><strong>Sentinel characters were invisible to the Party panel.</strong> Every other archetype worked. Sentinel&apos;s internal code is <code>SNT</code>, and the extension read those first two letters as the start of the character summary it was looking for, then gave up on the whole character as unreadable. Importing the same character into the creator always worked, which is what made it look random.</li>
+        <li>Loading a locally saved character while a sheet was open on a token did not attach it. It rendered fine, had no header bar, and only stuck if you pressed Edit and then Finalize. Loading now attaches exactly like pasting a code does.</li>
+        <li><strong>Players can pay Threat again.</strong> Version 1.22 locked all Threat changes to the GM, which was wrong: Nanobarrier, Adrenaline Rush and several items charge Threat, and those are player actions. Adding Threat is open to everyone again; only the GM can spend it back down.</li>
+        <li>The manual Threat + and &minus; buttons on the sheet are now the GM&apos;s only, matching the roller. For a player they had stopped working while still announcing themselves in the log.</li>
+        <li>Hidden rolls survive closing the roller. They used to be discarded, so a GM who looked away and came back found them gone, which read as hidden rolls working only sometimes. They are still never sent to the table and never stored in the room.</li>
+        <li>A hidden roll now carries a clear <em>Hidden</em> badge and a tinted row instead of the word &quot;hidden&quot; tacked onto the character&apos;s name.</li>
+        <li>The roller is reordered: Table Controls, then Party, then the dice, then the log. A result now sits directly under the button that produced it instead of two panels away.</li>
+        <li>The panel is taller, and there is a height control in the log header. Your choice is remembered. The log and the party list grow with it rather than staying a fixed few lines.</li>
+        <li>The GM can open any character&apos;s sheet straight from their row in the Party panel.</li>
+        <li>Scrollbars are themed to match everything else.</li>
+        <li>Requires extension 0.9.2. The install link is unchanged, so no reinstall &mdash; but reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.22</span>
           <span class="version-title">The GM&apos;s controls are the GM&apos;s, and no third-party code at the table</span>

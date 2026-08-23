@@ -2,6 +2,210 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.23 / 0.9.2 — QA pass from the table
+
+Creator **v1.23**, extension **0.9.2**. Both repos change. Deploy the extension first.
+
+Everything here came out of one structured test pass in a live room. Three were real
+bugs, one of them a regression introduced by 0.9.1.
+
+---
+
+## Sentinel characters were invisible to the party panel
+
+The best bug in a while, because the reproduction reads as nonsense: Sentinel never
+appeared in the party panel, Weaver and Firebrand always did, and the same Sentinel
+code imported into the creator perfectly.
+
+A DM1 code mixes **two segment kinds**:
+
+- **tagged** — a two-letter tag plus payload: `CP…`, `SN…`, `NM…`, `GW…`
+- **positional and untagged** — segments 1 to 3 are bare lookup codes written straight
+  in by `buildCharacterCode()`: `parts.push(archetypeData.code)`
+
+Sentinel's archetype code is **`SNT`**. `parseCode()` located the snapshot with
+
+```js
+const snIndex = parts.findIndex((p) => p.startsWith("SN"));
+```
+
+which matched the **archetype at index 2**, not the snapshot at index 16. It then fed
+one character of archetype code to `JSON.parse` and returned "That code is damaged".
+`readPartyMember()` drops anything with an error, so the character silently vanished
+from the panel — and from the roller's selected-character banner, which uses the same
+parser.
+
+The creator was unaffected because it has its own parser and never looks for `SN`.
+Rests still landed for the same reason, which is why the character looked half-present.
+
+Both lookups now scan **backwards**. The tagged segments are appended after the
+positional ones, so the last match is always the real one, and a future archetype
+coded `CPX` cannot resurrect this.
+
+The full collision surface, checked rather than assumed: `EVR` (Everan) collides with
+the `EV` tag and `CRC` (Circumspect) with `CR`, but nothing reads those, so `SNT` was
+the only live break.
+
+**The test walks every archetype** rather than naming Sentinel. Confirmed non-vacuous:
+reverting to `findIndex` makes it fail with `sentinel:` named in the message.
+
+---
+
+## Loading a saved character did not attach it
+
+`loadCharacterLocal()` assigns a fresh character and renders. It never touched
+`ready`, so `queueSave()` returned at its guard, no `CHAR_KEY` was written, and no
+header bar appeared. Pressing Edit then Finalize worked only because that route went
+through the v1.21 finalize hook.
+
+This is the same bug for the third release running:
+
+| release | entry point | outcome |
+|---|---|---|
+| v1.20 | paste a code | hooked |
+| v1.21 | finalize a new build | missed, then hooked |
+| v1.23 | load a local save | missed again |
+
+Each fix hooked one more door. **The pattern was the mistake**, so all three now call
+one `adoptOntoToken()`. A fifth way in needs a call, not a fourth copy of the same six
+lines.
+
+`hookLoadLocal()` compares the character object identity before and after: the
+original returns early on a bad id or damaged code, and adopting then would write the
+*previous* character onto the token.
+
+---
+
+## 0.9.1 broke players paying Threat — regression, now corrected
+
+Reported as "a player adds Threat, it broadcasts, the meter does not move."
+
+0.9.1 made **all** Threat changes GM-only at the relay. That is wrong about the game.
+Adding Threat is a player action: `useNanobarrier()` charges it, Adrenaline Rush pays
+in it, and five catalogue items add it on use — every one routed through the creator's
+`addThreat()` and out over this channel. All of them were being refused. A Sentinel
+could press Barrier, watch the cost announce itself in the log, and see the pool sit
+still.
+
+The creator's own tooltip had the rule right the whole time: *"Anyone can add; only
+the GM should spend."* **The direction is what is privileged, not the pool.** A player
+can pay Threat in and cannot drain it.
+
+The rule moved to `isGmOnlyEvent()` in `dnm.js` so it is testable without a live room
+and stated once. A zero delta is explicitly not a spend.
+
+**Lesson worth keeping:** 0.9.1 tightened a permission by reading the UI — the roller
+disables Threat for players — without checking who else called the same path. The
+sheet had been the main Threat writer since v1.17.
+
+### The manual buttons
+
+Separately, the sheet's own Threat `+`/`−` are now GM-only, matching the roller.
+Removed rather than disabled: since 0.9.1 a player pressing them got the worst
+outcome available, an action that announced itself in the shared log and did nothing.
+Abilities and items are untouched.
+
+`obrRole` is resolved before the first render so the buttons never appear and then
+vanish, and refreshed on `player.onChange` for mid-session promotion. It fails closed
+to player.
+
+---
+
+## Hidden rolls
+
+Two changes, neither touching the security property: a hidden roll is still never
+broadcast and never written to room metadata.
+
+**They now survive closing the panel.** `hiddenLog` was a plain array, so closing the
+popover discarded it. From the GM's seat that is indistinguishable from hidden rolls
+working only sometimes. They persist to `localStorage` — this browser only, never
+reaching a player, and not spending the room's shared 16 kB. Every access is wrapped;
+private windows throw on the accessor itself. Entries are re-marked `hidden: true` on
+read, so a mangled record can never render as a public roll the GM believes the table
+saw.
+
+**The label is a badge**, warning-coloured and boxed, with the row tinted. It was
+`"(hidden)"` appended to the character name in the same weight and colour, which reads
+as part of the name.
+
+The related complaint — that the status note is too far from the log to be useful —
+is fixed by the reorder below rather than by moving the note.
+
+---
+
+## Layout
+
+- **Order is now Table Controls, Party, dice, log.** The log sits directly under the
+  roller instead of two panels below it, so a result is where you are already looking
+  after pressing Roll.
+- **Height control** in the log header, `OBR.action.setHeight()`, 480–1600 in steps of
+  120, remembered per browser in `localStorage`. Owlbear sizes the popover from the
+  manifest and gives the viewer no drag handle. Default raised to 900×420.
+- **The panes grow with it.** `.log` was a flat `max-height: 220px`, so a taller panel
+  bought empty space and the same eight visible entries. Both it and `.party-list` are
+  now viewport-relative with a floor.
+- **Themed scrollbars**, both the standard properties and the WebKit pseudo-elements:
+  Firefox reads one, Chromium the other, and neither alone covers the table.
+
+## Party panel: open a sheet
+
+Each row carries a **Sheet** button opening that token's character, using the same
+modal id and URL shape as the context menu — a second id would allow one token's sheet
+open twice, in two windows, both saving.
+
+`refreshParty()` now carries the token id alongside the code, and it is part of the
+render signature so a new token with a duplicate code still redraws. The id is attached
+with a spread rather than written onto the cached member, which would pin the first
+token that happened to carry that code.
+
+**Removing a party member** needs no feature: removing the token does it, as confirmed
+in testing.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `dnm.js`, `background.js`, `roller.js`, `index.html`,
+   `style.css`, `manifest.json` (0.9.2).
+2. **`dnm-cc/index.html`**
+3. Docs
+4. **Full room reload, everyone.**
+
+No reinstall. Schema stays at v2; no metadata migration. `manifest.json` changes only
+`version` and the action size, so the install URL is unchanged.
+
+---
+
+## Testing
+
+**159 assertions, all passing** — creator 97, party 23, security 39.
+
+New: every archetype parses for the party panel (non-vacuous, verified by reverting
+the fix); Sentinel's code really is `SNT`; and nine assertions on `isGmOnlyEvent()`
+covering both Threat directions, Momentum in both directions, epochs, clear, and junk.
+
+Browser-verified in Chromium rather than only parsed: section order reads
+`pools → gm-panel → party-panel → roller → log-section → status`, the height control
+renders, `.log` computes to 331px rather than the old flat 220, the scrollbar resolves
+to teal on the panel background, and the page raises no console errors.
+
+**Not verified here.** The relay's role check still needs a live room, as does the
+party panel's Sheet button and the Threat direction rule end to end.
+
+### Live checks
+
+- Attach a **Sentinel** to a token and confirm it appears in the Party panel.
+- Load a locally saved character onto a token: header bar appears, and it is still
+  there after close and reopen, with no Edit/Finalize.
+- As a **player**, use an ability that costs Threat and confirm the pool moves.
+- As a **player**, confirm the sheet shows no Threat +/- buttons.
+- As **GM**, confirm the sheet's Threat +/- still work.
+- As **GM**, roll hidden, close the roller, reopen: the roll is still there, badged.
+- Resize with the height control, close and reopen the panel: the height is remembered.
+- Press **Sheet** on a Party row and confirm the right character opens.
+
+
+
 # v1.22 / 0.9.1 — Security sweep
 
 Creator **v1.22**, extension **0.9.1**. Both repos change. Deploy the extension first.

@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.22", g("APP_VERSION") === "1.22");
+ok("APP_VERSION is 1.23", g("APP_VERSION") === "1.23");
 
 // -------------------------------------------------------------
 // Fixture
@@ -419,6 +419,60 @@ const reset = () => g("window.__cap.length = 0;");
   g("resumingFinishedCharacter = false");
   ok("a new build is not offered back-to-play",
     !g("renderOriginStep()").includes("Done — back to play"));
+}
+
+
+// -------------------------------------------------------------
+// Every archetype survives the extension's parser (v1.23)
+// -------------------------------------------------------------
+// Found in play: Sentinel characters never appeared in the GM's party panel, while
+// importing them into the creator worked perfectly.
+//
+// A code mixes two segment kinds. Most carry a two-letter TAG plus a payload (CP, SN,
+// NM, GW), but segments 1-3 are bare lookup codes with no tag: the origin, archetype
+// and temperament, written straight in. Sentinel's archetype code is SNT, so a
+// front-to-back search for a segment starting with "SN" found the ARCHETYPE at index
+// 2 instead of the snapshot at the end, and the parser reported the whole code as
+// damaged. Only the extension searches for SN, which is why the creator was fine.
+//
+// This walks every archetype rather than asserting the one that broke. The next
+// collision will be some other three-letter code, and a test naming Sentinel would
+// not catch it.
+{
+  const { parseCode } = await import("../out/dnm-obr/dnm.js");
+  const keys = JSON.parse(g(`JSON.stringify(
+    Object.keys(DM_DATA.archetypes).concat(Object.keys(DM_DATA.advancedArchetypes)))`));
+  ok("there are archetypes to walk", keys.length >= 9);
+
+  const broken = [];
+  for (const key of keys) {
+    const code = g(`(function(){
+      var c = state.character = getDefaultCharacter();
+      var arch = DM_DATA.archetypes[${JSON.stringify(key)}] || DM_DATA.advancedArchetypes[${JSON.stringify(key)}];
+      c.name = 'Probe';
+      c.origin = Object.keys(DM_DATA.origins)[0];
+      c.archetype = ${JSON.stringify(key)};
+      c.temperament = Object.keys(DM_DATA.temperaments)[0];
+      c.bonds = [{ name: 'Halvard', type: Object.keys(DM_DATA.bondInfo)[0] }];
+      if (!arch.forcedTalent) {
+        var t = Object.keys(arch.talents || {});
+        if (t.length) c.talent = t[0];
+      }
+      c.finalized = true;
+      normalizeEditableLists();
+      normalizeCurrentValues();
+      return buildCharacterCode();
+    })()`);
+    const r = parseCode(code);
+    if (r.error) broken.push(`${key}: ${r.error}`);
+  }
+  ok(`every archetype parses for the party panel${broken.length ? " — BROKEN: " + broken.join("; ") : ""}`,
+    broken.length === 0);
+
+  // The specific shape of the bug, asserted directly so a future refactor that
+  // reintroduces a front-to-back search fails here with an obvious name.
+  ok("Sentinel's archetype code really does collide with the SN tag",
+    g(`(DM_DATA.advancedArchetypes.sentinel || {}).code`) === "SNT");
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);

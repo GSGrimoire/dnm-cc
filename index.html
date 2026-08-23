@@ -2565,7 +2565,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.22';
+const APP_VERSION = '1.23';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -6772,17 +6772,38 @@ function renderSheetSkillsSection(stats) {
 // GM, so standalone there is nothing for it to talk to; the value shown is the room's
 // and is set by the module block at the end of the file.
 let obrThreat = null;
+// Set by the module block once Owlbear reports the role, and kept current on change.
+// Null standalone, where there is no room and no GM.
+let obrRole = null;
 
 function renderThreatCounter() {
   const value = obrThreat == null ? 0 : obrThreat;
+  const isGM = obrRole === "GM";
+
+  // v1.23. Manual nudges are the GM's, matching the roller, where the Threat buttons
+  // have always been disabled for players. They were live here, and since extension
+  // 0.9.1 a player pressing them got the worst possible result: the press announced
+  // itself in the shared log and the pool did not move, because the GM's page had
+  // already refused it. A control that reports success and does nothing is worse than
+  // no control.
+  //
+  // Removed rather than disabled: a disabled button still says "this is yours, but
+  // not now", and this one never is. Abilities and items are untouched — they call
+  // addThreat() directly and are exactly how a player is SUPPOSED to add Threat.
+  const controls = isGM
+    ? `<button class="resource-btn" onclick="addThreat(-1, 'manual adjustment')">&minus;</button>
+       <div class="resource-value">${value}</div>
+       <button class="resource-btn" onclick="addThreat(1, 'manual adjustment')">+</button>`
+    : `<div class="resource-value">${value}</div>`;
+
+  const note = isGM
+    ? 'The Game Master&rsquo;s pool, shared by the whole table. Abilities and items that tell you to add Threat push it here. Anyone can add; only the GM can spend.'
+    : 'The Game Master&rsquo;s pool, shared by the whole table. Abilities and items that tell you to add Threat push it here for you. Only the GM adjusts it by hand.';
+
   return `<div class="resource-counter obr-only threat-counter">
-    <div class="resource-label dm-tip" tabindex="0">Threat<span class="dm-tip-body"><span class="dm-tip-title">Threat</span><span class="dm-tip-desc">The Game Master's pool, shared by the whole table. Abilities and items that tell you to add Threat push it here. Anyone can add; only the GM should spend.</span></span></div>
-    <div class="resource-controls">
-      <button class="resource-btn" onclick="addThreat(-1, 'manual adjustment')">&minus;</button>
-      <div class="resource-value">${value}</div>
-      <button class="resource-btn" onclick="addThreat(1, 'manual adjustment')">+</button>
-    </div>
-    <div class="resource-max">group pool</div>
+    <div class="resource-label dm-tip" tabindex="0">Threat<span class="dm-tip-body"><span class="dm-tip-title">Threat</span><span class="dm-tip-desc">${note}</span></span></div>
+    <div class="resource-controls">${controls}</div>
+    <div class="resource-max">${isGM ? 'group pool' : 'GM pool'}</div>
   </div>`;
 }
 
@@ -8755,6 +8776,17 @@ function installThreatBridge() {
 // a live room's metadata have to keep rendering.
 let playerName = "Someone";
 
+async function resolveRole() {
+  try {
+    obrRole = await OBR.player.getRole();
+  } catch (err) {
+    // Left null, which renders as a player. Failing closed is right here: showing a
+    // player the GM's Threat controls produces presses the room will refuse, which is
+    // the exact confusion this change exists to remove.
+    console.warn("[dnm] could not read the role", err);
+  }
+}
+
 async function resolvePlayerName() {
   try {
     const name = await OBR.player.getName();
@@ -8975,6 +9007,45 @@ function loadIntoCreator(code) {
   return null;
 }
 
+// -------------------------------------------------------------
+// Becoming the token's character (v1.23)
+// -------------------------------------------------------------
+// There is exactly one thing that makes a sheet live on a token: `ready`. Until it is
+// true, queueSave() returns at its guard, so every renderAll() in the file saves
+// nothing and CHAR_KEY is never written. The character looks completely normal and
+// the token stays empty.
+//
+// This has now been the same bug three times, on three different ways in:
+//
+//   v1.20  paste a code onto an empty token   — hooked
+//   v1.21  finalize a newly built character   — missed, then hooked
+//   v1.22  load a locally saved character     — missed again, this is it
+//
+// Each fix hooked one more entry point and left the next one to be found in play.
+// The pattern was the mistake, so this is one function that all of them call. A
+// fifth way in — and there will be one — needs a call to adoptOntoToken(), not a
+// new copy of these six lines.
+function adoptOntoToken({ render = false } = {}) {
+  if (!tokenId || !state.character) return;
+  // Reapplied every time: importCharacter() and loadCharacterLocal() both ASSIGN a
+  // fresh character object, which drops the accessor and would silently return this
+  // character to a private Momentum counter.
+  bindMomentumToRoom(state.character);
+  const firstTime = !ready;
+  ready = true;
+  if (firstTime) insertBar(state.character.name);
+  if (render) renderAll();
+  commit();
+  // Reconciled on every adoption, not only the first. catchUpToRoomEpochs() refuses
+  // to act on an unfinalized character, so a rest the GM pushed while a player was
+  // part-way through spending Growth is skipped and — because writeAppliedEpochs()
+  // sits behind the same early return — correctly left pending rather than lost.
+  // Without this it would stay pending until the room next changed or the sheet was
+  // reopened, which from the player's seat is the v1.19B "rest arrives at random"
+  // bug wearing a different hat.
+  reconcileOnOpen();
+}
+
 // Pasting a code on an empty token has to write it through to the token, which
 // the standalone import path has no reason to do.
 function hookImport() {
@@ -8984,46 +9055,46 @@ function hookImport() {
     if (state.character && state.character.finalized === false) {
       state.character.finalized = true;
     }
-    // importCharacter() assigns a fresh object, so the accessor has to be reapplied
-    // or this character would go back to a private Momentum counter.
-    bindMomentumToRoom(state.character);
     if (document.getElementById("importSection")?.style.display === "none") {
-      ready = true;
-      insertBar(state.character.name);
-      renderAll();
-      commit();
-      reconcileOnOpen();
+      adoptOntoToken({ render: true });
+    } else {
+      // The import screen is still up, so nothing was actually imported. Rebind
+      // anyway: the object may already have been replaced.
+      bindMomentumToRoom(state.character);
     }
     return out;
   };
 }
 
-// Building a brand-new character directly on an attached token needs the same
-// write-through pasting a code gets. Without this hook, finalizeCharacter() leaves
-// `ready` false, so queueSave() (wired into every renderAll() by hookRenderAll())
-// silently no-ops and the token never receives CHAR_KEY. The sheet looks fully
-// built right up until the modal is closed, at which point the token turns out to
-// have nothing on it — and the party panel, which reads CHAR_KEY off every token,
-// never saw this character either.
+// Building a brand-new character directly on an attached token.
 function hookFinalize() {
   const original = window.finalizeCharacter;
   window.finalizeCharacter = function patchedFinalizeCharacter(...args) {
     const out = original.apply(this, args);
-    if (!ready) {
-      bindMomentumToRoom(state.character);
-      ready = true;
-      insertBar(state.character.name);
-      commit();
-    }
-    // Reconcile on every finalize, not only the first. catchUpToRoomEpochs() refuses
-    // to act on an unfinalized character, so a rest the GM pushed while a player was
-    // part-way through spending Growth is skipped and — because writeAppliedEpochs()
-    // sits behind the same early return — correctly left pending rather than lost.
-    // Without this it would stay pending until the room next changed or the sheet was
-    // reopened, which from the player's seat is the v1.19B "rest arrives at random"
-    // bug wearing a different hat. Finalizing is the moment the character can accept
-    // it, so that is where it is applied.
-    reconcileOnOpen();
+    adoptOntoToken();
+    return out;
+  };
+}
+
+// Loading a locally saved character while the sheet is open on a token. Reported in
+// play: the character rendered correctly, carried no header bar, and was never
+// written to the token — pressing Edit then Finalize was the only way to make it
+// stick, because that route went through the v1.21 hook.
+//
+// loadCharacterLocal() assigns a fresh object and renders, and had no idea it was
+// running inside Owlbear. A character saved while finalized comes back finalized, so
+// this is a complete character arriving on a token: exactly the import case, by a
+// different door.
+function hookLoadLocal() {
+  const original = window.loadCharacterLocal;
+  if (typeof original !== "function") return;
+  window.loadCharacterLocal = function patchedLoadCharacterLocal(...args) {
+    const before = state.character;
+    const out = original.apply(this, args);
+    // loadCharacterLocal() returns early on a bad id or a damaged code, leaving the
+    // previous character in place. Adopting then would write the OLD character to the
+    // token, so the swap is the signal that a load actually happened.
+    if (state.character && state.character !== before) adoptOntoToken({ render: true });
     return out;
   };
 }
@@ -9037,6 +9108,7 @@ async function startEmbedded() {
   hookRenderAll();
   hookImport();
   hookFinalize();
+  hookLoadLocal();
   installRollBridge();
   installThreatBridge();
   installActionBridge();
@@ -9045,6 +9117,17 @@ async function startEmbedded() {
   // name when there is one; this is the fallback for a sheet opened on a token that
   // has no character on it yet.
   await resolvePlayerName();
+
+  // v1.23. The sheet needs the role to decide whether the manual Threat controls
+  // belong to this person. Resolved before the first render, so a player never sees
+  // the buttons appear and then vanish, and refreshed on change because the room
+  // owner can promote someone mid-session.
+  await resolveRole();
+  OBR.player.onChange((player) => {
+    if (!player || player.role === obrRole) return;
+    obrRole = player.role;
+    if (ready) renderAll();
+  });
 
   try {
     adoptRoom(await OBR.room.getMetadata());
