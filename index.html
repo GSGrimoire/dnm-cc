@@ -1288,7 +1288,10 @@ body::after {
   font-weight: 600;
   color: var(--teal);
   letter-spacing: 0.05em;
-  margin-bottom: 4px;
+  /* v1.25: was 4px, which against a 0.72rem body read as one block of text with a
+     coloured first line rather than a heading and its description. */
+  margin-bottom: 7px;
+  padding-bottom: 1px;
 }
 .dm-tip-desc {
   font-family: var(--font-body);
@@ -1534,8 +1537,41 @@ body::after {
   border-bottom: 1px solid var(--border);
 }
 /* The first .sheet-section inside a block would otherwise draw a second rule
-   immediately under the block title. */
-.sheet-block > .sheet-section:first-of-type { border-top: none !important; padding-top: 8px !important; }
+   immediately under the block title.
+   v1.25: this used :first-of-type, which matches the first element of its TYPE among
+   siblings — and the first div in a block is the TITLE, so the rule never matched and
+   every titled block has been drawing two rules under its heading. Adjacency is what
+   was actually meant: the section that directly follows the title. */
+.sheet-block-title + .sheet-section { border-top: none !important; padding-top: 8px !important; }
+
+/* Replaces the inline border-top three sections used to carry. Same look, but now the
+   suppression rule above can actually win, because both live in the stylesheet. */
+.sheet-section-ruled { border-top: 1px solid var(--border); padding-top: 20px; }
+
+/* v1.25. Momentum's scope note. Sits under the label like Threat's "GM pool" line,
+   so the two shared pools read the same way. */
+/* v1.25. Claims a roll's surplus successes into the group pool. Greyed once taken,
+   because the pool's own +/- is the way to correct a mistake — undoing a claim would
+   mean tracking who claimed what. */
+.claim-momentum {
+  margin-left: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.claim-momentum:disabled { opacity: 0.4; cursor: default; border-style: dashed; }
+
+.resource-scope {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
 
 /* v1.24: a block with no title. The rule under the heading went with the heading —
    both belonged to a label ("Character") that a character sheet does not need — so
@@ -2546,7 +2582,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.24';
+const APP_VERSION = '1.25';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4020,6 +4056,9 @@ function updateAutoList(field, index, value) {
 
 function removeAutoList(field, index) {
   normalizeEditableLists();
+  const cfg = LOGGED_TEXT_LISTS[field];
+  const gone = String(state.character[field][index] || '').trim();
+  if (cfg && gone) announceSheetAction(cfg.removed, gone);
   state.character[field].splice(index, 1);
   saveCharacterLocal(true);
   renderAll();
@@ -4034,8 +4073,15 @@ function renderAutoGrowList(field, scrollClass = '', showRemove = true) {
   const visible = [...entries, ''];
   const rows = visible.map((entry, i) => {
     const isBlank = i >= entries.length;
+    // Opt-in per field: Knowledge Fragments post to the shared log, Custom Items do
+    // not. They share this renderer, and quietly logging someone's kit list would be
+    // noise the table did not ask for.
+    const logged = !!LOGGED_TEXT_LISTS[field];
+    const hooks = logged
+      ? ` onfocus="beginTextListEdit(this.value)" onchange="commitTextListEdit('${field}', this.value); renderAll();"`
+      : ' onchange="renderAll()"';
     return `<div class="editable-line-row">
-      <input class="dm-input inline-sheet-input" value="${escHtml(entry || '')}" placeholder="${isBlank ? escHtml(cfg.placeholder) : escHtml(cfg.label) + ' ' + (i + 1)}" oninput="updateAutoList('${field}', ${i}, this.value)" onchange="renderAll()">
+      <input class="dm-input inline-sheet-input" value="${escHtml(entry || '')}" placeholder="${isBlank ? escHtml(cfg.placeholder) : escHtml(cfg.label) + ' ' + (i + 1)}" oninput="updateAutoList('${field}', ${i}, this.value)"${hooks}>
       ${!isBlank && showRemove ? `<button class="mini-btn danger no-print" onclick="removeAutoList('${field}', ${i})">Remove</button>` : ''}
     </div>`;
   });
@@ -4057,6 +4103,8 @@ function addTruthField() {
 
 function removeTruthField(index) {
   normalizeEditableLists();
+  const gone = String(state.character.truths[index] || '').trim();
+  if (gone) announceSheetAction(LOGGED_TEXT_LISTS.truths.removed, gone);
   if (state.character.truths.length <= 2) {
     state.character.truths[index] = '';
   } else {
@@ -4101,6 +4149,62 @@ let injuryEditFrom = null;
 
 function beginInjuryEdit(value) {
   injuryEditFrom = String(value || '').trim();
+}
+
+// v1.25. The one place a sheet action announces itself.
+//
+// logAction() only PARKS a label. It is flushed either by a pool write — the Momentum
+// accessor and addThreat() both consume it — or by an explicit logActionNow(). Actions
+// that moved no pool, or that moved one in a way that did not consume the label, parked
+// a label that then sat there: silent at the time, and liable to mislabel whatever
+// spent a pool next.
+//
+// Reported from play twice in one session: End Scene showed a toast and logged nothing,
+// and Ask a Question moved Momentum and logged nothing.
+//
+// Calling logActionNow() after the fact is safe whether or not something already
+// flushed: it returns immediately when there is no parked label. So every action can
+// end with this and none of them has to know which kind it is.
+// v1.25. Truths and Knowledge Fragments now post to the shared log, the way Injuries
+// have since v1.20. Both are things the table cares about: a Truth is a fact about the
+// world that everyone is now playing under, and a Fragment is a piece of what the
+// party knows.
+//
+// Logged on COMMIT, never on input. The fields update per keystroke so the character
+// saves as you type, and logging there would post an entry per letter. `editFrom`
+// remembers what was in the field when it took focus, exactly as beginInjuryEdit does.
+const LOGGED_TEXT_LISTS = {
+  truths: { one: 'Truth', wrote: 'Wrote a Truth', changed: 'Changed a Truth', removed: 'Removed a Truth' },
+  knowledgeFragments: {
+    one: 'Knowledge Fragment',
+    wrote: 'Noted a Knowledge Fragment',
+    changed: 'Changed a Knowledge Fragment',
+    removed: 'Removed a Knowledge Fragment',
+  },
+};
+
+let textListEditFrom = null;
+
+function beginTextListEdit(value) {
+  textListEditFrom = String(value == null ? '' : value).trim();
+}
+
+function commitTextListEdit(field, value) {
+  const cfg = LOGGED_TEXT_LISTS[field];
+  const before = textListEditFrom;
+  const after = String(value == null ? '' : value).trim();
+  textListEditFrom = null;
+  if (!cfg || before === null || before === after) return;
+  if (!before && after) announceSheetAction(cfg.wrote, after);
+  // Emptying the field is how one of these gets deleted by hand, the same act as
+  // pressing Remove, so it reads the same way in the log.
+  else if (before && !after) announceSheetAction(cfg.removed, before);
+  else announceSheetAction(cfg.changed, `${before} to ${after}`);
+}
+
+function announceSheetAction(label, detail) {
+  logAction(label, detail);
+  logActionNow();
 }
 
 function announceInjury(label, detail) {
@@ -4153,7 +4257,7 @@ function renderEditableTruths() {
   const rows = [];
   for (let i = 0; i < visibleCount; i++) {
     rows.push(`<div class="editable-line-row">
-      <input class="dm-input inline-sheet-input" value="${escHtml(truths[i] || '')}" placeholder="Truth ${i + 1}" oninput="updateTruth(${i}, this.value)">
+      <input class="dm-input inline-sheet-input" value="${escHtml(truths[i] || '')}" placeholder="Truth ${i + 1}" oninput="updateTruth(${i}, this.value)" onfocus="beginTextListEdit(this.value)" onchange="commitTextListEdit('truths', this.value)">
       <button class="mini-btn danger no-print" onclick="removeTruthField(${i})">Remove</button>
     </div>`);
   }
@@ -4747,6 +4851,12 @@ function endScene() {
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${refreshed.join(', ')}.` : '';
+  // v1.25: these three boundaries showed a toast and told the table nothing. A toast
+  // is visible to one person for four seconds; the log is the record. Reported from
+  // play as "End Scene gives me a popup but nothing in the log".
+  announceSheetAction('End Scene', refreshed.length
+    ? `refreshed ${refreshed.length} ${refreshed.length === 1 ? 'ability' : 'abilities'}`
+    : 'scene effects cleared');
   showToast(`Scene ended. Once-per-scene actions and scene effects are ready again.${names}`, 'success');
 }
 
@@ -4764,6 +4874,10 @@ function startNewSession() {
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
+  const uniq = [...new Set(refreshed)];
+  announceSheetAction('New Session', uniq.length
+    ? `refreshed ${uniq.length} ${uniq.length === 1 ? 'ability' : 'abilities'}`
+    : 'scene and session limits cleared');
   showToast(`New session started. Scene and session limits are ready again.${names}`, 'success');
 }
 
@@ -4782,6 +4896,10 @@ function startNewAdventure() {
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
+  const uniqAdv = [...new Set(refreshed)];
+  announceSheetAction('New Adventure', uniqAdv.length
+    ? `refreshed ${uniqAdv.length} ${uniqAdv.length === 1 ? 'ability' : 'abilities'}`
+    : 'all limits cleared');
   showToast(`New adventure started. Scene, session, and adventure limits are ready again.${names}`, 'success');
 }
 
@@ -4924,8 +5042,12 @@ function handlePortraitImageError(img, errorId) {
 // uses it so far, for the reset button.
 function renderResourceCounter(key, label, current, max, colorStyle = '', noteHtml = '', footerHtml = '') {
   const info = getResourceInfo(key);
+  // v1.25: Momentum is the whole table's pool, not this character's, and nothing on
+  // the counter said so. Threat already carries the same kind of note.
+  const scope = key === 'momentum' ? '<div class="resource-scope">Group Pool</div>' : '';
   return `<div class="resource-counter dm-tip" tabindex="0">
     <div class="stat-box-label">${escHtml(label)}</div>
+    ${scope}
     <div class="counter-line no-print">
       <button onclick="adjustResource('${key}',-1)">−</button>
       <input type="number" class="resource-value-input" min="0" max="${max}" value="${current}" onchange="setResource('${key}', this.value)" aria-label="${escHtml(label)} current value">
@@ -6805,8 +6927,19 @@ function renderSheetResourcesSection(c) {
       ${renderResourceCounter('growth', 'Growth', getGrowthRemaining(), maxes.growth)}
       ${renderResourceCounter('momentum', 'Momentum', c.currentMomentum, maxes.momentum)}
       ${renderThreatCounter()}
-      ${renderKnowledgeFragmentsCounter()}
     </div>
+  </div>`;
+}
+
+// v1.25: Knowledge Fragments moved out of the Resources grid and into a block of their
+// own. The dice panel now sits directly under Resources so the Attributes and Skills a
+// roll is picked from are next to the roller, and the Fragments list — a list of text,
+// never a counter — was the odd cell in that grid anyway.
+function renderKnowledgeFragmentsSection() {
+  const info = getResourceInfo('knowledgeFragments');
+  return `<div class="sheet-section">
+    <div class="sheet-section-title dm-tip" tabindex="0">Knowledge Fragments<span class="dm-tip-body"><span class="dm-tip-title">${escHtml(info.name)}</span><span class="dm-tip-desc">${escHtml(info.desc)}</span></span></div>
+    ${renderAutoGrowList('knowledgeFragments')}
   </div>`;
 }
 
@@ -7176,6 +7309,7 @@ function useSecondWind(points, target) {
     ? `spent ${cost} Momentum, regained ${amount} Spirit`
     : `spent ${cost} Momentum, an ally regains ${amount} Spirit`);
   state.character.currentMomentum -= cost;
+  logActionNow();
   saveCharacterLocal(true);
   renderAll();
   const supportiveText = target === 'ally' && (state.character.bonds || []).some(b => b.type === 'supportive')
@@ -7195,6 +7329,10 @@ function spendMomentumForAction(key, cost) {
   }
   logAction(labels[key] || key, `spent ${cost} Momentum`);
   state.character.currentMomentum -= cost;
+  // Flushed rather than left to the Momentum accessor. Embedded, the accessor consumes
+  // the parked label and this is a no-op; standalone, or if the write is ever clamped
+  // to no change, this is what stops the entry going missing.
+  logActionNow();
   saveCharacterLocal(true);
   renderAll();
   showToast(`Spent ${cost} Momentum for ${labels[key] || key}.`, 'success');
@@ -7619,16 +7757,24 @@ function renderSummaryStep() {
     renderDicePanel(),
   ].join(''));
 
-  // ---- Block 2: what you can do with those numbers ----
+  // ---- Block 2: what the party knows ----
+  // v1.25. Knowledge Fragments used to be a cell in the Resources grid, which sat
+  // between Resources and the dice panel and pushed the roller away from the
+  // Attributes and Skills a roll is picked from. It was the odd cell there anyway —
+  // every other cell is a counter, and a Fragment is a piece of text whose wording
+  // matters. Its own block, directly after the character.
+  html += block('Knowledge Fragments', renderKnowledgeFragmentsSection());
+
+  // ---- Block 3: what you can do with those numbers ----
   html += block('Actions, Talents &amp; Abilities', renderActionsTalentsAbilitiesSection(c, archetypeData, abilities));
 
-  // ---- Block 3: what you carry ----
+  // ---- Block 4: what you carry ----
   html += block('Items and Equipment', renderInventorySection());
 
-  // ---- Block 4: what you have earned ----
+  // ---- Block 5: what you have earned ----
   html += block('Growth', renderGrowthSummarySection());
 
-  // ---- Block 5: the code ----
+  // ---- Block 6: the code ----
   html += block('Share Code', renderShareCodeSection(code));
 
   html += '</div>'; // end char-sheet
@@ -7681,13 +7827,13 @@ function renderGrowthEditButton() {
 function renderGrowthSummarySection() {
   const c = state.character;
   if (!((c.growthPool || 0) > 0 || (c.growthPurchases || []).length)) {
-    return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
+    return `<div class="sheet-section sheet-section-ruled">
       <div class="sheet-section-title">Available: 0 / Max: 10</div>
       <div style="font-size:0.8rem;color:var(--text-dim);">No Growth available or spent.</div>
       ${renderGrowthEditButton()}
     </div>`;
   }
-  return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
+  return `<div class="sheet-section sheet-section-ruled">
     <div class="sheet-section-title">Available: ${getGrowthRemaining()} / Max: 10 / Spent: ${getGrowthSpent()}</div>
     ${(c.growthPurchases || []).map(p => `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">◆ ${p.label}${p.detail ? ': ' + p.detail : ''} <span style="color:var(--warning);">(${p.cost}g)</span></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-dim);">No Growth spent.</div>'}
     ${renderGrowthEditButton()}
@@ -8243,7 +8389,7 @@ function renderInventorySection() {
       </div>`;
     }).join('');
   }
-  return `<div class="sheet-section" style="border-top:1px solid var(--border);padding-top:20px;">
+  return `<div class="sheet-section sheet-section-ruled">
     <details class="collapsible-section">
       <summary>Starting Equipment</summary>
       <div style="font-size:0.82rem;color:var(--text-dim);">${archetypeData ? archetypeData.equipment : '—'}</div>
@@ -8292,9 +8438,27 @@ const diceUI = { attr: 'might', skill: 'fight', count: 2, difficulty: 1, lastRes
 
 function rollDie() { return 1 + Math.floor(Math.random() * 20); }
 
+// v1.25: obrCompAt is the room's Complication threshold, set by the GM's Table
+// Controls and written by the module block. Null standalone and in any room that
+// predates it, where 20 is the rulebook default.
+let obrCompAt = null;
+
+function getCompAt() {
+  // Absence checked BEFORE coercion: Number(null) is 0, which is finite, so the old
+  // form clamped an unset threshold to the floor of 15 — making every roll of 15 or
+  // more a Complication on a sheet that had never heard from a GM. Standalone and in
+  // any room predating v1.25, the answer has to be the rulebook's 20.
+  if (obrCompAt === null || obrCompAt === undefined || obrCompAt === '') return 20;
+  const n = Math.round(Number(obrCompAt));
+  return Number.isFinite(n) ? Math.max(15, Math.min(20, n)) : 20;
+}
+
 function classifyDie(value, attrValue, skillValue) {
-  // D&M: <= attribute is a success; <= skill is a critical (2 successes); 20 is a complication
-  if (value === 20) return 'complication';
+  // D&M: <= attribute is a success; <= skill is a critical (2 successes); a die at or
+  // above the Complication threshold is a Complication. Order matters and has not
+  // changed — a Complication is never also a success, even where a lowered threshold
+  // overlaps the Attribute.
+  if (value >= getCompAt()) return 'complication';
   if (value <= skillValue) return 'crit';
   if (value <= attrValue) return 'success';
   return 'fail';
@@ -8366,8 +8530,18 @@ function renderDiceResult(res) {
   const verdict = hasDiff
     ? `<span class="${res.passed ? 'succ' : 'comp'}">${res.passed ? 'Passed' : 'Failed'} vs D${res.difficulty}</span>`
     : '';
+  // v1.25: the surplus is claimable rather than just reported. Momentum beyond the
+  // Difficulty goes to the GROUP pool, so it has to be a deliberate press — the player
+  // may spend it immediately instead, and the pool caps at 6.
+  //
+  // Claimed once, on this result. `res.momentumClaimed` is set on the roll object the
+  // panel is rendering, so a re-render keeps the button greyed rather than offering
+  // the same surplus twice.
   const gained = hasDiff && res.momentumGained > 0
-    ? `<div class="dice-momentum">+${res.momentumGained} Momentum — spend now, or save it to the group pool (max 6).</div>`
+    ? `<div class="dice-momentum">
+        +${res.momentumGained} Momentum — spend now, or add it to the group pool (max 6).
+        <button class="mini-btn claim-momentum no-print"${res.momentumClaimed ? ' disabled' : ''} onclick="claimRollMomentum()">${res.momentumClaimed ? 'Added' : `Add ${res.momentumGained} Momentum`}</button>
+      </div>`
     : '';
   return `<div class="dice-result">
     <div class="dice-result-target">${res.attrName} ${res.attrValue} (${res.skillName} ${res.skillValue}) — ${res.d20count}d20${hasDiff ? ` vs D${res.difficulty}` : ''}</div>
@@ -8375,6 +8549,39 @@ function renderDiceResult(res) {
     <div class="dice-summary"><span class="succ">${res.successes} success${res.successes===1?'':'es'}</span>${compTxt}${verdict ? ' · ' + verdict : ''}</div>
     ${gained}
   </div>`;
+}
+
+// v1.25. Adds the roll's surplus successes to the group Momentum pool.
+//
+// Guarded on the roll object rather than on a global, so the button greys out for THIS
+// result and a later roll offers its own surplus normally. The claim is one-way on
+// purpose: undoing it would mean tracking who claimed what, and the pool's own +/-
+// controls already exist for a correction.
+function claimRollMomentum() {
+  const res = diceUI.lastResult;
+  if (!res || res.momentumClaimed || !(res.momentumGained > 0)) return;
+  const maxMomentum = getResourceMaxes().momentum;
+  const before = getEffectiveResource('momentum');
+  const after = clampNumber(before + res.momentumGained, 0, maxMomentum);
+  const added = after - before;
+  res.momentumClaimed = true;
+
+  if (added <= 0) {
+    // The pool was already at its cap. Say so rather than greying the button with no
+    // explanation, and still mark it claimed so it cannot be pressed again.
+    showToast(`The group pool is already at ${maxMomentum} Momentum.`, 'info');
+    announceSheetAction('Momentum not added', `group pool already at ${maxMomentum}`);
+    renderAll();
+    return;
+  }
+
+  logAction('Momentum from a roll', `added ${added} to the group pool`);
+  state.character.currentMomentum = after;
+  logActionNow();
+  saveCharacterLocal(true);
+  renderAll();
+  const short = added < res.momentumGained ? ` (${res.momentumGained - added} lost to the cap)` : '';
+  showToast(`Added ${added} Momentum to the group pool.${short}`, 'success');
 }
 
 function computeRoll(d20count, attr, skill) {
@@ -8829,7 +9036,13 @@ function adoptRoom(meta) {
   const found = meta && meta[ROOM_KEY];
   const next = found && typeof found.momentum === "number" ? found.momentum : 0;
   const nextThreat = found && typeof found.threat === "number" ? found.threat : 0;
-  const changed = next !== roomMomentum || nextThreat !== obrThreat;
+  // v1.25. The GM's Complication threshold. A change to it alters what every future
+  // roll on this sheet means, so it counts as a change worth re-rendering for — the
+  // dice hint and any result already on screen are both wrong until it lands.
+  const nextCompAt = found && typeof found.compAt === "number" ? found.compAt : 20;
+  const compChanged = nextCompAt !== obrCompAt;
+  obrCompAt = nextCompAt;
+  const changed = next !== roomMomentum || nextThreat !== obrThreat || compChanged;
   roomMomentum = next;
   obrThreat = nextThreat;
   // v1.19B: the room state is remembered even when the character is not loaded yet.

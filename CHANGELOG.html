@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.24</h1>
-    <p class="lead">The GM can now see a player&apos;s hidden roll &mdash; the GM should know everything, and until now they did not. The character sheet also loses three pieces of furniture it did not need: the Finalized tag, the &quot;Character&quot; heading, and the wall of share code nobody reads.</p>
+    <h1>Version v.1.25</h1>
+    <p class="lead">Almost everything a sheet does now reaches the shared log &mdash; ending a scene and spending Momentum were both silent. Rolls that beat their Difficulty offer their spare Momentum as a button, and the GM can make a scene dangerous by lowering the Complication range for the whole table.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -339,7 +339,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.24 needs extension 0.9.4; the install link is unchanged, so nobody needs to reinstall.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.25 needs extension 0.9.5; the install link is unchanged, so nobody needs to reinstall.</div>
   </section>
 
   <section class="panel">
@@ -350,6 +350,28 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.25</span>
+          <span class="version-title">The log finally catches everything, spare Momentum is a button, and the GM can raise the danger</span>
+        </summary>
+        <ul>
+        <li><strong>End Scene, New Session and New Adventure now post to the log.</strong> They only ever showed you a popup, so the rest of the table never knew.</li>
+        <li><strong>Spending Momentum now posts to the log too.</strong> Ask a Question, Counterattack, Damage, Reduce Time, Follow-Up and Second Wind all moved the pool silently. The underlying cause was one shared fault, so this class of miss should be gone rather than fixed one button at a time.</li>
+        <li>Writing, changing or removing a <strong>Truth</strong> or a <strong>Knowledge Fragment</strong> is now logged, the way Injuries have been. It posts once when you finish typing, not once per letter.</li>
+        <li><strong>A roll that beats its Difficulty offers its spare Momentum as a button</strong>, on the sheet and in the roller. Press it to add that Momentum to the group pool; it greys out once taken so the same surplus cannot be counted twice. In the roller only the person who rolled, or the GM, can press it.</li>
+        <li><strong>The GM can lower the Complication range</strong> from Table Controls: 20, 19, 18, 17, 16 or 15. Any die at or above the number complicates, for everyone, until it is set back. The dice hint on the roller says which number is live so nobody plays on the wrong odds.</li>
+        <li><strong>Ending a scene now costs the group 1 Momentum</strong>, as the rules say. It comes off once, when the GM presses End Scene &mdash; not once per character.</li>
+        <li>Momentum is labelled <em>Group Pool</em> on the sheet, so it is clear it is not yours alone.</li>
+        <li>Knowledge Fragments have their own section now, just under the character. They used to sit inside the Resources grid, which pushed the dice roller away from the Attributes and Skills you pick a roll from.</li>
+        <li>Tooltips have room to breathe between the title and the text.</li>
+        <li>Fixed the double line under every section heading. One of the two rules had been drawn by mistake for several versions.</li>
+        <li>Requires extension 0.9.5. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.24</span>
           <span class="version-title">The GM sees hidden rolls, and the sheet loses three things it did not need</span>

@@ -2,6 +2,190 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.25 / 0.9.5 — Logging coverage, claimable Momentum, the GM's Complication range
+
+Creator **v1.25**, extension **0.9.5**. Both change; deploy the extension first. Room
+metadata schema moves to **v3**.
+
+All deliberate, so both halves take a number. Bond automation was planned alongside
+this and was **deliberately held back** to its own release — eleven changes plus a
+cross-character schema change in one drop would be untestable.
+
+---
+
+## The logging gap had one cause, not six
+
+Reported as two symptoms: End Scene showed a toast and logged nothing, and Ask a
+Question moved Momentum and logged nothing.
+
+`logAction()` only **parks** a label. It is flushed either by a pool write — the
+Momentum accessor and `addThreat()` both consume `pendingActionLabel` — or by an
+explicit `logActionNow()`. So an action was logged only if it happened to move a pool
+in a way that consumed the label.
+
+- `endScene()`, `startNewSession()` and `startNewAdventure()` never called `logAction`
+  **at all**. Toast only.
+- `spendMomentumForAction()` parked a label and relied on the accessor. Whatever the
+  precise reason it did not land, the design was the fault: the entry depended on a
+  side effect of a different operation.
+
+A parked label that is never flushed is worse than silence — it sits there and
+mislabels the next thing that *does* spend a pool.
+
+`announceSheetAction(label, detail)` is now the one way a sheet action announces
+itself: `logAction()` then `logActionNow()`. Flushing afterwards is safe whether or not
+something already consumed the label, because `logActionNow()` returns immediately when
+there is nothing parked. So every action can end with it and none has to know which
+kind it is. The Momentum spenders keep the accessor path and call it as a backstop.
+
+## Truths and Knowledge Fragments
+
+Logged on **commit**, not on input — the fields save per keystroke, and logging there
+would post an entry per letter. `beginTextListEdit`/`commitTextListEdit` mirror the
+Injury pair.
+
+Opt-in per field via `LOGGED_TEXT_LISTS`, because Knowledge Fragments and Custom Items
+share `renderAutoGrowList()` and quietly logging someone's kit list would be noise.
+
+---
+
+## Claimable Momentum
+
+A roll that beats its Difficulty produces surplus successes. The sheet reported the
+number; nothing collected it.
+
+Both halves now offer a button. Two different mechanisms, because the two contexts
+differ:
+
+- **The sheet** claims locally: `diceUI.lastResult.momentumClaimed` guards the roll
+  object being rendered, so a re-render keeps the button greyed rather than offering
+  the same surplus twice.
+- **The roller** claims through a new `claim` event, because the log is shared. Local
+  state would leave the button live on every other client and the pool would gain the
+  surplus once per person who pressed it. The reducer's claim is **idempotent**, so a
+  double-click or a re-delivered broadcast is harmless.
+
+Offered to the roller and the GM only. It is their Momentum to claim or spend instead,
+and the GM needs it for a roll whose owner has closed their sheet. Every roll now
+carries `by` so the button knows whose surplus it is.
+
+The claim is **one-way**. Undoing it would mean tracking who claimed what; the pool's
+own +/- already exists for a correction. A pool already at its cap says so rather than
+greying silently.
+
+---
+
+## The GM's Complication range
+
+`compAt` joins room state at schema v3: the die value at or above which a roll
+complicates. 20 is the rulebook default; the GM lowers it as far as 15.
+
+Below 15 a d20 complicates more often than not, which stops being a difficult scene
+and starts being a broken one, so the range is bounded at both ends and clamped in the
+reducer — it arrives over the same open broadcast channel as everything else.
+
+`classifyDie()` gained a `compAt` parameter defaulting to 20, so every existing caller
+keeps rulebook behaviour. **Order is unchanged**: a Complication is checked first and
+can never also be a success, which matters more once the threshold can overlap the
+Attribute.
+
+The roller's dice hint names the live threshold. Leaving it reading "Complication on
+20" while the GM had moved it would have players working from the wrong odds.
+
+### A bug caught in testing, not in play
+
+`readCompAt()` and the creator's `getCompAt()` both coerced before checking for
+absence. **`Number(null)` is `0`, which is finite** — so a null threshold clamped to
+the FLOOR, and every roll of 15 or higher would have complicated in a room that had
+never set one. The `{}` case passed because `Number(undefined)` is NaN, which is why
+the first round of tests looked green.
+
+Both now check `null`/`undefined`/`""` before coercing, and both cases are pinned.
+
+---
+
+## End Scene costs the group 1 Momentum
+
+Per the rules, and applied on the **GM's** press in `pushEpoch()`, not on the sheet's
+own End Scene button.
+
+A sheet-side deduction would fire once per character: five players ending the same
+scene would cost the table five Momentum. The scene ends once, so the pool moves once,
+and the GM is the one who ends it. The sheet's End Scene stays a personal reset that
+never touches the group pool.
+
+**GM undo was considered and rejected.** With the above, sheets no longer change
+global state, so there is very little left to undo, and an undo button is a lot of
+machinery for a rare case.
+
+---
+
+## Layout
+
+- **The double rule under every heading** was a real bug, not a style choice.
+  `.sheet-block > .sheet-section:first-of-type` matches the first element of its TYPE
+  among siblings — and the first div in a block is the **title**, so the rule never
+  matched and the inline `border-top` on three sections drew a second line. Adjacency
+  (`.sheet-block-title + .sheet-section`) is what was meant. The inline borders moved
+  to `.sheet-section-ruled` so the stylesheet is the only place a rule is decided.
+- **Knowledge Fragments** left the Resources grid for a block of its own between the
+  character and Actions. It was the odd cell there — every other cell is a counter —
+  and it sat between Resources and the dice panel, pushing the roller away from the
+  Attributes and Skills a roll is picked from. The dice panel was already directly
+  under Resources; removing the Fragments cell is what actually closed the gap.
+- **Momentum is labelled "Group Pool"**, matching Threat's scope note.
+- **Tooltip titles** got 7px under them instead of 4, which against a 0.72rem body
+  read as one block of text with a coloured first line.
+
+---
+
+## Deploy order
+
+1. **`dnm-obr` first** — `dnm.js`, `roller.js`, `index.html`, `style.css`,
+   `manifest.json` (0.9.5). Schema v3: a creator reading `compAt` from a `dnm.js` that
+   never writes it would sit at 20 forever.
+2. **`dnm-cc/index.html`**
+3. Docs
+4. **Full room reload, everyone.**
+
+No reinstall. `readCompAt()` defaults a missing key, so live v2 rooms keep working.
+
+---
+
+## Testing
+
+**203 assertions, all passing** — creator 106, party 46, security 51.
+
+New: the threshold's defaults, clamps and null case; `classifyDie` at and around a
+lowered threshold, including that a Complication still outranks a success and a
+critical on the same die; the claim event's idempotence and that an unknown id touches
+nothing; and that setting the threshold is GM-only while claiming is not.
+
+The layout assertions were **rewritten to look blocks up by name rather than index**.
+Inserting Knowledge Fragments shifted every index and broke five assertions that were
+really only asserting "still in position 4", which is not what any of them meant.
+
+Verified end to end in jsdom: End Scene, Ask a Question, a Truth and a Fragment all
+produce log entries; claiming adds Momentum once and the second press adds nothing.
+
+**Not verified here.** Anything needing a live room: the GM's threshold reaching other
+clients, the claim button greying out on someone else's screen, and the End Scene
+Momentum deduction landing once.
+
+### Live checks
+
+- Press End Scene on a sheet — it should appear in the shared log.
+- Spend Momentum on Ask a Question — it should appear too.
+- Write a Truth and a Knowledge Fragment; confirm one entry each, on finishing typing.
+- Roll well enough to beat the Difficulty, press **Add N Momentum**, confirm the pool
+  moves and the button greys **on every client**.
+- As a player, confirm you cannot claim someone else's surplus.
+- GM: set Complication to 17, confirm the roller hint changes for **players too**, and
+  that a 17 now complicates.
+- GM: press End Scene and confirm the group loses exactly 1 Momentum, once.
+
+
+
 # v1.24 / 0.9.4 — The GM reads hidden rolls; three things off the sheet
 
 Creator **v1.24**, extension **0.9.4**. Both change. Deploy the extension first.

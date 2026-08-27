@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.24", g("APP_VERSION") === "1.24");
+ok("APP_VERSION is 1.25", g("APP_VERSION") === "1.25");
 
 // -------------------------------------------------------------
 // Fixture
@@ -249,22 +249,34 @@ const reset = () => g("window.__cap.length = 0;");
   const sheet = g("renderFinalizedCharacterView()");
   const frag = JSDOM.fragment(sheet);
   const blocks = [...frag.querySelectorAll(".sheet-block")];
-  ok("exactly five top-level blocks", blocks.length === 5);
+  ok("exactly six top-level blocks", blocks.length === 6);
+
+  // v1.25: the blocks are looked up BY NAME rather than by index. Inserting Knowledge
+  // Fragments shifted every index and broke five assertions that were really only
+  // asserting "still in position 4" — which is not what any of them meant.
+  const titles = blocks.map((b) => b.querySelector(".sheet-block-title")?.textContent.trim());
+  const blockNamed = (name) => blocks[titles.indexOf(name)];
 
   // v1.24: the first block is deliberately untitled. Labelling it "Character" on a
   // character sheet said nothing, and the rule under the heading went with it.
-  const titles = blocks.map((b) => b.querySelector(".sheet-block-title")?.textContent.trim());
   ok("blocks are in the specified order",
-    JSON.stringify(titles) === JSON.stringify([undefined, "Actions, Talents & Abilities", "Items and Equipment", "Growth", "Share Code"]));
+    JSON.stringify(titles) === JSON.stringify([undefined, "Knowledge Fragments", "Actions, Talents & Abilities", "Items and Equipment", "Growth", "Share Code"]));
   ok("the first block carries no title element and no rule under one",
     !blocks[0].querySelector(".sheet-block-title") && blocks[0].classList.contains("is-untitled"));
   ok("every other block still names itself",
     blocks.slice(1).every((b) => !!b.querySelector(".sheet-block-title")));
 
+  // v1.25: Knowledge Fragments left the Resources grid so the dice panel sits directly
+  // under the Attributes and Skills a roll is picked from.
+  ok("Knowledge Fragments is its own block, right after the character",
+    titles[1] === "Knowledge Fragments");
+  ok("Knowledge Fragments is no longer a cell in the Resources grid",
+    !blocks[0].querySelector(".resource-grid")?.textContent.includes("Knowledge Fragment"));
+  ok("the dice panel is the last thing in the first block",
+    !!blocks[0].querySelector("#diceAttr, .dice-panel"));
+
   // v1.24: the Share Code block is the two buttons, the size and the copy message.
-  // The code itself is no longer rendered — nobody read 13 kB of base64, and showing
-  // it cost a disclosure widget and two rules to frame something never looked at.
-  const share = blocks[4];
+  const share = blockNamed("Share Code");
   ok("Share Code offers Copy Code and Save Local",
     /Copy Code/.test(share.textContent) && /Save Local/.test(share.textContent));
   ok("Share Code still reports the length", /[\d,]+ characters/.test(share.textContent));
@@ -276,9 +288,10 @@ const reset = () => g("window.__cap.length = 0;");
 
   ok("the dice roller sits in the first block, under the numbers it rolls",
     !!blocks[0].querySelector("#diceAttr, .dice-panel"));
-  ok("Growth block still shows the live counts", /Available:\s*\d+\s*\/\s*Max:/.test(blocks[3].textContent));
+  ok("Growth block still shows the live counts",
+    /Available:\s*\d+\s*\/\s*Max:/.test(blockNamed("Growth").textContent));
   ok("Items block does not repeat its title inside itself",
-    !blocks[2].textContent.includes("Inventory & Equipment"));
+    !blockNamed("Items and Equipment").textContent.includes("Inventory & Equipment"));
 
   const details = [...frag.querySelectorAll("details.collapsible-section")];
   const labels = details.map((d) => d.querySelector("summary")?.textContent.trim());

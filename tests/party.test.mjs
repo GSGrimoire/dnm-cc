@@ -1,6 +1,7 @@
 // Party-status tests. These exercise the real exported helpers from dnm.js — no
 // reimplementation, no hand-built status objects.
-import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent } from "../out/dnm-obr/dnm.js";
+import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
+  COMP_AT_MIN, COMP_AT_MAX } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -79,6 +80,71 @@ ok("junk is not privileged", isGmOnlyEvent(null) === false && isGmOnlyEvent("x")
 // A zero delta moves nothing; treating it as a spend would refuse a harmless no-op.
 ok("a zero Threat delta is not a spend",
   isGmOnlyEvent({ type: "pool", pool: "threat", delta: 0 }) === false);
+
+
+// -------------------------------------------------------------
+// The GM's Complication threshold (0.9.5)
+// -------------------------------------------------------------
+{
+  const fresh = () => structuredClone(EMPTY_STATE);
+
+  ok("a room with no compAt reads as 20", readCompAt({}) === COMP_AT_MAX);
+  ok("a pre-0.9.5 room reads as 20", readCompAt({ momentum: 2 }) === COMP_AT_MAX);
+  ok("a set value is honoured", readCompAt({ compAt: 17 }) === 17);
+  // Clamped rather than trusted: this arrives over the same open broadcast channel
+  // as everything else, and a threshold of 2 would make every die a Complication.
+  ok("below the floor is clamped", readCompAt({ compAt: 3 }) === COMP_AT_MIN);
+  ok("above 20 is clamped", readCompAt({ compAt: 99 }) === COMP_AT_MAX);
+  ok("nonsense reads as 20", readCompAt({ compAt: "banana" }) === COMP_AT_MAX);
+  // Number(null) is 0, which is finite. Coercing before checking for absence made an
+  // unset threshold clamp to the FLOOR, so every 15+ complicated in a room that had
+  // never set one. Caught in testing before it shipped; pinned here.
+  ok("null reads as 20, not the floor", readCompAt({ compAt: null }) === COMP_AT_MAX);
+  ok("an empty string reads as 20", readCompAt({ compAt: "" }) === COMP_AT_MAX);
+
+  // The rulebook default is unchanged for every existing caller.
+  ok("20 still complicates by default", classifyDie(20, 9, 2) === "complication");
+  ok("19 is an ordinary miss by default", classifyDie(19, 9, 2) === "fail");
+
+  ok("a lowered threshold complicates at and above it",
+    classifyDie(17, 9, 2, 17) === "complication" && classifyDie(18, 9, 2, 17) === "complication");
+  ok("below the threshold is unaffected", classifyDie(16, 9, 2, 17) === "fail");
+  // Order matters: a Complication is never also a success, even where a low threshold
+  // overlaps the Attribute.
+  ok("a Complication outranks a success on the same die",
+    classifyDie(9, 9, 2, 9) === "complication");
+  ok("a Complication outranks a critical on the same die",
+    classifyDie(2, 9, 2, 2) === "complication");
+
+  // Only the GM may move it, and it must survive a trim like epochs do.
+  ok("setting the threshold is GM-only", isGmOnlyEvent({ type: "compAt", value: 17 }) === true);
+  ok("the reducer stores it", applyEvent(fresh(), { type: "compAt", value: 16 }).compAt === 16);
+  ok("the reducer clamps it", applyEvent(fresh(), { type: "compAt", value: 1 }).compAt === COMP_AT_MIN);
+}
+
+// -------------------------------------------------------------
+// Claiming a roll's surplus Momentum (0.9.5)
+// -------------------------------------------------------------
+{
+  const fresh = () => structuredClone(EMPTY_STATE);
+  const rolled = applyEvent(fresh(), {
+    type: "roll",
+    entry: { id: "r9", who: "Kell", detail: [], gain: 3, by: "p-1" },
+  });
+  ok("a roll records who made it and what it earned",
+    rolled.log[0].by === "p-1" && rolled.log[0].gain === 3);
+  ok("a fresh roll is unclaimed", rolled.log[0].claimed === false);
+
+  const claimed = applyEvent(rolled, { type: "claim", id: "r9" });
+  ok("claiming marks the entry", claimed.log[0].claimed === true);
+  // Idempotent, so a double-click or a re-delivered broadcast cannot double-count.
+  ok("claiming twice changes nothing",
+    applyEvent(claimed, { type: "claim", id: "r9" }).log[0].claimed === true);
+  ok("claiming an unknown id touches no entry",
+    applyEvent(rolled, { type: "claim", id: "nope" }).log[0].claimed === false);
+  ok("anyone may claim as far as the reducer is concerned — the check is in the UI",
+    isGmOnlyEvent({ type: "claim", id: "r9" }) === false);
+}
 
 console.log(`\nparty: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
