@@ -2,6 +2,42 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.25B / 0.9.5B — Fixes from testing 1.25
+
+Letter release: everything here corrects what 1.25 got wrong. No behaviour was added.
+
+**Tooltip spacing, for real this time.** 1.25 set `margin-bottom` on `.dm-tip-title`
+and it landed on four tooltips out of nineteen. **Fifteen of the titles are written as
+`<span>`, and vertical margin on an inline element does nothing** — so the gap only
+appeared where the call site happened to use a `<div>`. That is exactly the "some
+tooltips but not all" that came back. `.dm-tip-title` is now `display: block`, which
+makes the gap work whichever tag a call site used, and the gap is 3px rather than 7 —
+a word-space, which is what was asked for.
+
+**The last double rule.** 1.25 fixed the rule with `.sheet-block-title + .sheet-section`,
+which covered Items, Growth and the rest. *Actions, Talents & Abilities* opens with a
+`details.sheet-collapse`, not a section, so it kept its own `border-top`. Widened to
+`.sheet-block-title + *`: the heading's rule is the divider, and whatever follows it
+must not draw another regardless of what element it is. Padding is still corrected only
+for a section, which is the only thing that reserved space for a rule it no longer
+draws.
+
+**Measuring this needed a real browser.** The first attempt to confirm the fix used
+jsdom's `getComputedStyle`, which reported a 16px top border on every element including
+ones with no border at all — jsdom does no cascade. It sent the diagnosis to the wrong
+place until it was re-run in Chromium, where all six blocks read `0px`. The assertions
+that shipped test the SOURCE rule instead, for the same reason.
+
+**Knowledge Fragments** collapses now, and no longer repeats its own name as a
+subheading directly under the block title that already says it. Open by default: a
+fragment you have forgotten you recovered is no use to a Weaver.
+
+**Table Controls**: *Complication on* is *Complication Level*, and `.gm-group-label`
+went from 56px to 74px with a line-height, because the longer label wrapped mid-word
+and knocked the number buttons out of line with the rows above and below.
+
+---
+
 # v1.25 / 0.9.5 — Logging coverage, claimable Momentum, the GM's Complication range
 
 Creator **v1.25**, extension **0.9.5**. Both change; deploy the extension first. Room

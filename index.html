@@ -1283,15 +1283,19 @@ body::after {
   border-top-color: var(--teal);
 }
 .dm-tip-title {
+  /* v1.25B: THIS is what the spacing needed. 15 of the 19 tooltip titles are written
+     as <span>, and margin on an inline element does nothing vertically — so v1.25's
+     margin only ever landed on the four written as <div>, which is exactly the
+     "some tooltips but not all" that came back from play. Making the title a block
+     makes the gap work regardless of which tag the call site used.
+     The gap itself is deliberately small: a word-space, not a paragraph break. */
+  display: block;
   font-family: var(--font-display);
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--teal);
   letter-spacing: 0.05em;
-  /* v1.25: was 4px, which against a 0.72rem body read as one block of text with a
-     coloured first line rather than a heading and its description. */
-  margin-bottom: 7px;
-  padding-bottom: 1px;
+  margin-bottom: 3px;
 }
 .dm-tip-desc {
   font-family: var(--font-body);
@@ -1542,7 +1546,14 @@ body::after {
    siblings — and the first div in a block is the TITLE, so the rule never matched and
    every titled block has been drawing two rules under its heading. Adjacency is what
    was actually meant: the section that directly follows the title. */
-.sheet-block-title + .sheet-section { border-top: none !important; padding-top: 8px !important; }
+/* v1.25B: widened from `+ .sheet-section` to `+ *`. The Actions block's first child
+   is a details.sheet-collapse, not a section, so it kept its own border-top and drew
+   the second line under that heading. The rule the block title already draws is the
+   divider; whatever follows it must not draw another, whatever element it happens to
+   be. Padding is still only corrected for a section, which is the only thing that
+   reserved space for a rule it no longer draws. */
+.sheet-block-title + * { border-top: none !important; }
+.sheet-block-title + .sheet-section { padding-top: 8px !important; }
 
 /* Replaces the inline border-top three sections used to carry. Same look, but now the
    suppression rule above can actually win, because both live in the stylesheet. */
@@ -2582,7 +2593,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.25';
+const APP_VERSION = '1.25B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -6937,10 +6948,18 @@ function renderSheetResourcesSection(c) {
 // never a counter — was the odd cell in that grid anyway.
 function renderKnowledgeFragmentsSection() {
   const info = getResourceInfo('knowledgeFragments');
-  return `<div class="sheet-section">
-    <div class="sheet-section-title dm-tip" tabindex="0">Knowledge Fragments<span class="dm-tip-body"><span class="dm-tip-title">${escHtml(info.name)}</span><span class="dm-tip-desc">${escHtml(info.desc)}</span></span></div>
+  const count = (state.character.knowledgeFragments || []).filter(x => String(x || '').trim()).length;
+  // v1.25B: no inner heading. The block above already says "Knowledge Fragments", and
+  // repeating it drew a second title and a second rule under the first.
+  //
+  // Collapsible because a Weaver accumulates these and an open list of twenty pushes
+  // everything below it off the screen. Open by default: a fragment you have forgotten
+  // you recovered is no use, and the count on the summary only tells you there is
+  // something to look at, not what.
+  return `<details class="sheet-collapse" open>
+    <summary class="sheet-collapse-summary dm-tip" tabindex="0">Fragments${count ? ` (${count})` : ''}<span class="dm-tip-body"><span class="dm-tip-title">${escHtml(info.name)}</span><span class="dm-tip-desc">${escHtml(info.desc)}</span></span></summary>
     ${renderAutoGrowList('knowledgeFragments')}
-  </div>`;
+  </details>`;
 }
 
 // ============================================================

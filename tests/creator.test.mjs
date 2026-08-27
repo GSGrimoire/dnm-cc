@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.25", g("APP_VERSION") === "1.25");
+ok("APP_VERSION is 1.25B", g("APP_VERSION") === "1.25B");
 
 // -------------------------------------------------------------
 // Fixture
@@ -285,6 +285,25 @@ const reset = () => g("window.__cap.length = 0;");
     !share.querySelector("#charCode") && !sheet.includes('id="charCode"'));
   ok("the code disclosure is gone with it",
     !share.querySelector("details") && !sheet.includes('id="shareCodeBlock"'));
+
+  // v1.25B. The heading's own rule is the divider; nothing directly beneath it may
+  // draw a second. Asserted on the SOURCE rather than computed style, because jsdom
+  // does no cascade — it reported a 16px border on elements that have none, which is
+  // what sent the first attempt at this fix looking in the wrong place.
+  ok("the suppression rule covers any first child, not only a section",
+    /\.sheet-block-title \+ \* \{[^}]*border-top:\s*none/.test(html));
+  ok("tooltip titles are blocks, so the gap works on a span too",
+    /\.dm-tip-title \{[^}]*display:\s*block/.test(html));
+
+  // v1.25B: Knowledge Fragments collapses and does not repeat its own name inside.
+  {
+    const kf = blockNamed("Knowledge Fragments");
+    ok("Knowledge Fragments collapses", !!kf.querySelector("details.sheet-collapse > summary"));
+    ok("Knowledge Fragments has no inner subheading",
+      kf.querySelectorAll(".sheet-section-title").length === 0);
+    ok("its summary is not a second copy of the block title",
+      !/^Knowledge Fragments/.test(kf.querySelector("summary").textContent.trim()));
+  }
 
   ok("the dice roller sits in the first block, under the numbers it rolls",
     !!blocks[0].querySelector("#diceAttr, .dice-panel"));
