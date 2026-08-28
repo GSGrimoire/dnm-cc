@@ -1,0 +1,5 @@
+# Test scaffolding, not source. tests/*.test.mjs read ../out/dnm-cc and ../out/dnm-obr,
+# which is where both repos are staged before a run; jsdom and playwright are installed
+# with --no-save for the same reason.
+node_modules/
+out/

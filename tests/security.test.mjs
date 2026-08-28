@@ -15,6 +15,7 @@ import { JSDOM } from "jsdom";
 import {
   applyEvent, trimState, sanitizeEntry, EMPTY_STATE,
   MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS, canRevealConcealed,
+  sanitizeBondEffect, readBondQueue, MAX_BOND_EFFECTS,
 } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
@@ -264,6 +265,73 @@ const rollEv = (entry) => ({ type: "roll", entry });
   ok("`by` is length-clamped like any other untrusted string",
     applyEvent(fresh(), rollEv({ id: "b1", who: "A", detail: [], conceal: "hidden", by: "x".repeat(500) }))
       .log[0].by.length === FIELD_LIMITS.id);
+}
+
+// -------------------------------------------------------------
+// Forged bond effects (0.9.6)
+// -------------------------------------------------------------
+// Bond effects are the first events that make something happen on ANOTHER player's
+// sheet, so they are worth going at directly. The honest threat model: a forged
+// effect can only pay a sheet that already holds the matching bond, for one Spirit,
+// and a forged grant has to name a target who exists. That is a nuisance, not a
+// privilege — which is why it is not GM-only and why the reducer, not the role
+// check, is what bounds it.
+{
+  const forged = (extra) => sanitizeBondEffect({ id: "f1", t: Date.now(), kind: "grant", from: "A", target: "B", amount: 1, ...extra });
+
+  ok("an effect that is not an object is refused", sanitizeBondEffect("rivalry") === null);
+  ok("an effect with no kind is refused", sanitizeBondEffect({ id: "x", t: 1 }) === null);
+  ok("an invented kind is refused", sanitizeBondEffect({ id: "x", t: 1, kind: "drain" }) === null);
+  ok("an effect with no id is refused", sanitizeBondEffect({ t: 1, kind: "rivalry" }) === null);
+
+  // The sanitiser BUILDS a new object rather than copying the one it was handed, so
+  // a forged effect cannot smuggle extra keys into room metadata for some later
+  // reader to trip over.
+  const smuggled = forged({ evil: "payload", gm: true });
+  ok("unknown keys do not survive the sanitiser",
+    !Object.prototype.hasOwnProperty.call(smuggled, "evil")
+    && !Object.prototype.hasOwnProperty.call(smuggled, "gm"));
+
+  // Written through JSON.parse rather than an object literal on purpose: a literal's
+  // `__proto__` sets the prototype at creation and never becomes an own property, so
+  // a literal would assert nothing. JSON.parse creates it as an ordinary own key,
+  // which is the shape an event actually arrives in — it crossed the wire as JSON.
+  const hostile = JSON.parse('{"id":"f9","t":1,"kind":"rivalry","from":"A","__proto__":{"polluted":true}}');
+  const cleaned = sanitizeBondEffect(hostile);
+  ok("a `__proto__` key arriving over the wire does not survive",
+    !Object.prototype.hasOwnProperty.call(cleaned, "__proto__"));
+  ok("and nothing was written to Object.prototype", ({}).polluted === undefined);
+
+  // A rivalry effect carries no target and no amount by design — the recipient's own
+  // sheet decides both. A forged one claiming otherwise must not gain either.
+  const rivalry = sanitizeBondEffect({ id: "f2", t: Date.now(), kind: "rivalry", from: "A", amount: 99, target: "B" });
+  ok("a forged rivalry cannot carry an amount", rivalry.amount === undefined);
+  ok("a forged rivalry cannot name a target", rivalry.target === undefined);
+
+  ok("a fractional amount is rounded rather than carried through",
+    forged({ amount: 2.7 }).amount === 3);
+  ok("a non-numeric amount becomes zero", forged({ amount: "lots" }).amount === 0);
+  ok("Infinity does not survive as an amount", forged({ amount: Infinity }).amount === 4);
+  ok("every text field is length-clamped",
+    forged({ from: "x".repeat(9000), target: "y".repeat(9000), source: "z".repeat(9000) }).source.length === FIELD_LIMITS.label);
+  ok("an id is length-clamped like any other untrusted string",
+    forged({ id: "i".repeat(9000) }).id.length === FIELD_LIMITS.id);
+
+  // The flood case. One client broadcasting bond effects in a loop must not be able
+  // to push the room's shared 16 kB budget over on its own.
+  let state = structuredClone(EMPTY_STATE);
+  for (let i = 0; i < 500; i++) {
+    state = applyEvent(state, { type: "bond", effect: { id: `flood${i}`, t: Date.now(), kind: "grant", from: "A".repeat(80), target: "B".repeat(80), amount: 4, source: "S".repeat(80) } });
+  }
+  ok("a flood of forged effects cannot grow the queue past its cap",
+    readBondQueue(state).length === MAX_BOND_EFFECTS);
+  ok("and the state still fits the room budget after one",
+    JSON.stringify(trimState(state)).length <= MAX_STATE_BYTES);
+
+  // Garbage already sitting in a room's metadata — written by a bug, or by hand —
+  // must not reach a reader as a live effect.
+  ok("junk in the stored queue is filtered on read",
+    readBondQueue({ bonds: [null, 42, "x", { id: "ok", t: Date.now(), kind: "rivalry", from: "K" }] }).length === 1);
 }
 
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);

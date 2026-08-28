@@ -2,6 +2,156 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.26 / 0.9.6 — Bond automation, and sharing a rest
+
+Creator **v1.26**, extension **0.9.6**. Both change; deploy the extension first. Room
+metadata schema moves to **v4**.
+
+All deliberate, so both halves take a number. This is the release held back from 1.25.
+
+## The rules question that changed the scope
+
+Two things were checked against `DM_DATA` before writing any of this, because the
+answer decided what had to be built.
+
+**Adrenaline Rush really is the only way to spend Threat for Spirit**, and therefore
+the only rivalry trigger. Two near misses: `bold` is a *modifier* on Adrenaline Rush
+(+1) rather than a second route, and the Maverick drive — "when the GM spends 3 or more
+Threat at once, regain 1 Spirit" — is Spirit gained when the GM SPENDS Threat, which is
+not "by adding to Threat" and so does not satisfy the bond's wording.
+
+**Second Wind is NOT the only way to help an ally.** The supportive bond's own text
+names two routes: "by spending Momentum **or giving up their own Spirit during a
+rest**", and the `performer` talent exists solely to extend the second one. The sheet
+had no rest-sharing at all — `takeRest()` restored your own Spirit and stopped — so
+automating the bond on Second Wind alone would have shipped half a rule. Rest sharing
+is therefore in this release rather than the next.
+
+## The mechanism
+
+A bond pays out on somebody else's sheet, and at any moment nearly every sheet at the
+table is closed. That is the epoch problem again, so it takes the epoch answer: a
+**queue in room metadata** (`bonds`) that each sheet drains when it next opens, not a
+broadcast that only reaches whoever is looking.
+
+The two bonds resolve **at opposite ends**, and that is the rules rather than an
+inconsistency:
+
+| | Who holds the bond | Who is paid | Where it resolves |
+|---|---|---|---|
+| Rivalry | the beneficiary | the holder | recipient's sheet |
+| Supportive | the helper | the ally | sender's sheet |
+
+**The rivalry direction is the thing most likely to be "corrected" into a bug.** The
+rule is "when an ally with whom the character has a rivalry regains Spirit by adding to
+Threat, the character recovers one Spirit as well" — the person spending the Threat
+needs no bond at all. So `useAdrenalineRush()` announces the actor and *nothing else*;
+every other sheet asks itself whether it holds a rivalry naming that actor. There is
+nothing for the actor's sheet to check, which is why `announceRivalryTrigger()` takes no
+arguments. The creator's own toast had this backwards — it read the actor's bonds and
+said "your rivalry-bonded ally also gains 1 Spirit" — while the Actions catalogue entry
+three inches above it had it right. Fixed.
+
+Supportive needs a target, which is why Second Wind's ally option now has a name field
+at all. It spent the Momentum and told nobody who benefited, and that missing name is
+precisely what made the bond unautomatable before.
+
+## Contract
+
+- `dnm.js` — `EMPTY_STATE.v: 4`, `bonds: []`. `sanitizeBondEffect()`, `readBondQueue()`,
+  `pruneBondQueue()`, `bondNameKey()` / `bondNamesMatch()`, `MAX_BOND_EFFECTS` (12),
+  `BOND_EFFECT_TTL_MS` (6h). One reducer branch for `{ type: "bond", effect }`.
+- `background.js` — **unchanged**. `persist()` is event-shape agnostic and hands
+  everything to `applyEvent()`, which is the single place that knows what an event
+  means. That this needed no edit is the design working.
+- Creator — `appliedBondEffects` (array of ids, capped 24) and `restShare`
+  (`{ key, left, recipients }`) are created lazily on the character, like
+  `appliedEpochs`. Both ride along in the CP payload via the `...c` spread, so no code
+  format change and no snapshot change.
+
+`MAX_APPLIED_BOND_IDS` is 24 against a `MAX_BOND_EFFECTS` of 12 **on purpose**: if an
+id could age out of the applied list while the effect were still in the room's queue,
+the same bond would pay twice. Twice the queue size is the invariant; change one and
+change the other.
+
+## Not GM-only, deliberately
+
+`isGmOnlyEvent()` is untouched. A forged rivalry effect can only land on a sheet that
+already holds a rivalry naming that actor, for one Spirit; a forged grant has to name a
+target who exists. That is a nuisance, not a privilege — and making it privileged would
+break every bond at a table whose GM has the extension closed. What *is* enforced is in
+the reducer, where a sender's clamp cannot be skipped: amounts clamp to 0–4 (3 from
+Second Wind plus at most 1 from a bond), every string is length-bounded, unknown kinds
+are refused, and the queue is capped and aged so a client broadcasting in a loop cannot
+eat the room's shared 16 kB.
+
+## Name matching
+
+Bond names are free text typed at creation; character names are free text too. Both
+halves normalise through one rule — trimmed, lower-cased, empty never matches
+(`bondNameKey`). The ally pickers are `<input list=…>` with a datalist fed from the
+characters attached to tokens in the scene, so a player can pick the exact spelling
+rather than guess it; typing an unlisted name stays legal, because a bond may name an
+NPC or someone who has not attached a token yet.
+
+**A bond whose name does not match any character silently does nothing.** That is the
+known sharp edge of this release. The picker makes it avoidable on the supportive side;
+rivalry depends on what was typed during character creation. Worth surfacing in the
+party panel later — deliberately not built here.
+
+## Rest sharing
+
+`takeRest()` opens a budget equal to what the rest actually returned. The rules phrase
+it as reducing the amount you regain; done afterwards it is the same arithmetic and does
+not ask the player to commit before they know the number — which at a table is the
+difference between a control people use and one they skip. The budget is what stops it
+becoming a way to hand out Spirit earned elsewhere. It lapses at the next rest and at
+every scene boundary, so a live "give away 3 Spirit" control cannot sit on the sheet in
+a scene the rest had nothing to do with.
+
+`performer` lifts the one-ally-per-rest limit. Its own ceiling ("one ally for each
+Spirit you gave up") needs no separate check: every recipient costs at least 1 out of a
+budget already capped at what was gained.
+
+## Two talents that were in the data and in no code
+
+- **`cautious`** — +1 Spirit on a Second Wind taken on yourself, the exact mirror of
+  `bold` on the Adrenaline Rush side. Implemented now. It had never done anything.
+- **`inspire`** — mentioned in the Second Wind toast rather than automated. Granting a
+  free d20 re-roll needs a mechanism the sheet does not have, and inventing one for a
+  single talent is not worth the surface.
+
+## Testing
+
+Creator 139, party 65, security 68. Every new guard was **mutation-tested**: the fix was
+reverted one at a time and the matching assertion watched to fail — the self-guard, the
+bond-list check, the supportive +1, the Performer gate, Cautious, the dedupe, first
+contact, the rest budget, the trim order, the queue cap direction, the amount clamp and
+the TTL. A test written after the fix can pass for reasons unrelated to the bug.
+
+The rest-share control was also driven end to end in real Chromium: typed name survives
+the re-render, the two-step confirm arms and fires, giver drops by 2, the grant carries
+3 (2 + supportive bond), and 2 stays in the budget.
+
+## Live checks — these cannot be covered by the suites
+
+1. Two attached characters, A holds a rivalry naming B. **Close A's sheet.** B uses
+   Adrenaline Rush. Open A: A gains 1 Spirit and the log says so.
+2. Same pair reversed — B holds no bond. B uses Adrenaline Rush; **B gains nothing extra
+   and A gains nothing**, because the bond belongs to whoever holds it.
+3. A has a supportive bond naming B. A uses Second Wind on "B" for 2. B's sheet gains
+   **3**.
+4. A takes a Break, gives 2 to B. A's Spirit drops 2, B gains 2 (or 3 with a supportive
+   bond). A second ally is refused without Performer.
+5. A character attached to a token **mid-session**, after effects are already in the
+   queue, gains nothing on first open — and then receives the next effect normally.
+6. The ally picker lists the other characters in the scene, and not the character
+   themselves.
+7. Reload the room after deploying. The extension's background page is cached per room
+   session and a tab refresh is not always enough.
+
+---
+
 # v1.25B / 0.9.5B — Fixes from testing 1.25
 
 Letter release: everything here corrects what 1.25 got wrong. No behaviour was added.

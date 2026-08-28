@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.25B</h1>
-    <p class="lead">Almost everything a sheet does now reaches the shared log &mdash; ending a scene and spending Momentum were both silent. Rolls that beat their Difficulty offer their spare Momentum as a button, and the GM can make a scene dangerous by lowering the Complication range for the whole table.</p>
+    <h1>Version v.1.26</h1>
+    <p class="lead">Bonds do something now. A rivalry pays out when your rival buys Spirit with Threat, a supportive bond adds to whatever you give an ally, and you can hand an ally part of your own rest. All of it reaches the other player&apos;s sheet on its own, even if they had it closed at the time.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -334,12 +334,24 @@ h1 {
         <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
       </article>
       <article class="feature-card">
+        <h3>Rivalry Bonds</h3>
+        <p>When someone uses Adrenaline Rush, anyone holding a rivalry bond with them recovers 1 Spirit. It arrives on its own.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Supportive Bonds</h3>
+        <p>Name the ally you are helping and a supportive bond with them adds +1 to what they get, on Second Wind and at a rest.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Sharing a Rest</h3>
+        <p>Give up part of the Spirit a rest just returned to you and hand it to an ally. New &mdash; the sheet never had this before.</p>
+      </article>
+      <article class="feature-card">
         <h3>Shared Roll Room Removed</h3>
         <p>It needed a server that was never set up. Rolls have travelled through Owlbear since v1.12, which needs no server at all.</p>
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.25B needs extension 0.9.5B; the install link is unchanged, so nobody needs to reinstall.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.26 needs extension 0.9.6; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -350,6 +362,26 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.26</span>
+          <span class="version-title">Bonds pay out by themselves, and you can share a rest</span>
+        </summary>
+        <ul>
+        <li><strong>Rivalry bonds now pay out.</strong> When a character uses Adrenaline Rush, everyone who holds a rivalry bond naming them recovers 1 Spirit. It lands on their sheet on its own &mdash; the next time they open it, if it was closed.</li>
+        <li>Worth reading twice, because it runs the opposite way to how it sounds: <strong>the person spending the Threat needs no bond at all.</strong> The bond belongs to the one who benefits. If you wrote a rivalry with Kestrel, you gain when <em>Kestrel</em> buys Spirit with Threat.</li>
+        <li><strong>Second Wind now asks who you are helping.</strong> It used to spend the Momentum and tell nobody, which meant the ally had to be told out loud and the bond could not be worked out at all. A <strong>supportive bond</strong> with the ally you name adds +1 Spirit for them, automatically.</li>
+        <li><strong>New: give up part of your rest to an ally.</strong> After any rest you may hand some of the Spirit you just regained to someone else, which is the rules&apos; other route for a supportive bond &mdash; and something the sheet has never been able to do. The control appears under the rest buttons and lapses at the next rest or scene.</li>
+        <li>With the <strong>Performer</strong> talent you may split a rest between several allies. Without it, one per rest, as written.</li>
+        <li><strong>Cautious now works.</strong> It adds +1 Spirit to a Second Wind you take on yourself. It has been in the rules text since the beginning and had never actually done anything.</li>
+        <li>Both the Second Wind and the rest-sharing box suggest the names of characters attached to tokens in your scene, so you can pick the exact spelling. Bonds only fire on an exact name, ignoring capitals and stray spaces &mdash; so if a bond is not paying out, check the spelling against the character&apos;s name first.</li>
+        <li>The Adrenaline Rush message used to say &quot;your rivalry-bonded ally also gains 1 Spirit&quot; based on <em>your</em> bonds, which was the rule backwards and contradicted the Actions entry three inches above it.</li>
+        <li>Requires extension 0.9.6. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.25B</span>
           <span class="version-title">The log finally catches everything, spare Momentum is a button, and the GM can raise the danger</span>

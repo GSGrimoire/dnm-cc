@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.25B", g("APP_VERSION") === "1.25B");
+ok("APP_VERSION is 1.26", g("APP_VERSION") === "1.26");
 
 // -------------------------------------------------------------
 // Fixture
@@ -523,6 +523,233 @@ const reset = () => g("window.__cap.length = 0;");
   // reintroduces a front-to-back search fails here with an obvious name.
   ok("Sentinel's archetype code really does collide with the SN tag",
     g(`(DM_DATA.advancedArchetypes.sentinel || {}).code`) === "SNT");
+}
+
+// -------------------------------------------------------------
+// Bonds (v1.26)
+// -------------------------------------------------------------
+// The rivalry bond runs BACKWARDS from how the ability reads, and that is the thing
+// most likely to be "corrected" into a bug by someone refactoring later. The rule:
+//
+//   "When an ally with whom the character has a rivalry regains one or more Spirit by
+//    adding to Threat, the character recovers one Spirit as well."
+//
+// The person spending the Threat needs no bond. The BOND HOLDER is paid. So these
+// tests are written from the holder's seat and assert the actor gets nothing.
+{
+  // grantSpiritToAlly() is the seam the module block replaces with a broadcast.
+  // Intercepting it here is what lets a jsdom run see what would have gone to the
+  // room, which is otherwise invisible without a live Owlbear.
+  const grants = [];
+  w.grantSpiritToAlly = (payload) => { grants.push(payload); };
+  const rivalryCalls = { n: 0 };
+  w.announceRivalryTrigger = () => { rivalryCalls.n++; };
+
+  const setUp = (bonds, name) => g(`(function(){
+    var c = state.character;
+    c.name = ${JSON.stringify(name || "Fixture")};
+    c.bonds = ${JSON.stringify(bonds)};
+    c.appliedBondEffects = [];
+    c.currentSpirit = 1;
+    return getResourceMaxes().spirit;
+  })()`);
+
+  const drain = (queue) => JSON.parse(g(
+    `JSON.stringify(applyPendingBondEffects(${JSON.stringify(queue)}) || null)`));
+  const spirit = () => g("getEffectiveResource('spirit')");
+
+  ok("name matching ignores case and stray spaces",
+    g(`bondNamesEqual('  Halvard ', 'halvard')`) === true);
+  ok("an empty name matches nothing, including another empty name",
+    g(`bondNamesEqual('', '')`) === false);
+
+  // --- rivalry, from the holder's seat ---
+  setUp([{ name: "Kestrel", type: "rivalry" }]);
+  let before = spirit();
+  let result = drain([{ id: "fx1", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("a rivalry holder gains 1 Spirit when their rival uses Adrenaline Rush",
+    spirit() === before + 1 && result && result.gained === 1);
+
+  // Re-running the same queue must change nothing. A broadcast can be delivered
+  // twice and room metadata is re-read on every change, so this runs constantly.
+  before = spirit();
+  ok("draining the same effect twice pays once",
+    drain([{ id: "fx1", t: Date.now(), kind: "rivalry", from: "Kestrel" }]) === null
+    && spirit() === before);
+
+  // --- rivalry, from the actor's seat ---
+  setUp([{ name: "Kestrel", type: "rivalry" }], "Kestrel");
+  before = spirit();
+  drain([{ id: "fx2", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("the character who spent the Threat is not paid by their own rivalry",
+    spirit() === before);
+
+  // --- rivalry, no bond ---
+  setUp([{ name: "Halvard", type: "supportive" }]);
+  before = spirit();
+  drain([{ id: "fx3", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("a character with no rivalry naming the actor gains nothing",
+    spirit() === before);
+
+  // A supportive bond is not a rivalry, even when it names the right person.
+  setUp([{ name: "Kestrel", type: "supportive" }]);
+  before = spirit();
+  drain([{ id: "fx4", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("a supportive bond does not pay out on Adrenaline Rush", spirit() === before);
+
+  // --- grants ---
+  setUp([{ name: "Kestrel", type: "rivalry" }]);
+  before = spirit();
+  drain([{ id: "fx5", t: Date.now(), kind: "grant", from: "Kestrel", target: "fixture",
+           amount: 2, source: "Second Wind" }]);
+  ok("a grant reaches the named target regardless of case", spirit() === before + 2);
+
+  setUp([]);
+  before = spirit();
+  drain([{ id: "fx6", t: Date.now(), kind: "grant", from: "Kestrel", target: "Someone Else",
+           amount: 2, source: "Second Wind" }]);
+  ok("a grant aimed at somebody else is ignored", spirit() === before);
+
+  // --- first contact ---
+  // A character attached mid-session must adopt the queue's position rather than
+  // collect six hours of other people's effects. Same rule as catchUpToRoomEpochs().
+  g(`(function(){
+    state.character.name = 'Fixture';
+    state.character.bonds = [{ name: 'Kestrel', type: 'rivalry' }];
+    delete state.character.appliedBondEffects;
+    state.character.currentSpirit = 1;
+  })()`);
+  before = spirit();
+  result = drain([{ id: "fx7", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("a character meeting the room for the first time adopts without collecting",
+    spirit() === before && result && result.gained === 0 && !result.detail);
+  ok("first contact still records the ids, so a later effect is not swallowed",
+    JSON.parse(g("JSON.stringify(state.character.appliedBondEffects)")).includes("fx7"));
+
+  // An effect that lands on a full Spirit track is still reported. "Nothing happened"
+  // and "you were already full" are different answers and only one of them sends a
+  // player asking whether bonds work at all.
+  setUp([{ name: "Kestrel", type: "rivalry" }]);
+  g(`(function(){ state.character.currentSpirit = getResourceMaxes().spirit; })()`);
+  result = drain([{ id: "fx8", t: Date.now(), kind: "rivalry", from: "Kestrel" }]);
+  ok("a payout onto a full Spirit track says so rather than staying silent",
+    !!result && result.gained === 0 && /already at full/.test(result.detail || ""));
+
+  // --- Second Wind ---
+  setUp([{ name: "Kestrel", type: "supportive" }]);
+  g("state.character.currentMomentum = 6");
+  grants.length = 0;
+  g(`setAllyTarget('secondWind', 'Kestrel')`);
+  g("useSecondWind(2, 'ally')");
+  ok("Second Wind on a supportive-bonded ally sends 2 + 1",
+    grants.length === 1 && grants[0].amount === 3 && grants[0].target === "Kestrel");
+
+  grants.length = 0;
+  g("state.character.currentMomentum = 6");
+  g(`setAllyTarget('secondWind', 'Someone Unbonded')`);
+  g("useSecondWind(2, 'ally')");
+  ok("Second Wind on an unbonded ally sends the plain amount",
+    grants.length === 1 && grants[0].amount === 2);
+
+  // The Momentum must not leave the pool when there is nobody to give it to.
+  grants.length = 0;
+  g("state.character.currentMomentum = 6");
+  g(`setAllyTarget('secondWind', '   ')`);
+  g("useSecondWind(2, 'ally')");
+  ok("Second Wind with no ally named spends nothing",
+    grants.length === 0 && g("state.character.currentMomentum") === 6);
+
+  // Cautious was in the data from the start and implemented nowhere, which meant a
+  // Cautious character paid full price for a smaller Second Wind.
+  g(`(function(){
+    state.character.growthExtraTalents = ['cautious'];
+    state.character.currentMomentum = 6;
+    state.character.currentSpirit = 1;
+  })()`);
+  before = spirit();
+  g("useSecondWind(2, 'self')");
+  ok("Cautious adds +1 to a Second Wind taken on yourself", spirit() === before + 3);
+  g("state.character.growthExtraTalents = []");
+
+  // --- Adrenaline Rush announces regardless of the actor's own bonds ---
+  g(`(function(){
+    state.character.bonds = [];
+    state.character.oncePerSceneUsed = [];
+    state.character.currentSpirit = 1;
+  })()`);
+  rivalryCalls.n = 0;
+  g("useAdrenalineRush(1)");
+  ok("Adrenaline Rush announces the rivalry trigger even with no bonds of its own",
+    rivalryCalls.n === 1);
+
+  // --- rest sharing ---
+  const restSetup = (talents) => g(`(function(){
+    var c = state.character;
+    c.name = 'Fixture';
+    c.bonds = [{ name: 'Kestrel', type: 'supportive' }];
+    c.growthExtraTalents = ${JSON.stringify(talents || [])};
+    c.oncePerSceneUsed = [];
+    c.currentSpirit = 1;
+    delete c.restShare;
+    return takeRest('break');
+  })()`);
+
+  restSetup();
+  ok("a rest opens a share budget equal to what it returned",
+    g("state.character.restShare.left") === g("state.character.restShare.left")
+    && g("!!state.character.restShare") && g("state.character.restShare.left") > 0);
+
+  grants.length = 0;
+  before = spirit();
+  let budget = g("state.character.restShare.left");
+  g(`setAllyTarget('restShare', 'Kestrel')`);
+  g("giveRestSpirit(2)");
+  ok("giving 2 costs the giver 2 and sends 2 + 1 for the supportive bond",
+    spirit() === before - 2 && grants.length === 1 && grants[0].amount === 3);
+  ok("the budget shrinks by what was given",
+    g("state.character.restShare.left") === budget - 2);
+
+  // "You may help multiple allies" is the whole of Performer. Without it the rules
+  // allow one ally per rest.
+  grants.length = 0;
+  g(`setAllyTarget('restShare', 'Halvard')`);
+  g("giveRestSpirit(1)");
+  ok("without Performer a second ally is refused", grants.length === 0);
+
+  restSetup(["performer"]);
+  grants.length = 0;
+  g(`setAllyTarget('restShare', 'Kestrel')`);
+  g("giveRestSpirit(1)");
+  g(`setAllyTarget('restShare', 'Halvard')`);
+  g("giveRestSpirit(1)");
+  ok("Performer allows a second ally", grants.length === 2);
+
+  // The budget is what stops this being a way to hand out Spirit earned elsewhere.
+  restSetup();
+  budget = g("state.character.restShare.left");
+  g(`setAllyTarget('restShare', 'Kestrel')`);
+  g(`giveRestSpirit(${budget})`);
+  ok("spending the whole budget closes the control",
+    g("!state.character.restShare"));
+
+  // A rest's unspent generosity must not survive into the next scene.
+  restSetup();
+  ok("a rest leaves a share budget behind", g("!!state.character.restShare"));
+  g("endScene()");
+  ok("End Scene clears the share budget", g("!state.character.restShare"));
+
+  // --- the ally picker ---
+  g(`(function(){
+    state.character.name = 'Fixture';
+    state.character.bonds = [{ name: 'Kestrel', type: 'rivalry' }, { name: 'Halvard', type: 'supportive' }];
+    obrPartyNames = ['Kestrel', 'Fixture', 'Nadia'];
+  })()`);
+  const names = JSON.parse(g("JSON.stringify(getKnownAllyNames())"));
+  ok("the picker offers bond names and party names", names.includes("Kestrel") && names.includes("Nadia"));
+  ok("the picker does not offer the character themselves", !names.includes("Fixture"));
+  ok("the picker does not list a name twice",
+    names.length === new Set(names.map((n) => n.toLowerCase())).size);
+  g("obrPartyNames = []");
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);

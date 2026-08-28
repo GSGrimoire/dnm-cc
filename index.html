@@ -2268,6 +2268,49 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
 }
 .action-note { margin-top: 8px; font-size: 0.7rem; line-height: 1.4; color: var(--warning); }
 
+/* --- v1.26 ally pickers and rest sharing ---
+   A bond only fires when the name matches, so the input is styled to read as a field
+   that wants an exact answer rather than a note to self. The datalist supplies the
+   spellings; typing an unlisted name stays legal, because a bond may name an NPC or
+   someone who has not attached a token yet. */
+.ally-picker { margin: 0 0 6px; }
+.ally-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 5px 7px;
+}
+.ally-input:focus {
+  outline: none;
+  border-color: var(--teal-dim);
+  background: rgba(0,180,180,0.06);
+}
+.ally-input::placeholder { color: var(--text-dim); opacity: 0.7; }
+.rest-share {
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 10px;
+  background: rgba(0,180,180,0.05);
+  border: 1px solid var(--teal-dim);
+  border-radius: 2px;
+  text-align: left;
+}
+.rest-share-label {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-bottom: 6px;
+}
+.rest-share .action-controls { margin-top: 0; }
+.rest-share .action-note { color: var(--text-dim); }
+
 /* --- v1.10 limited-use ability cards --- */
 .limited-feature-card {
   margin-bottom: 12px;
@@ -2593,7 +2636,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.25B';
+const APP_VERSION = '1.26';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4829,6 +4872,11 @@ function takeRest(key) {
   const before = getEffectiveResource('spirit');
   state.character.currentSpirit = clampNumber(before + spiritRestored, 0, maxes.spirit);
   const gained = state.character.currentSpirit - before;
+  // v1.26. What is left of this rest that may still be given to an ally. Set here
+  // rather than asked for beforehand: the amount is only knowable once the rest has
+  // been taken, and Wanderer, injuries and a part-full Spirit track all change it.
+  if (gained > 0) state.character.restShare = { key, left: gained, recipients: [] };
+  else clearRestShare();
   const recharged = rechargePoweredItems(rest.tier);
   const refreshedAbilities = resetLimitedUseOnRest(rest.tier);
   saveCharacterLocal(true);
@@ -4859,6 +4907,10 @@ function endScene() {
   // once-per-scene state does. New Session and New Adventure clear the scene
   // boundary too, so this lands in all three by sitting next to them.
   state.character.nanobarrierUses = 0;
+  // v1.26. A rest's unspent generosity does not survive the boundary. Left in
+  // place it would put a live "give away 3 Spirit" control on the sheet in a
+  // scene the rest had nothing to do with.
+  clearRestShare();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${refreshed.join(', ')}.` : '';
@@ -4882,6 +4934,10 @@ function startNewSession() {
   // once-per-scene state does. New Session and New Adventure clear the scene
   // boundary too, so this lands in all three by sitting next to them.
   state.character.nanobarrierUses = 0;
+  // v1.26. A rest's unspent generosity does not survive the boundary. Left in
+  // place it would put a live "give away 3 Spirit" control on the sheet in a
+  // scene the rest had nothing to do with.
+  clearRestShare();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -4904,6 +4960,10 @@ function startNewAdventure() {
   // once-per-scene state does. New Session and New Adventure clear the scene
   // boundary too, so this lands in all three by sitting next to them.
   state.character.nanobarrierUses = 0;
+  // v1.26. A rest's unspent generosity does not survive the boundary. Left in
+  // place it would put a live "give away 3 Spirit" control on the sheet in a
+  // scene the rest had nothing to do with.
+  clearRestShare();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -4929,6 +4989,33 @@ function renderPlayControls() {
       <button class="confirm-btn boundary-control dm-tip" tabindex="0" onclick="confirmClick(this, () => startNewAdventure(), 'Confirm?')">New Adventure<span class="dm-tip-body"><span class="dm-tip-title">New Adventure</span><span class="dm-tip-desc">Refreshes once-per-adventure, once-per-session, and once-per-scene features, and clears scene-length effects. It does not substitute for a rest.</span></span></button>
       ${restBtns}
     </div>
+    ${renderRestShare()}
+  </div>`;
+}
+
+// v1.26. Appears only while a rest still has Spirit left to give, so it is invisible
+// almost all of the time and unmissable in the moment it matters.
+function renderRestShare() {
+  const share = state.character.restShare;
+  if (!share || !(share.left > 0)) return '';
+  const held = getEffectiveResource('spirit');
+  const most = Math.min(share.left, held);
+  if (most < 1) return '';
+  const rest = REST_TYPES[share.key];
+  const performer = characterHasTalent('performer');
+  const given = Array.isArray(share.recipients) ? share.recipients : [];
+  const buttons = [1, 2, 3]
+    .filter(n => n <= most)
+    .map(n => actionConfirmButton(`Give ${n}`, `giveRestSpirit(${n})`, `Give ${n}?`))
+    .join('');
+  const note = given.length
+    ? `<div class="action-note">Already helped: ${escHtml(given.join(', '))}.${performer ? '' : ' Only one ally per rest without Performer.'}</div>`
+    : '';
+  return `<div class="rest-share">
+    <div class="rest-share-label dm-tip" tabindex="0">Share ${escHtml(rest ? rest.name : 'Rest')} Spirit — ${share.left} left<span class="dm-tip-body"><span class="dm-tip-title">Giving up Spirit at a rest</span><span class="dm-tip-desc">Reduce the Spirit you just regained to help an ally regain the same amount. A supportive bond with that ally gives them +1 more. Without the Performer talent you may help one ally per rest. Lapses at the next rest or scene boundary.</span></span></div>
+    ${renderAllyPicker('restShare')}
+    <div class="action-controls">${buttons}</div>
+    ${note}
   </div>`;
 }
 
@@ -7203,6 +7290,194 @@ function readRoomEpochs(roomState) {
 }
 
 // ============================================================
+// BONDS (v1.26)
+// ============================================================
+// A bond pays out on somebody else's sheet, which is why this sits next to the epoch
+// code and borrows its shape: the effect goes into a queue in room metadata and each
+// sheet drains it when it next opens. A broadcast would only reach the sheets that
+// happen to be open, and at any moment nearly all of them are closed.
+//
+// The two bonds resolve at OPPOSITE ENDS, and that is the rules rather than an
+// inconsistency:
+//
+//   RIVALRY  "When an ally with whom the character has a rivalry regains one or more
+//            Spirit by adding to Threat, the character recovers one Spirit as well."
+//            Read that twice — it runs backwards from how the ability feels. The
+//            person spending the Threat needs no bond at all. The BOND HOLDER is paid,
+//            and only their own sheet knows their bond list, so Adrenaline Rush
+//            announces who did it and every other sheet decides for itself.
+//
+//   SUPPORTIVE  "Whenever a character helps an ally with whom they have a supportive
+//            bond to regain Spirit by spending Momentum or giving up their own Spirit
+//            during a rest, the ally regains +1 Spirit." Here the HELPER holds the
+//            bond, so the helper works the sum out and has to name a target — hence
+//            the ally pickers below. Note the two routes: Second Wind is only half of
+//            it, and rest sharing is the other half.
+const BOND_NAME_MAX = 24;
+
+// Bond names are free text typed during character creation and the character names
+// they must match are free text too, so case and stray spaces decide whether a bond
+// fires. Both halves of the toolchain normalise through one rule; this mirrors
+// bondNameKey() in dnm.js.
+function bondNameKey(name) {
+  return String(name == null ? '' : name).trim().toLowerCase();
+}
+
+function bondNamesEqual(a, b) {
+  const key = bondNameKey(a);
+  return !!key && key === bondNameKey(b);
+}
+
+function findBondNaming(type, name) {
+  const key = bondNameKey(name);
+  if (!key) return null;
+  return (state.character.bonds || []).find(b => b && b.type === type && bondNameKey(b.name) === key) || null;
+}
+
+// Names the ally pickers offer. The character's own bond names are always there,
+// which is what makes the picker useful standalone; embedded, the module block fills
+// obrPartyNames from the other tokens in the scene, so a player can pick the exact
+// spelling rather than guess at it.
+let obrPartyNames = [];
+
+function getKnownAllyNames() {
+  const self = bondNameKey(state.character.name);
+  const seen = new Map();
+  const add = value => {
+    const key = bondNameKey(value);
+    if (!key || key === self || seen.has(key)) return;
+    seen.set(key, String(value).trim());
+  };
+  (state.character.bonds || []).forEach(b => add(b && b.name));
+  obrPartyNames.forEach(add);
+  return [...seen.values()];
+}
+
+// Where the pickers keep what has been typed. Deliberately NOT on the character: a
+// half-typed ally name describes this visit to the sheet, and a field on the object
+// would be serialised into the share code and written to the token.
+const allyTarget = { secondWind: '', restShare: '' };
+
+function setAllyTarget(which, value) {
+  if (!(which in allyTarget)) return;
+  allyTarget[which] = String(value == null ? '' : value).slice(0, BOND_NAME_MAX);
+}
+
+// A text input with a datalist rather than a select plus an "Other" box. A bond can
+// name someone who is not in the room — an NPC, a player who has not attached a token
+// yet — so the field has to accept anything, and the known names are a suggestion
+// rather than the set of legal answers.
+function renderAllyPicker(which) {
+  const listId = `allyNames-${which}`;
+  const options = getKnownAllyNames()
+    .map(name => `<option value="${escHtml(name)}"></option>`)
+    .join('');
+  return `<div class="ally-picker">
+    <input class="ally-input" type="text" list="${listId}" maxlength="${BOND_NAME_MAX}"
+      placeholder="Ally's name" value="${escHtml(allyTarget[which])}"
+      oninput="setAllyTarget('${which}', this.value)">
+    <datalist id="${listId}">${options}</datalist>
+  </div>`;
+}
+
+// The two ways a bond effect leaves this sheet. Standalone they report and stop —
+// there is no room and no other sheet to reach — and the module block replaces both
+// to put the effect in the room's queue, exactly as it replaces addThreat().
+function grantSpiritToAlly({ target, amount, source }) {
+  showToast(`Tell ${target} to add ${amount} Spirit (${source}).`, 'info');
+}
+
+// A no-op standalone on purpose: the Adrenaline Rush toast already says who benefits,
+// and a second toast saying the same thing to a player with no room to send it to is
+// noise.
+function announceRivalryTrigger() {}
+
+// Bounded so a long session cannot grow the character code without limit — this list
+// rides on the token in the CP payload. Twice MAX_BOND_EFFECTS in dnm.js, which is
+// what stops an id ageing out of this list while the effect it marks is still sitting
+// in the room's queue; that would pay the same bond a second time.
+const MAX_APPLIED_BOND_IDS = 24;
+
+function readAppliedBondEffects() {
+  const stored = state.character.appliedBondEffects;
+  return Array.isArray(stored) ? stored.map(String) : null;
+}
+
+function writeAppliedBondEffects(ids) {
+  state.character.appliedBondEffects = ids.slice(-MAX_APPLIED_BOND_IDS);
+}
+
+function clearRestShare() {
+  if (state.character && state.character.restShare) delete state.character.restShare;
+}
+
+// Returns { changed, gained, detail } — `changed` covers the case where ids were
+// marked but nothing was owed, which still has to be saved. Returns null when the
+// queue held nothing new at all.
+function applyPendingBondEffects(queue) {
+  if (!Array.isArray(queue) || !state.character || !state.character.finalized) return null;
+  const applied = readAppliedBondEffects();
+
+  // First contact, mirroring catchUpToRoomEpochs(). A character that has never met
+  // this room adopts the queue's position without draining it — otherwise a character
+  // attached mid-session would arrive and collect every effect the table has produced
+  // in the last six hours, none of which were meant for them.
+  if (!applied) {
+    writeAppliedBondEffects(queue.map(fx => String(fx && fx.id)).filter(Boolean));
+    saveCharacterLocal(true);
+    return { changed: true, gained: 0, detail: '' };
+  }
+
+  const seen = new Set(applied);
+  const myName = bondNameKey(state.character.name);
+  const maxSpirit = getResourceMaxes().spirit;
+  const lines = [];
+  let gained = 0;
+  let changed = false;
+
+  queue.forEach(fx => {
+    const id = fx && fx.id ? String(fx.id) : '';
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    applied.push(id);
+    changed = true;
+
+    // Never your own effect. Adrenaline Rush pays out to everyone who holds a rivalry
+    // with the person who spent, and that is never the spender.
+    if (bondNamesEqual(fx.from, state.character.name) || bondNameKey(fx.from) === myName) return;
+
+    let amount = 0;
+    let why = '';
+    if (fx.kind === 'rivalry') {
+      if (!findBondNaming('rivalry', fx.from)) return;
+      amount = 1;
+      why = `Rivalry Bond — ${fx.from} used Adrenaline Rush`;
+    } else if (fx.kind === 'grant') {
+      if (!bondNamesEqual(fx.target, state.character.name)) return;
+      amount = Math.max(0, Math.round(Number(fx.amount) || 0));
+      why = `${fx.source || 'Spirit'} from ${fx.from || 'an ally'}`;
+    } else {
+      return;
+    }
+    if (amount <= 0) return;
+
+    const before = getEffectiveResource('spirit');
+    state.character.currentSpirit = clampNumber(before + amount, 0, maxSpirit);
+    const real = state.character.currentSpirit - before;
+    gained += real;
+    // Reported even when it lands on a full Spirit track. "Nothing happened" and
+    // "you were already full" are different answers, and only one of them sends a
+    // player asking whether bonds are working.
+    lines.push(real > 0 ? `${why} — +${real} Spirit` : `${why} — already at full Spirit`);
+  });
+
+  if (!changed) return null;
+  writeAppliedBondEffects(applied);
+  saveCharacterLocal(true);
+  return { changed: true, gained, detail: lines.join('; ') };
+}
+
+// ============================================================
 // THE ROLLS AND ACTIONS LOG (v1.17)
 // ============================================================
 // Rolls have travelled to the shared log since v1.12. Everything else a player
@@ -7302,19 +7577,30 @@ function useAdrenalineRush(points) {
   const gained = state.character.currentSpirit - before;
   const threat = { 1: 1, 2: 3, 3: 6 }[amount];
   const bonusText = bonuses.length ? ` Bonus sources before the Spirit maximum: ${bonuses.map(b => `+${b.amount} from ${b.name}`).join(' and ')}.` : '';
-  const rivalryText = (state.character.bonds || []).some(b => b.type === 'rivalry') ? ' Your rivalry-bonded ally also gains 1 Spirit.' : '';
+  // v1.26. This used to read the ACTOR's own bonds and say "your rivalry-bonded ally
+  // also gains 1 Spirit", which is the rule backwards — and it contradicted the
+  // Actions entry three inches above it, which had it right all along. The bond pays
+  // out to whoever HOLDS a rivalry naming you. Whether you hold one is irrelevant, so
+  // there is nothing here to check: the sheets that hold such a bond work it out for
+  // themselves when they next open.
+  const rivalryText = ' Any ally who holds a rivalry bond with you recovers 1 Spirit.';
   showToast(`Adrenaline Rush restored ${gained} Spirit.${bonusText}${rivalryText}`, 'success');
   logAction('Adrenaline Rush', `regained ${gained} Spirit, added ${threat} Threat`);
+  announceRivalryTrigger();
   addThreat(threat, 'Adrenaline Rush');
 }
 
-function useSecondWind(points, target) {
+// v1.26. `targetName` is optional: the ally control reads whatever is in the picker,
+// and an explicit name is for callers that have one already.
+function useSecondWind(points, target, targetName) {
   const amount = clampNumber(points, 1, 3);
   const cost = { 1: 1, 2: 3, 3: 6 }[amount];
   if ((state.character.currentMomentum || 0) < cost) {
     showToast(`Second Wind needs ${cost} Momentum.`, 'error');
     return;
   }
+
+  let toast = '';
   if (target === 'self') {
     const maxSpirit = getResourceMaxes().spirit;
     const before = getEffectiveResource('spirit');
@@ -7322,19 +7608,96 @@ function useSecondWind(points, target) {
       showToast(`You need at least ${amount} lost Spirit to choose this option.`, 'error');
       return;
     }
-    state.character.currentSpirit = before + amount;
+    // v1.26. Cautious is the exact mirror of Bold on the Adrenaline Rush side: the
+    // same +1, on the Momentum route instead of the Threat one. It was in the data
+    // from the start and implemented nowhere, so a Cautious character has been paying
+    // full price for a smaller Second Wind.
+    const cautious = characterHasTalent('cautious');
+    state.character.currentSpirit = clampNumber(before + amount + (cautious ? 1 : 0), 0, maxSpirit);
+    const gained = state.character.currentSpirit - before;
+    logAction('Second Wind', `spent ${cost} Momentum, regained ${gained} Spirit`);
+    toast = `Spent ${cost} Momentum. You regain ${gained} Spirit.${cautious ? ' Cautious added +1.' : ''}`;
+    state.character.currentMomentum -= cost;
+  } else {
+    const name = String(targetName == null ? allyTarget.secondWind : targetName).trim();
+    if (!name) {
+      showToast(`Name the ally you are restoring first.`, 'error');
+      return;
+    }
+    const bond = findBondNaming('supportive', name);
+    const total = amount + (bond ? 1 : 0);
+    logAction('Second Wind', `spent ${cost} Momentum, ${name} regains ${total} Spirit`);
+    state.character.currentMomentum -= cost;
+    // The ally's own sheet applies this, because it is the only thing that can: their
+    // Spirit maximum, their injuries and their own catch-up all live there.
+    grantSpiritToAlly({ target: name, amount: total, source: 'Second Wind' });
+    const inspire = characterHasTalent('inspire')
+      ? ` Inspire: ${name} may re-roll 1d20 for free on their next Skill Test.` : '';
+    toast = `Spent ${cost} Momentum. ${name} regains ${total} Spirit.${bond ? ' Supportive Bond added +1.' : ''}${inspire}`;
   }
-  logAction('Second Wind', target === 'self'
-    ? `spent ${cost} Momentum, regained ${amount} Spirit`
-    : `spent ${cost} Momentum, an ally regains ${amount} Spirit`);
-  state.character.currentMomentum -= cost;
+
   logActionNow();
   saveCharacterLocal(true);
   renderAll();
-  const supportiveText = target === 'ally' && (state.character.bonds || []).some(b => b.type === 'supportive')
-    ? ' If this is your Supportive-Bonded ally, they regain +1 additional Spirit.'
-    : '';
-  showToast(`Spent ${cost} Momentum. ${target === 'self' ? `You regain ${amount} Spirit.` : `The selected ally regains ${amount} Spirit.`}${supportiveText}`, 'success');
+  showToast(toast, 'success');
+}
+
+// ============================================================
+// SHARING SPIRIT AT A REST (v1.26)
+// ============================================================
+// The supportive bond's second route, and the one the sheet has never had: "giving up
+// their own Spirit during a rest". The rules phrase it as reducing the amount you
+// regain. Done afterwards it is the same arithmetic and does not ask the player to
+// decide before they know the number — which at a table is the difference between a
+// control people use and one they skip.
+//
+// The budget is bounded by what this rest actually returned, so it cannot be used to
+// hand out Spirit earned some other way. It is stored on the character rather than in
+// a module binding because the sheet is a modal that gets closed constantly, and a
+// GM-pushed rest often applies while nobody is looking at it.
+function giveRestSpirit(amount) {
+  const share = state.character.restShare;
+  if (!share || !(share.left > 0)) return;
+
+  const name = String(allyTarget.restShare || '').trim();
+  if (!name) {
+    showToast('Name the ally you are giving Spirit to first.', 'error');
+    return;
+  }
+
+  const n = clampNumber(amount, 1, share.left);
+  const current = getEffectiveResource('spirit');
+  if (current < n) {
+    showToast('You do not have that much Spirit left to give.', 'error');
+    return;
+  }
+
+  const recipients = Array.isArray(share.recipients) ? share.recipients : [];
+  const already = recipients.some(r => bondNamesEqual(r, name));
+  // "You may help multiple allies, to a maximum of one for each Spirit you gave up"
+  // is the whole of the Performer talent. Without it the rules allow one ally per
+  // rest, and Performer's own ceiling is satisfied automatically: every recipient
+  // costs at least 1 Spirit out of a budget that is already capped at what was gained.
+  if (!already && recipients.length >= 1 && !characterHasTalent('performer')) {
+    showToast('Without the Performer talent you may help only one ally per rest.', 'error');
+    return;
+  }
+
+  const restName = REST_TYPES[share.key] ? REST_TYPES[share.key].name : 'Rest';
+  const bond = findBondNaming('supportive', name);
+  const total = n + (bond ? 1 : 0);
+
+  state.character.currentSpirit = current - n;
+  share.left -= n;
+  if (!already) recipients.push(name);
+  share.recipients = recipients;
+  if (share.left <= 0) clearRestShare();
+
+  announceSheetAction('Shared Rest Spirit', `gave up ${n}, ${name} regains ${total}`);
+  saveCharacterLocal(true);
+  renderAll();
+  grantSpiritToAlly({ target: name, amount: total, source: `${restName} share` });
+  showToast(`You gave up ${n} Spirit. ${name} regains ${total}.${bond ? ' Supportive Bond added +1.' : ''}`, 'success');
 }
 
 function spendMomentumForAction(key, cost) {
@@ -7455,7 +7818,10 @@ function renderActionControls(action) {
   }
   if (action.key === 'secondWind') {
     const costs = {1:1,2:3,3:6};
-    const group = target => `<div class="action-controls-group"><div class="action-controls-label">${target === 'self' ? 'Restore your Spirit' : `Restore an ally's Spirit`}</div><div class="action-controls">${[1,2,3].map(points => actionConfirmButton(`+${points} / −${costs[points]} Momentum`, `useSecondWind(${points}, '${target}')`, `Spend ${costs[points]}?`, momentum < costs[points] || (target === 'self' && missingSpirit < points))).join('')}</div></div>`;
+    // v1.26. The ally half needs a name. Until now it spent the Momentum and told
+    // nobody who benefited, which is exactly the information the supportive bond turns
+    // on — and the reason the bond could not be automated before.
+    const group = target => `<div class="action-controls-group"><div class="action-controls-label">${target === 'self' ? 'Restore your Spirit' : `Restore an ally's Spirit`}</div>${target === 'ally' ? renderAllyPicker('secondWind') : ''}<div class="action-controls">${[1,2,3].map(points => actionConfirmButton(`+${points} / −${costs[points]} Momentum`, `useSecondWind(${points}, '${target}')`, `Spend ${costs[points]}?`, momentum < costs[points] || (target === 'self' && missingSpirit < points))).join('')}</div></div>`;
     return `<div class="action-controls">${group('self')}${group('ally')}</div>`;
   }
   if (action.key === 'createTruth') {
@@ -9049,6 +9415,88 @@ function installActionBridge() {
   };
 }
 
+// -------------------------------------------------------------
+// Bonds (v1.26)
+// -------------------------------------------------------------
+// The same shape as the Threat bridge: the creator funnels every bond payout through
+// two functions that only report standalone, and these replace them with a broadcast.
+// A new bond source therefore has to call one of the two funnels and nothing else.
+//
+// The effect goes into a QUEUE in room metadata rather than being applied by the
+// sender, because the sheet that owes or is owed the Spirit is almost always closed.
+// The GM's background page persists it like any other event; each sheet drains it on
+// open. background.js needed no change at all for this — persist() hands everything
+// to applyEvent(), which is the single place that knows what an event means.
+function sendBondEffect(effect) {
+  const payload = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    t: Date.now(),
+    // The character name, not the player name: bonds are written between characters,
+    // and it is the character name a bond has to match.
+    from: (state.character?.name || playerName || "Someone").slice(0, 24),
+    ...effect,
+  };
+  OBR.broadcast.sendMessage(CHANNEL, { type: "bond", effect: payload }, { destination: "ALL" })
+    .catch((err) => console.warn("[dnm] bond broadcast failed", err));
+}
+
+function installBondBridge() {
+  // Carries no target and no amount. Every sheet at the table asks itself whether it
+  // holds a rivalry naming this actor, which is the only place that question can be
+  // answered — see the BONDS block in the classic script for why it reads backwards.
+  window.announceRivalryTrigger = function announceRivalryToRoom() {
+    sendBondEffect({ kind: "rivalry" });
+  };
+  window.grantSpiritToAlly = function grantSpiritToRoom({ target, amount, source }) {
+    sendBondEffect({ kind: "grant", target, amount, source });
+  };
+}
+
+// The names offered by the ally pickers. Parsing every attached character's code is
+// the expensive part and scene.items.onChange fires on every drag frame, so this is
+// debounced and the parse is cached on the code string — a token that moved but was
+// not edited costs one map lookup. Mirrors the roller's party panel, which learned
+// the same lesson.
+const partyNameCache = new Map();
+let partyNameTimer = null;
+
+async function refreshPartyNames() {
+  let items = [];
+  try {
+    items = await OBR.scene.items.getItems();
+  } catch (err) {
+    return; // no scene open, or the read raced a scene change
+  }
+  const names = [];
+  for (const item of items) {
+    const code = item.metadata && item.metadata[CHAR_KEY] && item.metadata[CHAR_KEY].code;
+    if (typeof code !== "string" || !code) continue;
+    if (!partyNameCache.has(code)) {
+      let name = "";
+      try {
+        const parsed = parseCharacterCode(code);
+        if (parsed && !parsed.error && parsed.character && parsed.character.name) {
+          name = String(parsed.character.name);
+        }
+      } catch (err) {
+        name = "";
+      }
+      // Bounded the same way the roller's is: every edit writes a new code, so without
+      // a cap this grows by one entry per save.
+      if (partyNameCache.size > 60) partyNameCache.clear();
+      partyNameCache.set(code, name);
+    }
+    const cached = partyNameCache.get(code);
+    if (cached) names.push(cached);
+  }
+  obrPartyNames = names;
+}
+
+function schedulePartyNameRefresh() {
+  clearTimeout(partyNameTimer);
+  partyNameTimer = setTimeout(refreshPartyNames, 500);
+}
+
 let lastRoomState = null;
 
 function adoptRoom(meta) {
@@ -9071,9 +9519,16 @@ function adoptRoom(meta) {
   lastRoomState = found || null;
 
   let caughtUp = null;
-  if (ready && found) caughtUp = reconcileEpochs(found);
+  let bonded = null;
+  if (ready && found) {
+    // Epochs first. A rest restores Spirit and a bond payout clamps to the maximum, so
+    // running them the other way round would waste a grant that the rest was about to
+    // make room for.
+    caughtUp = reconcileEpochs(found);
+    bonded = reconcileBonds(found);
+  }
 
-  if (!changed && !caughtUp) return;
+  if (!changed && !caughtUp && !bonded) return;
   if (!ready) return;
   if (changed) {
     if (state.character.__setMomentumFromRoom) state.character.__setMomentumFromRoom(next);
@@ -9106,13 +9561,33 @@ function reconcileEpochs(roomState) {
   return result;
 }
 
+// v1.26. Drains whatever bond effects this character is owed, and announces only the
+// ones that actually paid out.
+//
+// applyPendingBondEffects() also returns a result when it marked ids without granting
+// anything — a first-contact adoption, or effects meant for other people. That still
+// has to reach the token, or the sheet would adopt the queue afresh on every open and
+// a grant arriving later would be swallowed as "already there when I arrived". So the
+// result is returned either way and only the detail decides whether the table hears
+// about it.
+function reconcileBonds(roomState) {
+  const queue = Array.isArray(roomState && roomState.bonds) ? roomState.bonds : [];
+  const result = applyPendingBondEffects(queue);
+  if (!result) return null;
+  if (!result.detail) return result;
+  sendAction({ label: 'Bond', detail: result.detail });
+  showToast(`A bond paid out: ${result.detail}.`, 'success');
+  return result;
+}
+
 // Called once the character is actually loaded. Without this the sheet reconciles only
 // when room metadata next changes, which from a player's seat looks like the rest
 // arriving at random — or not at all until they touched something.
 function reconcileOnOpen() {
   if (!ready || !lastRoomState) return;
   const result = reconcileEpochs(lastRoomState);
-  if (result) renderAll();
+  const bonded = reconcileBonds(lastRoomState);
+  if (result || bonded) renderAll();
 }
 
 // -------------------------------------------------------------
@@ -9357,6 +9832,7 @@ async function startEmbedded() {
   installRollBridge();
   installThreatBridge();
   installActionBridge();
+  installBondBridge();
 
   // Resolved once at start rather than per entry. sendAction() prefers the character
   // name when there is one; this is the fallback for a sheet opened on a token that
@@ -9380,6 +9856,19 @@ async function startEmbedded() {
     console.warn("[dnm] could not read room state", err);
   }
   OBR.room.onMetadataChange(adoptRoom);
+
+  // v1.26. Feeds the ally pickers. Failing here is not fatal: the pickers fall back to
+  // the character's own bond names, which is the set that matters most anyway.
+  refreshPartyNames();
+  try {
+    OBR.scene.items.onChange(schedulePartyNameRefresh);
+    // A scene change swaps the whole item set out, and this modal can outlive one.
+    // Mirrors the roller's party panel, which needs the same subscription for the
+    // same reason.
+    OBR.scene.onReadyChange((sceneReady) => { if (sceneReady) schedulePartyNameRefresh(); });
+  } catch (err) {
+    console.warn("[dnm] could not watch the scene for party names", err);
+  }
 
   const params = new URLSearchParams(location.search);
   tokenId = params.get("item");
