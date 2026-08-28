@@ -2,6 +2,124 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.27 / 0.9.7 — One press is not one broadcast
+
+Creator **v1.27**, extension **0.9.7**. Both change; deploy the extension first. No room
+metadata schema change.
+
+Reported from play: raising Threat by 3 meant pressing + three times, which sent three
+pool events and wrote three "added 1 Threat" lines. The log was recording the clicking
+rather than the decision, and the table had to add the lines up.
+
+A run of changes to the same pool under the same **label** is now summed and sent once:
+one pool event, one entry reading "added 3 Threat".
+
+## What the label does
+
+The label is the coalescing key, and that is the whole of the safety. A different label
+closes the open run and starts a new one, so an ability can never be folded into a manual
+nudge — every ability passes its own reason, and "Nanobarrier" is not "manual adjustment".
+
+Two rules fall out of it:
+
+- **A parked Momentum label is never batched.** Its detail is written by the ability
+  ("spent 3 Momentum, regained 3 Spirit"), cannot be regenerated from a total, and two
+  uses of Second Wind are two decisions rather than one spend of six. Those flush the open
+  run and send on their own, exactly as before. Only the unlabelled path — which IS the
+  +/- buttons and the number input — is summed. Threat is batchable under any label
+  because its detail always regenerates from the sum.
+- **Manual + and − share one key**, `MANUAL_POOL_LABEL`, with the direction deliberately
+  left out. Encode the direction and a press up followed by a press down cannot cancel;
+  it lands as two entries for a change nobody made. It now sends nothing at all.
+
+## The display problem
+
+Pool events are deltas and are never applied optimistically — applying locally and again
+from the GM's update would double count. So without help the number would sit still for
+the length of the window and the buttons would feel broken.
+
+`peek()` reports what has been counted but not confirmed, and the display adds it on and
+marks it unsettled (dimmed, dotted underline). It keeps reporting **across the flush**,
+until the room's own value arrives or a five-second safety timeout fires. Clearing on
+flush instead would drop the number back to its old value for the length of the broadcast
+round trip — a visible flinch on every press.
+
+The creator needs this only for Threat: Momentum is already applied locally through the
+accessor's mirror. But `adoptRoom()` now adds any still-queued Momentum back when it
+takes the room's number, or an unrelated room change mid-run would snap the counter to
+the older value and lose the presses on screen.
+
+## Ordering
+
+`announce()` in the roller and `sendAction()` in the creator both flush first, so a roll
+or a named action cannot land in the log ahead of the presses that came before it. Both
+are re-entered from inside the batcher's own send, and that is safe by construction: the
+batcher clears `pending` **before** calling send, so the re-entrant flush finds nothing.
+Moving that assignment after the send is the mutation that breaks five tests at once.
+
+## The Maverick drive
+
+"When the GM spends 3 or more Threat at once, regain 1 Spirit" was undetectable when a
+spend of 3 arrived as three spends of 1. It now arrives as one event of −3 and one line
+reading "removed 3 Threat", which is what a Maverick player needs in order to claim it.
+
+**Deliberately not automated.** All six temperament drives are displayed as text and
+claimed by hand, and several of them — "the first PC to take a turn in a round", "create a
+Truth that represents a plan" — are not detectable by the sheet at all. Automating one of
+six would be the inconsistency, not the omission.
+
+## Contract
+
+- `dnm.js` — `createPoolBatcher(send, { delay, maxWait, settleAfter })` with
+  `POOL_BATCH_MS` 900, `POOL_BATCH_MAX_MS` 2500, `POOL_SETTLE_MS` 5000. `maxWait` is why
+  leaning on a button still lands rather than waiting for the hand to stop.
+- **The batcher is duplicated** in the creator's module block, which cannot import
+  without becoming a page that needs the network — the property the vendored SDK exists
+  to protect. Change one, change both, like the four shared constants.
+- `background.js` and the reducer are **unchanged**. A batched delta is an ordinary pool
+  event; `isGmOnlyEvent()` reads the total, so a batched −3 is checked exactly as three
+  −1s were.
+
+## embedded.test.mjs — the module block finally has coverage
+
+The other three suites all ended by saying the module block was not covered, because
+jsdom does not execute `<script type="module">` and the block carries the bundled SDK.
+That was true for fifteen releases, and it is the half of the file where the interesting
+failures live.
+
+It has no imports — the SDK is inlined — so once the SDK is removed it is ordinary script
+code that runs in the same jsdom window. **Find the SDK by line length, not by text**: two
+comments above the bundle quote `const OBR = Zo;`, so a substring search deletes a comment
+and leaves the bundle. jsdom gives each `w.eval` its own scope for lexical declarations,
+so the block's `const`s are unreachable; assert through the bridges and through what was
+broadcast, which is the honest surface anyway.
+
+## Testing
+
+Creator 148, embedded 32, party 87, security 68. Every guard mutation-tested.
+
+One test was **wrong and passed**: the headline batching test drove three presses in a
+single tick, and three synchronous adds coalesce under any deferral at all, including
+`setTimeout(…, 0)`. It passed with the debounce removed. Only a test with real gaps
+between the presses caught it. When the behaviour is about timing, space the test out like
+a hand does.
+
+## Live checks
+
+1. Press + on Threat three times quickly. The number moves at once and reads dimmed with a
+   dotted underline; about a second later it settles and the log shows **one** line,
+   "added 3 Threat".
+2. Press + then − quickly. Nothing appears in the log at all.
+3. Press + once, wait, press + again. Two separate lines — coalescing must not swallow a
+   second decision.
+4. Use an ability that charges Threat right after a manual nudge. Two entries, the ability
+   under its own name.
+5. Use Second Wind twice in quick succession. Two entries, each with its own detail.
+6. As GM, press − three times. One line reading "removed 3 Threat" — the trigger a
+   Maverick player is watching for.
+
+---
+
 # v1.26 / 0.9.6 — Bond automation, and sharing a rest
 
 Creator **v1.26**, extension **0.9.6**. Both change; deploy the extension first. Room

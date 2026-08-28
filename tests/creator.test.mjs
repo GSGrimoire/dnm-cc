@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.26", g("APP_VERSION") === "1.26");
+ok("APP_VERSION is 1.27", g("APP_VERSION") === "1.27");
 
 // -------------------------------------------------------------
 // Fixture
@@ -752,14 +752,56 @@ const reset = () => g("window.__cap.length = 0;");
   g("obrPartyNames = []");
 }
 
+// -------------------------------------------------------------
+// Pool batching seams (v1.27)
+// -------------------------------------------------------------
+// The batching itself lives in the module block and is covered against dnm.js in
+// party.test.mjs. What is testable HERE is that the standalone half still has the
+// seams the module block replaces, and that the Threat counter reads the pending
+// total rather than the room's number alone — a display that ignored it would freeze
+// for the length of the batching window and the buttons would feel broken.
+{
+  ok("getPendingThreat exists as the bridge seam", g("typeof getPendingThreat") === "function");
+  ok("and reports nothing standalone, where there is no room to wait for",
+    g("getPendingThreat()") === 0);
+
+  // The counter is Owlbear-only markup, rendered always and hidden by CSS in a tab.
+  g("obrRole = 'GM'; obrThreat = 4;");
+  ok("the counter shows the room's number when nothing is pending",
+    /resource-value">4</.test(g("renderThreatCounter()")));
+  ok("and is not marked unsettled", !g("renderThreatCounter()").includes("resource-controls unsettled"));
+
+  w.getPendingThreat = () => 3;
+  ok("the counter adds what has not been confirmed yet",
+    /resource-value">7</.test(g("renderThreatCounter()")));
+  ok("and says so, rather than claiming the room has agreed",
+    g("renderThreatCounter()").includes("resource-controls unsettled"));
+
+  // A pool cannot read below zero even if a pending spend overshoots.
+  w.getPendingThreat = () => -9;
+  ok("a pending total cannot drag the display below zero",
+    /resource-value">0</.test(g("renderThreatCounter()")));
+  w.getPendingThreat = () => 0;
+
+  // addThreat must survive as the funnel. Every Threat source in the file goes through
+  // it, and the module block batches at that one point; a call site that broadcast for
+  // itself would bypass the batching and be back to one event per press.
+  ok("addThreat survives as the single Threat funnel", g("typeof addThreat") === "function");
+  ok("no Threat source broadcasts on its own",
+    (html.match(/pool:\s*["']threat["']/g) || []).length === 0);
+
+  g("obrRole = null; obrThreat = null;");
+}
+
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);
 console.log(`
-NOT VERIFIED HERE — OBR.isAvailable is false, so the module block never ran:
-  · every broadcast: rolls, actions, pool events, injury entries reaching the log
-  · every room-metadata read and write
-  · the Momentum accessor and the addThreat() replacement
-  · epoch catch-up on sheet open
-  · role gates, and modal open / close / resize
+NOT VERIFIED HERE — OBR.isAvailable is false, so the module block never ran.
+Since v1.27 much of it IS covered, by embedded.test.mjs, which runs the block
+against a stub SDK: the bridges, the Momentum accessor, addThreat, the bond
+bridge and the pool batcher. What neither suite can reach:
+  · that a broadcast is actually delivered, and the GM's relay accepting it
+  · room metadata round trips, and epoch or bond catch-up against a real room
+  · role gates, modal open / close / resize, token reads and writes
   · the party panel in its entirety — that is extension code, in roller.js
 These need the live checks listed in UPGRADE_NOTES.md.`);
 process.exit(fail ? 1 : 0);

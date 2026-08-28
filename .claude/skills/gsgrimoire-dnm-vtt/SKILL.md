@@ -151,6 +151,33 @@ Before tightening a permission, find **every** caller of the path. Threat was lo
 by reading the roller's UI, which had disabled it for players — and that silently broke every
 ability that charges Threat from the sheet.
 
+## Pool changes
+
+Every Threat change funnels through the creator's `addThreat()`; every Momentum change
+goes through the accessor `bindMomentumToRoom()` installs, which catches all six write
+paths because there is no way to write the field that does not go through the setter. A
+call site that broadcasts for itself is a bug — it bypasses the funnel and, since v1.27,
+the batching with it.
+
+Since v1.27 a run of nudges to the same pool under the same LABEL is summed and sent once:
+one pool event, one log line reading "added 3 Threat". Three presses used to be three of
+each, and the log recorded the clicking rather than the decision. The label is the
+coalescing key, which is what keeps an ability out of a manual run — every ability passes
+its own reason.
+
+Two rules the batching depends on:
+
+- **A parked Momentum label is never batched.** Its detail is written by the ability
+  ("spent 3 Momentum, regained 3 Spirit") and cannot be regenerated from a total, and two
+  uses of Second Wind are two decisions rather than one spend of six. Threat is batchable
+  under any label because its detail always regenerates from the sum.
+- **Manual + and − share one key** (`MANUAL_POOL_LABEL`) with the direction left out, or a
+  press up and a press down cannot cancel and land as two entries for a change nobody made.
+
+`createPoolBatcher()` is duplicated: `dnm.js` for the roller, and a copy in the creator's
+module block, which cannot import without becoming a page that needs the network. Change
+one, change both — the same rule as the four shared constants.
+
 ## Working from a QA report
 
 Play reports arrive as symptoms, and the same root cause usually produces several. Reproduce
@@ -186,9 +213,21 @@ for t in creator party security; do node tests/$t.test.mjs; done
 and playwright in ONE command or the next run dies on a missing module.
 
 - `creator.test.mjs` — the creator in jsdom, module block stripped
-- `party.test.mjs` — party status, the GM-only rule, the bond queue
+- `embedded.test.mjs` — the module block itself, run against a stub SDK
+- `party.test.mjs` — party status, the GM-only rule, the bond queue, the pool batcher
 - `security.test.mjs` — written from the attacker's side: forged events into the reducer,
   hostile codes into the parser
+
+`embedded.test.mjs` (v1.27) closed a gap the other three had disclaimed for fifteen
+releases. The block has no imports — the SDK is inlined — so once the SDK is removed it
+is ordinary script code that can be evaluated in the same jsdom window. **Find the SDK by
+LINE LENGTH, not by text**: two comments above the bundle quote `const OBR = Zo;`, so a
+substring search deletes a comment and leaves the SDK in place.
+
+jsdom gives each `w.eval` its own scope for lexical declarations, so the block's `const`
+and `let` bindings are unreachable from a test. Function declarations and `window.*`
+assignments are. Assert through the bridges and through what was BROADCAST — which is
+the honest surface anyway, since what the room is told is the thing that matters.
 
 Two rules earned the hard way:
 
@@ -199,7 +238,14 @@ whatever the code already does. That is how a forced-talent bug survived a full 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.
 
-The jsdom suites cannot execute the creator's module block or anything needing a live room —
-broadcasts, room metadata, role gates, the party panel. Use Playwright against the extension's
-standalone page for layout and controls, and list the rest as live checks in the release notes
-rather than implying coverage that does not exist.
+Do it against `out/`, not the source — mutate the staged copy, run, restage. And when the
+behaviour is about TIMING, space the test out like a hand does. The pool batcher's
+headline test drove three presses in one tick, which coalesce under any deferral at all
+including `setTimeout(…, 0)` — so it passed with the debounce removed. Only a test with
+real gaps between the presses caught it.
+
+What no suite can reach: actual broadcast delivery, the GM's relay, room metadata round
+trips, role gates, the modal, and the party panel. Use Playwright against either
+standalone page for layout and cascade — **jsdom does no cascade and will report borders
+and computed styles that do not exist** — and list the rest as live checks in the release
+notes rather than implying coverage that does not exist.

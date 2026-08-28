@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.26</h1>
-    <p class="lead">Bonds do something now. A rivalry pays out when your rival buys Spirit with Threat, a supportive bond adds to whatever you give an ally, and you can hand an ally part of your own rest. All of it reaches the other player&apos;s sheet on its own, even if they had it closed at the time.</p>
+    <h1>Version v.1.27</h1>
+    <p class="lead">Pressing + three times is one change, not three. Threat and Momentum nudges are added up and posted once, so the log says &ldquo;added 3 Threat&rdquo; instead of three separate lines &mdash; and a Maverick can finally see when the GM has spent 3 or more at once.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -334,6 +334,10 @@ h1 {
         <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
       </article>
       <article class="feature-card">
+        <h3>One Change, One Line</h3>
+        <p>A run of +/&minus; presses on Threat or Momentum is added up and posted once. The number moves as you press; it reads dimmed until the table confirms it.</p>
+      </article>
+      <article class="feature-card">
         <h3>Rivalry Bonds</h3>
         <p>When someone uses Adrenaline Rush, anyone holding a rivalry bond with them recovers 1 Spirit. It arrives on its own.</p>
       </article>
@@ -351,7 +355,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.26 needs extension 0.9.6; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.27 needs extension 0.9.7; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -362,6 +366,24 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.27</span>
+          <span class="version-title">Pressing + three times is one change, not three</span>
+        </summary>
+        <ul>
+        <li><strong>A run of Threat or Momentum presses is added up and posted once.</strong> Raising Threat by 3 used to write three separate &ldquo;added 1 Threat&rdquo; lines, so the log recorded the clicking rather than the decision and everyone had to add them up. It now reads <em>added 3 Threat</em>, once.</li>
+        <li><strong>Press + then &minus; and nothing is posted at all.</strong> Previously that was two lines for a change nobody made.</li>
+        <li>The number still moves the moment you press it. While it is waiting for the table to confirm it, it reads dimmed with a dotted underline &mdash; the value is right, and the panel is not pretending it has landed yet.</li>
+        <li>Abilities are never rolled into a manual adjustment. Anything with its own name &mdash; Adrenaline Rush, Nanobarrier, Second Wind &mdash; still posts on its own, with its own wording. Two uses of Second Wind stay two entries.</li>
+        <li>Wait a moment between presses and you get two entries, as you should. Only a quick run counts as one decision.</li>
+        <li><strong>Maverick players:</strong> your drive is &ldquo;when the GM spends 3 or more Threat at once, regain 1 Spirit&rdquo;, and until now there was no way to tell 3 at once from three separate 1s. The log now says <em>removed 3 Threat</em> in one line. It is still yours to claim &mdash; all six drives work that way, and several of them are things the sheet cannot see at all.</li>
+        <li>Requires extension 0.9.7. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.26</span>
           <span class="version-title">Bonds pay out by themselves, and you can share a rest</span>

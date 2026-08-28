@@ -2273,6 +2273,16 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
    that wants an exact answer rather than a note to self. The datalist supplies the
    spellings; typing an unlisted name stays legal, because a bond may name an NPC or
    someone who has not attached a token yet. */
+/* v1.27. A run of +/- presses is summed and sent once, so between the last press and
+   the room confirming it this number is what this client expects rather than what the
+   room has agreed. Dimmed while that is true: the value is right, and the sheet is not
+   pretending it has landed. */
+.resource-controls.unsettled .resource-value {
+  opacity: 0.72;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .ally-picker { margin: 0 0 6px; }
 .ally-input {
   width: 100%;
@@ -2636,7 +2646,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.26';
+const APP_VERSION = '1.27';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -6977,8 +6987,16 @@ let obrThreat = null;
 // Null standalone, where there is no room and no GM.
 let obrRole = null;
 
+// v1.27. What the pool batcher is holding but has not had confirmed by the room. Zero
+// standalone, where there is no room and nothing to wait for; the module block replaces
+// it. Threat is display-only here — it is not a field on the character — so unlike
+// Momentum there is no local mirror to read, and without this the number would sit
+// still for the length of the batching window and the buttons would feel broken.
+function getPendingThreat() { return 0; }
+
 function renderThreatCounter() {
-  const value = obrThreat == null ? 0 : obrThreat;
+  const pending = getPendingThreat();
+  const value = Math.max(0, (obrThreat == null ? 0 : obrThreat) + pending);
   const isGM = obrRole === "GM";
 
   // v1.23. Manual nudges are the GM's, matching the roller, where the Threat buttons
@@ -7003,7 +7021,7 @@ function renderThreatCounter() {
 
   return `<div class="resource-counter obr-only threat-counter">
     <div class="resource-label dm-tip" tabindex="0">Threat<span class="dm-tip-body"><span class="dm-tip-title">Threat</span><span class="dm-tip-desc">${note}</span></span></div>
-    <div class="resource-controls">${controls}</div>
+    <div class="resource-controls${pending !== 0 ? ' unsettled' : ''}">${controls}</div>
     <div class="resource-max">${isGM ? 'group pool' : 'GM pool'}</div>
   </div>`;
 }
@@ -9153,6 +9171,105 @@ const ROOM_KEY = "com.thuknights.dnm-rolls/state";
 
 const SAVE_DEBOUNCE_MS = 400;
 
+// ---------------------------------------------------------------------------
+// Coalescing pool nudges (v1.27)
+// ---------------------------------------------------------------------------
+// A COPY of createPoolBatcher() in dnm.js. Change one, change both — the same rule
+// the four shared constants above follow, and for the same reason: this file cannot
+// import from the extension without becoming a page that needs the network to work,
+// which is the property the vendored SDK exists to protect.
+//
+// Reported from play: raising Threat by 3 meant pressing + three times, which sent
+// three pool events and wrote three "added 1 Threat" lines. The log recorded the
+// clicking rather than the decision. A run of changes to the same pool under the same
+// label is now summed and sent once.
+//
+// A different label flushes the run first, which is what stops an ability being folded
+// into a manual adjustment: every ability passes its own reason, and "Nanobarrier" is
+// not "manual adjustment", so the two can never merge.
+const POOL_BATCH_MS = 900;
+const POOL_BATCH_MAX_MS = 2500;
+const POOL_SETTLE_MS = 5000;
+
+function createPoolBatcher(send, opts = {}) {
+  const delay = opts.delay ?? POOL_BATCH_MS;
+  const maxWait = opts.maxWait ?? POOL_BATCH_MAX_MS;
+  const settleAfter = opts.settleAfter ?? POOL_SETTLE_MS;
+
+  let pending = null;
+  let timer = null;
+  let deadline = 0;
+  let settleTimer = null;
+  const inFlight = { momentum: 0, threat: 0 };
+
+  const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  function settle() {
+    if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+    inFlight.momentum = 0;
+    inFlight.threat = 0;
+  }
+
+  function flush() {
+    stopTimer();
+    const batch = pending;
+    pending = null;
+    deadline = 0;
+    // A run that cancels itself out is not an event and not a log line.
+    if (!batch || !batch.delta) return null;
+    inFlight[batch.pool] = (inFlight[batch.pool] || 0) + batch.delta;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(settle, settleAfter);
+    send(batch);
+    return batch;
+  }
+
+  function add(pool, delta, label) {
+    const n = Math.round(Number(delta) || 0);
+    if (!n) return;
+    if (pending && (pending.pool !== pool || pending.label !== label)) flush();
+    if (!pending) {
+      pending = { pool, label, delta: 0 };
+      deadline = Date.now() + maxWait;
+    }
+    pending.delta += n;
+    stopTimer();
+    timer = setTimeout(flush, Math.max(0, Math.min(delay, deadline - Date.now())));
+  }
+
+  function peek(pool) {
+    const queued = pending && pending.pool === pool ? pending.delta : 0;
+    return queued + (inFlight[pool] || 0);
+  }
+
+  return { add, flush, peek, settle };
+}
+
+// The label a manual nudge batches under. Direction is deliberately NOT part of it:
+// pressing + then - has to cancel to nothing rather than land as two entries, and it
+// cannot cancel if up and down carry different keys. The wording is worked out from
+// the sign of the total at flush.
+const MANUAL_POOL_LABEL = " manual";
+
+const poolBatch = createPoolBatcher(({ pool, delta, label }) => {
+  OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool, delta }, { destination: "ALL" })
+    .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+
+  const momentum = pool === "momentum";
+  const down = delta < 0;
+  const manual = label === MANUAL_POOL_LABEL;
+  sendAction({
+    label: manual ? (momentum ? (down ? "Momentum spent" : "Momentum gained") : "Threat") : label,
+    detail: `${down ? (momentum ? "spent" : "removed") : (momentum ? "gained" : "added")} ${Math.abs(delta)} ${momentum ? "Momentum" : "Threat"}`,
+    pool,
+    delta,
+  });
+
+  // The Threat counter reads getPendingThreat(), which has just changed shape from
+  // "queued" to "in flight", so the sheet has to be told to draw it again.
+  if (ready) renderAll();
+});
+
 let tokenId = null;
 let ready = false;          // true once a character is loaded and saving is allowed
 let saveTimer = null;
@@ -9230,6 +9347,7 @@ function hookRenderAll() {
 // for a roll made there. The fallbacks below cover a roll computed before that.
 function installRollBridge() {
   window.postRoll = function postRollToOwlbear(from, res) {
+    poolBatch.flush();
     const detail = res.dice.map((d) => ({ d, kind: classifyDie(d, res.attrValue, res.skillValue) }));
     const entry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -9288,8 +9406,6 @@ function bindMomentumToRoom(character) {
       // events from the broadcast channel, and the GM's metadata update sets the
       // value absolutely rather than as a delta, so there is nothing to double.
       mirror = next;
-      OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
-        .catch((err) => console.warn("[dnm] pool broadcast failed", err));
 
       // v1.17. The accessor catches all six write paths, which is exactly why it
       // cannot name them: it sees a number change, not a reason. So the handlers
@@ -9304,16 +9420,28 @@ function bindMomentumToRoom(character) {
       //
       // suppressPoolLog is set around normalizeCurrentValues(), whose clamp is a pool
       // write like any other. Loading a sheet is not an action.
-      if (!suppressPoolLog) {
-        const spent = delta < 0;
-        const parked = pendingActionLabel;
-        pendingActionLabel = null;
-        sendAction({
-          label: parked ? parked.label : (spent ? "Momentum spent" : "Momentum gained"),
-          detail: parked ? parked.detail : `${spent ? "spent" : "gained"} ${Math.abs(delta)} Momentum`,
-          pool: "momentum",
-          delta,
-        });
+      //
+      // v1.27. A PARKED label is never batched. Its detail is written by the ability
+      // itself — "spent 3 Momentum, regained 3 Spirit" — and cannot be regenerated
+      // from a total, and two uses of Second Wind are two decisions rather than one
+      // spend of six. So a named ability flushes whatever run is open and sends on its
+      // own, exactly as before. Only the unlabelled path, which IS the +/- buttons and
+      // the number input, gets summed.
+      const parked = pendingActionLabel;
+      pendingActionLabel = null;
+      if (suppressPoolLog) {
+        // Bookkeeping, not an action — but it still has to reach the room, and it must
+        // not be summed into whatever the player was doing before it.
+        poolBatch.flush();
+        OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
+          .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+      } else if (parked) {
+        poolBatch.flush();
+        OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
+          .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+        sendAction({ label: parked.label, detail: parked.detail, pool: "momentum", delta });
+      } else {
+        poolBatch.add("momentum", delta, MANUAL_POOL_LABEL);
       }
     },
   });
@@ -9341,21 +9469,31 @@ function installThreatBridge() {
   window.addThreat = function patchedAddThreat(amount, reason) {
     const n = Math.round(Number(amount) || 0);
     if (!n) return;
-    OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "threat", delta: n }, { destination: "ALL" })
-      .catch((err) => console.warn("[dnm] threat broadcast failed", err));
     // v1.17: the reason was always computed and always thrown away here — used for the
     // local toast and dropped from the broadcast. Every Threat call site passes a real
     // one: the item and action name, "Adrenaline Rush", "I Know a Guy", "manual
     // adjustment". Carrying it through is the whole of what makes the Threat half of
     // the log readable.
-    sendAction({
-      label: reason || "Threat",
-      detail: `${n > 0 ? "added" : "removed"} ${Math.abs(n)} Threat`,
-      pool: "threat",
-      delta: n,
-    });
+    //
+    // v1.27: it is now the batching key as well. Unlike Momentum, every Threat entry's
+    // detail is "added N Threat" and is regenerable from a total, so any run under one
+    // reason can merge — two Nanobarrier charges in the same breath read correctly as
+    // "added 2 Threat". The manual buttons pass MANUAL_POOL_LABEL so that + and − under
+    // it cancel rather than stack.
+    poolBatch.add("threat", n, reason === "manual adjustment" ? MANUAL_POOL_LABEL : (reason || "Threat"));
     // Still shows the toast, so the player sees what was pushed and why.
     if (typeof original === "function") original(n, reason);
+    // Nothing else redraws after a manual Threat press — the counter is display-only
+    // and normally waits for the room. It has to show the pending total now.
+    if (ready) renderAll();
+  };
+}
+
+// The classic script's stand-in, replaced so the Threat counter can show what has been
+// counted but not yet confirmed.
+function installPendingThreatBridge() {
+  window.getPendingThreat = function pendingThreatFromBatcher() {
+    return poolBatch.peek("threat");
   };
 }
 
@@ -9391,6 +9529,11 @@ async function resolvePlayerName() {
 }
 
 function sendAction({ label, detail, pool, delta }) {
+  // v1.27. Anything else reaching the log ends an open run of pool nudges first, so a
+  // named action cannot land ahead of the presses that came before it. Re-entrant by
+  // design and harmless: the batcher clears its pending run before calling back into
+  // here, so the flush this triggers from inside its own send finds nothing to do.
+  poolBatch.flush();
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     t: Date.now(),
@@ -9501,6 +9644,10 @@ let lastRoomState = null;
 
 function adoptRoom(meta) {
   const found = meta && meta[ROOM_KEY];
+  // v1.27. The room's own numbers have arrived, which is the only confirmation there
+  // is, so anything the batcher had in flight stops being a promise. Settled BEFORE
+  // the values are read, or a delta already included in them would be counted twice.
+  poolBatch.settle();
   const next = found && typeof found.momentum === "number" ? found.momentum : 0;
   const nextThreat = found && typeof found.threat === "number" ? found.threat : 0;
   // v1.25. The GM's Complication threshold. A change to it alters what every future
@@ -9531,8 +9678,14 @@ function adoptRoom(meta) {
   if (!changed && !caughtUp && !bonded) return;
   if (!ready) return;
   if (changed) {
-    if (state.character.__setMomentumFromRoom) state.character.__setMomentumFromRoom(next);
-    else state.character.currentMomentum = next;
+    // v1.27. Plus whatever is still queued. settle() above has already cleared the
+    // in-flight part, so this is only the presses that have not been sent yet — and
+    // without adding them back, an unrelated room change during a run of clicks would
+    // snap the counter to the room's older number and lose them on screen.
+    const queued = poolBatch.peek("momentum");
+    const value = Math.max(0, next + queued);
+    if (state.character.__setMomentumFromRoom) state.character.__setMomentumFromRoom(value);
+    else state.character.currentMomentum = value;
   }
   renderAll();
 }
@@ -9833,6 +9986,7 @@ async function startEmbedded() {
   installThreatBridge();
   installActionBridge();
   installBondBridge();
+  installPendingThreatBridge();
 
   // Resolved once at start rather than per entry. sendAction() prefers the character
   // name when there is one; this is the fallback for a sheet opened on a token that

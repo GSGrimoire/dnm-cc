@@ -2,7 +2,8 @@
 // reimplementation, no hand-built status objects.
 import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
   COMP_AT_MIN, COMP_AT_MAX, readBondQueue, pruneBondQueue, bondNamesMatch,
-  MAX_BOND_EFFECTS, BOND_EFFECT_TTL_MS, trimState, MAX_LOG_ENTRIES } from "../out/dnm-obr/dnm.js";
+  MAX_BOND_EFFECTS, BOND_EFFECT_TTL_MS, trimState, MAX_LOG_ENTRIES,
+  createPoolBatcher } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -224,6 +225,145 @@ ok("a zero Threat delta is not a spend",
   // break every bond at a table whose GM has the extension closed.
   ok("a bond event is not GM-only",
     isGmOnlyEvent({ type: "bond", effect: { id: "b6", kind: "rivalry", from: "K" } }) === false);
+}
+
+// -------------------------------------------------------------
+// Coalescing pool nudges (0.9.7)
+// -------------------------------------------------------------
+// Short delays so the suite stays fast. The real values are 900/2500/5000 and the
+// behaviour under test is the arithmetic and the flush rules, not the constants.
+{
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const make = (opts) => {
+    const sent = [];
+    const b = createPoolBatcher((batch) => sent.push(batch), { delay: 20, maxWait: 120, settleAfter: 200, ...opts });
+    return { b, sent };
+  };
+
+  // The report from play: +1 three times sent three events and wrote three log lines.
+  {
+    const { b, sent } = make();
+    b.add("threat", 1, "manual"); b.add("threat", 1, "manual"); b.add("threat", 1, "manual");
+    ok("a run of presses sends nothing until it stops", sent.length === 0);
+    ok("and the display can see the total meanwhile", b.peek("threat") === 3);
+    await wait(60);
+    ok("a run of three presses is one event", sent.length === 1);
+    ok("carrying the total", sent[0].delta === 3 && sent[0].pool === "threat");
+  }
+
+  // The same thing SPACED OUT, which is how a person actually clicks. Three adds in
+  // one tick coalesce under any deferral at all, including setTimeout(…, 0) — so the
+  // test above passes even with the debounce removed. This is the one that fails.
+  {
+    const { b, sent } = make({ delay: 50, maxWait: 1000 });
+    for (let i = 0; i < 3; i++) { b.add("threat", 1, "manual"); await wait(15); }
+    ok("presses spaced out like a real hand are still one run", sent.length === 0);
+    await wait(90);
+    ok("and land as a single event of 3", sent.length === 1 && sent[0].delta === 3);
+  }
+
+  // And a genuinely separate decision, after the run has closed, is a separate entry.
+  // Coalescing must not swallow the second thought.
+  {
+    const { b, sent } = make({ delay: 20, maxWait: 1000 });
+    b.add("threat", 1, "manual");
+    await wait(70);
+    b.add("threat", 1, "manual");
+    await wait(70);
+    ok("two presses far apart stay two events", sent.length === 2);
+  }
+
+  // This is what makes the Maverick drive readable: "spends 3 or more Threat AT ONCE"
+  // was undetectable when three presses arrived as three events of 1.
+  {
+    const { b, sent } = make();
+    for (let i = 0; i < 3; i++) b.add("threat", -1, "manual");
+    await wait(60);
+    ok("a spend of three arrives as one event of -3", sent.length === 1 && sent[0].delta === -3);
+    ok("and is still GM-only, because that is read off the total",
+      isGmOnlyEvent({ type: "pool", pool: "threat", delta: sent[0].delta }) === true);
+  }
+
+  // Previously two events and two log lines for a change nobody made.
+  {
+    const { b, sent } = make();
+    b.add("momentum", 1, "manual");
+    b.add("momentum", -1, "manual");
+    await wait(60);
+    ok("a run that cancels itself out sends nothing at all", sent.length === 0);
+    ok("and leaves nothing pending afterwards", b.peek("momentum") === 0);
+  }
+
+  // The guard that keeps an ability from being folded into a manual nudge.
+  {
+    const { b, sent } = make();
+    b.add("threat", 1, "manual");
+    b.add("threat", 6, "Adrenaline Rush");
+    ok("a different label flushes the run immediately rather than merging",
+      sent.length === 1 && sent[0].delta === 1 && sent[0].label === "manual");
+    await wait(60);
+    ok("and the new label goes out on its own",
+      sent.length === 2 && sent[1].delta === 6 && sent[1].label === "Adrenaline Rush");
+  }
+
+  {
+    const { b, sent } = make();
+    b.add("threat", 1, "manual");
+    b.add("momentum", 1, "manual");
+    ok("a different pool flushes too — the two are never summed together",
+      sent.length === 1 && sent[0].pool === "threat");
+  }
+
+  // Someone leaning on + must still see the pool move rather than nothing until they
+  // let go, so the debounce has a ceiling.
+  {
+    const { b, sent } = make({ delay: 40, maxWait: 90 });
+    const t0 = Date.now();
+    const id = setInterval(() => b.add("momentum", 1, "manual"), 10);
+    await wait(140);
+    clearInterval(id);
+    ok("holding a button still lands within the ceiling", sent.length >= 1);
+    ok("and the first send happened before the presses stopped", Date.now() - t0 >= 90);
+  }
+
+  // peek() is what stops the number freezing for the length of the window. It has to
+  // keep reporting ACROSS the flush, or the display drops back to the old value for
+  // the length of the broadcast round trip — a visible flinch on every press.
+  {
+    const { b } = make();
+    b.add("threat", 2, "manual");
+    ok("peek reports what is queued", b.peek("threat") === 2);
+    await wait(60);
+    ok("and keeps reporting it after the flush, until the room confirms",
+      b.peek("threat") === 2);
+    b.settle();
+    ok("settle clears it", b.peek("threat") === 0);
+    ok("peek never reports another pool's total", b.peek("momentum") === 0);
+  }
+
+  // If the confirmation never arrives, the display must not be wrong forever.
+  {
+    const { b } = make({ settleAfter: 40 });
+    b.add("momentum", 3, "manual");
+    await wait(120);
+    ok("an unconfirmed batch gives up on its own rather than sticking", b.peek("momentum") === 0);
+  }
+
+  // flush() re-entered from inside its own send finds nothing to do. Both callers rely
+  // on this: announce() and sendAction() flush on every outgoing message, and the
+  // batcher reaches them through exactly those functions.
+  {
+    let depth = 0, maxDepth = 0, calls = 0;
+    const b = createPoolBatcher(() => {
+      calls++;
+      depth++; maxDepth = Math.max(maxDepth, depth);
+      b.flush();
+      depth--;
+    }, { delay: 5 });
+    b.add("threat", 2, "manual");
+    b.flush();
+    ok("a re-entrant flush does not send twice or recurse", calls === 1 && maxDepth === 1);
+  }
 }
 
 console.log(`\nparty: ${pass} passed, ${fail} failed`);
