@@ -3,7 +3,7 @@
 import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
   COMP_AT_MIN, COMP_AT_MAX, readBondQueue, pruneBondQueue, bondNamesMatch,
   MAX_BOND_EFFECTS, BOND_EFFECT_TTL_MS, trimState, MAX_LOG_ENTRIES,
-  createPoolBatcher } from "../out/dnm-obr/dnm.js";
+  createPoolBatcher, sanitizeBondEffect, DRIVE_THREAT_SPEND_MIN, FIELD_LIMITS } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -220,11 +220,48 @@ ok("a zero Threat delta is not a spend",
       readBondQueue(trimmed).length === 1 && readBondQueue(trimmed)[0].id === "keep");
   }
 
-  // Not privileged, and deliberately so: a forged effect can only land on a sheet
-  // that already holds the matching bond, for one Spirit. Making it GM-only would
-  // break every bond at a table whose GM has the extension closed.
-  ok("a bond event is not GM-only",
+  // The two BONDS are not privileged, and deliberately so: a forged effect can only
+  // land on a sheet that already holds the matching bond, for one Spirit. Making them
+  // GM-only would break every bond at a table whose GM has the extension closed.
+  ok("a rivalry effect is not GM-only",
     isGmOnlyEvent({ type: "bond", effect: { id: "b6", kind: "rivalry", from: "K" } }) === false);
+  ok("a grant is not GM-only",
+    isGmOnlyEvent({ type: "bond", effect: { id: "b7", kind: "grant", from: "K", target: "A", amount: 2 } }) === false);
+
+  // The DRIVE is, because its own text says "when THE GM spends". Unlike a bond, a
+  // forged copy would reach every Maverick at the table on nobody's authority.
+  ok("a drive effect IS GM-only",
+    isGmOnlyEvent({ type: "bond", effect: { id: "b8", kind: "drive", drive: "maverick", amount: 3 } }) === true);
+  ok("and a bond event with no effect is not privileged by accident",
+    isGmOnlyEvent({ type: "bond" }) === false);
+}
+
+// -------------------------------------------------------------
+// The Maverick drive (0.9.8)
+// -------------------------------------------------------------
+{
+  const fresh = () => structuredClone(EMPTY_STATE);
+  const now = Date.now();
+  const drive = (extra) => sanitizeBondEffect({ id: "d1", t: now, kind: "drive", drive: "maverick", from: "GM", amount: 3, ...extra });
+
+  ok("the threshold is the one in the drive's own text", DRIVE_THREAT_SPEND_MIN === 3);
+
+  const d = drive();
+  ok("a drive effect survives the reducer", !!d && d.kind === "drive");
+  ok("carrying which drive it is", d.drive === "maverick");
+  ok("and the size of the spend, for the recipient's log", d.amount === 3);
+
+  // Like a rivalry, a drive names nobody: every sheet decides for itself, here by
+  // reading its own temperament. A forged target must not survive to imply otherwise.
+  ok("a forged target does not survive on a drive", drive({ target: "Someone" }).target === undefined);
+  ok("the amount is clamped like any other untrusted number", drive({ amount: 1e9 }).amount === 999);
+  ok("a negative amount cannot survive", drive({ amount: -5 }).amount === 0);
+  ok("the drive key is length-clamped", drive({ drive: "x".repeat(500) }).drive.length === FIELD_LIMITS.id);
+
+  const queued = applyEvent(fresh(), { type: "bond", effect: { id: "d2", t: now, kind: "drive", drive: "maverick", from: "GM", amount: 4 } });
+  ok("it queues like any other effect", readBondQueue(queued).length === 1);
+  ok("waiting for sheets that are shut, which is the whole point",
+    readBondQueue(queued)[0].kind === "drive");
 }
 
 // -------------------------------------------------------------

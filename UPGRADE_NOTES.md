@@ -2,6 +2,81 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.28 / 0.9.8 — The Maverick drive fires by itself
+
+Creator **v1.28**, extension **0.9.8**. Both change; deploy the extension first. No room
+metadata schema change — `drive` is a third `kind` on the existing bond queue.
+
+"When the GM spends 3 or more Threat at once, regain 1 Spirit." v1.27 made this
+*readable*, and the note there said it was deliberately not automated because all six
+temperament drives are claimed by hand. Asked for, so built — with the announcement the
+request specified: a broadcast to the shared log and a toast at both ends, so nothing
+happens silently.
+
+## Why it needed v1.27 first
+
+"At once" had nothing to read while a spend of 3 arrived as three spends of 1. Coalescing
+is the whole reason this is possible, and it is also why the announcement has to come
+from **the client that made the spend**: only that client knows a run of presses was one
+decision. Room metadata just shows a number that moved.
+
+There are two such clients — the roller's pool buttons and the sheet's Threat controls,
+which have been the GM's since v1.23 — so `announceThreatSpendDrive()` exists in both,
+hung off each side's batcher flush.
+
+## GM-only, unlike the two bonds
+
+`isGmOnlyEvent()` now returns true for a `bond` event of kind `drive`. That is a
+departure from v1.26, which deliberately left bonds open, and the reason is the rule's own
+wording: "when **the GM** spends". A forged rivalry can only pay a sheet that already
+holds the matching bond; a forged drive would reach every Maverick at the table on
+nobody's authority. The sender-side role check stays as well, but it is the reducer's
+check the GM's background page actually enforces.
+
+## Recipient side
+
+`applyPendingBondEffects()` grows a third branch. It reads the character's own
+**temperament**, not a bond list — nobody writes a bond for this — and it checks
+`fx.drive === 'maverick'` rather than paying out on the strength of being a drive at all.
+The other five drives are not detectable by the sheet ("the first PC to take a turn in a
+round", "create a Truth that represents a plan"), so an effect naming one is a message
+from a future version and paying it would be inventing a rule.
+
+**No self-guard, unlike the two bonds.** The sender is the GM rather than a character, so
+a GM who also plays a Maverick is entitled to their own drive. The guard moved inside the
+rivalry and grant branches rather than sitting above all three.
+
+The log entry is labelled **Drive**, not Bond. Calling it a bond would send a Maverick
+looking for a bond they never wrote.
+
+## Announcements
+
+- The spending GM: a toast on the sheet, a status line in the roller — "Spent 3 Threat at
+  once — every Maverick regains 1 Spirit."
+- Each Maverick: the existing bond payout path, which already broadcasts one entry to the
+  shared log and shows a local toast. Now labelled Drive.
+
+## Testing
+
+Creator 155, embedded 40, party 100, security 68. Mutation-tested: the temperament check,
+the drive-key check, the threshold, the sender's role check and the Drive label each
+break their own assertion when reverted.
+
+The temperament test **walks every temperament in `DM_DATA`** rather than asserting the
+one that pays. A test naming only Maverick would not catch a branch that pays everyone.
+
+## Live checks
+
+1. As GM, press Threat − three times quickly. Toast: "Spent 3 Threat at once". Every
+   Maverick at the table gains 1 Spirit and their log shows a **Drive** line.
+2. Do it with a Maverick's sheet **closed**. They gain it when they next open it.
+3. Press − twice. Nothing fires.
+4. Press − twice, wait, press − twice. Still nothing — two runs, not one spend of 4.
+5. A player using an ability that adds Threat fires nothing. Adding is not spending.
+6. A non-Maverick gains nothing and sees nothing.
+
+---
+
 # v1.27 / 0.9.7 — One press is not one broadcast
 
 Creator **v1.27**, extension **0.9.7**. Both change; deploy the extension first. No room

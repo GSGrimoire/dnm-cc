@@ -222,6 +222,57 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   ok("carrying 2 plus the supportive bond's 1", grant.effect.amount === 3);
 }
 
+// -------------------------------------------------------------
+// The Maverick drive (v1.28)
+// -------------------------------------------------------------
+// The sheet's Threat controls are the GM's, so this is one of the two places a spend
+// can happen. The announcement has to come from wherever it happened, because only
+// that client knows a run of presses was one decision — the room's metadata just shows
+// a number that moved. This is why coalescing had to land first.
+{
+  const drives = () => sent.filter((e) => e.type === "bond" && e.effect.kind === "drive");
+
+  g("obrRole = 'GM';");
+  sent.length = 0;
+  g("addThreat(-1,'manual adjustment'); addThreat(-1,'manual adjustment'); addThreat(-1,'manual adjustment');");
+  await wait(1100);
+  ok("spending 3 at once announces the drive", drives().length === 1);
+  ok("naming which drive, so a future one cannot be paid by accident",
+    drives()[0].effect.drive === "maverick");
+  ok("and how much was spent", drives()[0].effect.amount === 3);
+  ok("it names no target — every sheet reads its own temperament",
+    drives()[0].effect.target === undefined);
+
+  // "At once" is the whole of the rule. Two is two.
+  sent.length = 0;
+  g("addThreat(-1,'manual adjustment'); addThreat(-1,'manual adjustment');");
+  await wait(1100);
+  ok("spending 2 announces nothing", drives().length === 0);
+
+  // Two spends of 2, far enough apart to be two runs, is not a spend of 4.
+  sent.length = 0;
+  g("addThreat(-2,'manual adjustment');");
+  await wait(1100);
+  g("addThreat(-2,'manual adjustment');");
+  await wait(1100);
+  ok("two separate spends of 2 are not one spend of 4", drives().length === 0);
+
+  // ADDING Threat is a player action several abilities require. It is not a spend.
+  sent.length = 0;
+  g("addThreat(6,'Adrenaline Rush');");
+  await wait(1100);
+  ok("paying Threat IN never fires the drive", drives().length === 0);
+
+  // Sender-side role check. Not the control — that is isGmOnlyEvent() in the reducer,
+  // enforced by the GM's background page — but it stops an honest misclick.
+  g("obrRole = 'PLAYER';");
+  sent.length = 0;
+  g("addThreat(-1,'manual adjustment'); addThreat(-1,'manual adjustment'); addThreat(-1,'manual adjustment');");
+  await wait(1100);
+  ok("a player's client does not announce a drive", drives().length === 0);
+  g("obrRole = 'GM';");
+}
+
 console.log(`\nembedded: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — the SDK is a stub, so this is the block's logic, not Owlbear:

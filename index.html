@@ -2646,7 +2646,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.27';
+const APP_VERSION = '1.28';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -7450,6 +7450,7 @@ function applyPendingBondEffects(queue) {
   const myName = bondNameKey(state.character.name);
   const maxSpirit = getResourceMaxes().spirit;
   const lines = [];
+  const kinds = new Set();
   let gained = 0;
   let changed = false;
 
@@ -7460,20 +7461,30 @@ function applyPendingBondEffects(queue) {
     applied.push(id);
     changed = true;
 
-    // Never your own effect. Adrenaline Rush pays out to everyone who holds a rivalry
-    // with the person who spent, and that is never the spender.
-    if (bondNamesEqual(fx.from, state.character.name) || bondNameKey(fx.from) === myName) return;
-
     let amount = 0;
     let why = '';
     if (fx.kind === 'rivalry') {
+      // Never your own. Adrenaline Rush pays everyone who holds a rivalry with the
+      // person who spent, and that is never the spender.
+      if (bondNameKey(fx.from) === myName) return;
       if (!findBondNaming('rivalry', fx.from)) return;
       amount = 1;
       why = `Rivalry Bond — ${fx.from} used Adrenaline Rush`;
     } else if (fx.kind === 'grant') {
+      if (bondNameKey(fx.from) === myName) return;
       if (!bondNamesEqual(fx.target, state.character.name)) return;
       amount = Math.max(0, Math.round(Number(fx.amount) || 0));
       why = `${fx.source || 'Spirit'} from ${fx.from || 'an ally'}`;
+    } else if (fx.kind === 'drive') {
+      // v1.28. The Maverick drive: "When the GM spends 3 or more Threat at once,
+      // regain 1 Spirit." No self-guard here, unlike the two bonds — the sender is the
+      // GM, not a character, and a GM playing a Maverick alongside is entitled to it.
+      // Whether the spend was big enough was decided by the sender, which is the only
+      // client that knows a run of presses was one decision.
+      if (fx.drive !== 'maverick') return;
+      if (state.character.temperament !== 'maverick') return;
+      amount = 1;
+      why = `Maverick Drive — the GM spent ${Math.max(0, Math.round(Number(fx.amount) || 0))} Threat at once`;
     } else {
       return;
     }
@@ -7483,6 +7494,7 @@ function applyPendingBondEffects(queue) {
     state.character.currentSpirit = clampNumber(before + amount, 0, maxSpirit);
     const real = state.character.currentSpirit - before;
     gained += real;
+    kinds.add(fx.kind);
     // Reported even when it lands on a full Spirit track. "Nothing happened" and
     // "you were already full" are different answers, and only one of them sends a
     // player asking whether bonds are working.
@@ -7492,7 +7504,11 @@ function applyPendingBondEffects(queue) {
   if (!changed) return null;
   writeAppliedBondEffects(applied);
   saveCharacterLocal(true);
-  return { changed: true, gained, detail: lines.join('; ') };
+  // v1.28. The log entry is named for what actually paid out. A drive is not a bond
+  // and calling it one would send a Maverick looking for a bond they never wrote.
+  const onlyDrive = kinds.size === 1 && kinds.has('drive');
+  const label = onlyDrive ? 'Drive' : (kinds.has('drive') ? 'Bond & Drive' : 'Bond');
+  return { changed: true, gained, detail: lines.join('; '), label };
 }
 
 // ============================================================
@@ -9265,10 +9281,33 @@ const poolBatch = createPoolBatcher(({ pool, delta, label }) => {
     delta,
   });
 
+  announceThreatSpendDrive(pool, delta);
+
   // The Threat counter reads getPendingThreat(), which has just changed shape from
   // "queued" to "in flight", so the sheet has to be told to draw it again.
   if (ready) renderAll();
 });
+
+// v1.28. "When the GM spends 3 or more Threat at once, regain 1 Spirit" — the Maverick
+// drive. The sheet's Threat controls are the GM's since v1.23, so this is the second
+// place a spend can happen; the roller's Table Controls are the other, and it carries
+// the same function.
+//
+// Announced from wherever the spend happened, because only that client knows a run of
+// presses was one decision — the room's metadata just shows a number that moved. Sent
+// once for the whole table, and every sheet decides for itself whether it is a Maverick,
+// exactly as a rivalry bond has every sheet decide whether it holds the bond.
+const DRIVE_THREAT_SPEND_MIN = 3;
+
+function announceThreatSpendDrive(pool, delta) {
+  if (pool !== "threat" || obrRole !== "GM") return;
+  if (delta > -DRIVE_THREAT_SPEND_MIN) return;
+  const spent = Math.abs(delta);
+  sendBondEffect({ kind: "drive", drive: "maverick", amount: spent });
+  // The GM is told as well. A drive firing silently on somebody else's sheet is the
+  // thing the shared log exists to prevent.
+  showToast(`Spent ${spent} Threat at once — every Maverick regains 1 Spirit.`, "warning");
+}
 
 let tokenId = null;
 let ready = false;          // true once a character is loaded and saving is allowed
@@ -9728,8 +9767,9 @@ function reconcileBonds(roomState) {
   const result = applyPendingBondEffects(queue);
   if (!result) return null;
   if (!result.detail) return result;
-  sendAction({ label: 'Bond', detail: result.detail });
-  showToast(`A bond paid out: ${result.detail}.`, 'success');
+  const label = result.label || 'Bond';
+  sendAction({ label, detail: result.detail });
+  showToast(`${label === 'Drive' ? 'Your Drive' : 'A bond'} paid out: ${result.detail}.`, 'success');
   return result;
 }
 

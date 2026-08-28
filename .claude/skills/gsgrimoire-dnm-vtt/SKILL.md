@@ -144,6 +144,12 @@ What is privileged, and why:
   Nanobarrier, Adrenaline Rush and several items all add it. The direction is privileged, not
   the pool.
 - **Momentum** — open to everyone. It is the group's pool.
+- **Bond effects** — open. A forged one can only pay a sheet that already holds the
+  matching bond, and blocking them would break every bond at a table whose GM has the
+  extension closed.
+- **The Maverick drive** — GM only, unlike the two bonds, because its own text says "when
+  THE GM spends". A forged one would reach every Maverick at the table on nobody's
+  authority.
 
 Sender-side checks stay anyway: they stop honest misclicks, which is worth having.
 
@@ -177,6 +183,16 @@ Two rules the batching depends on:
 `createPoolBatcher()` is duplicated: `dnm.js` for the roller, and a copy in the creator's
 module block, which cannot import without becoming a page that needs the network. Change
 one, change both — the same rule as the four shared constants.
+
+Coalescing is also what made the **Maverick drive** possible (v1.28): "spends 3 or more
+Threat at once" had nothing to read while a spend of 3 arrived as three spends of 1. It
+follows that the announcement must come from the client that made the spend — only that
+client knows a run of presses was one decision — so `announceThreatSpendDrive()` hangs off
+each side's batcher flush, in both repos.
+
+**The other five drives are not automated and should not be.** They are things the sheet
+cannot see: being first to act in a round, creating a Truth that represents a plan. Only
+Maverick's has an observable trigger.
 
 ## Working from a QA report
 

@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.27", g("APP_VERSION") === "1.27");
+ok("APP_VERSION is 1.28", g("APP_VERSION") === "1.28");
 
 // -------------------------------------------------------------
 // Fixture
@@ -737,6 +737,60 @@ const reset = () => g("window.__cap.length = 0;");
   ok("a rest leaves a share budget behind", g("!!state.character.restShare"));
   g("endScene()");
   ok("End Scene clears the share budget", g("!state.character.restShare"));
+
+  // --- the Maverick drive ---
+  // "When the GM spends 3 or more Threat at once, regain 1 Spirit." The recipient side
+  // reads its own TEMPERAMENT, not a bond list — nobody writes a bond for this — and
+  // whether the spend was big enough was settled by the sender, which is the only
+  // client that knows a run of presses was one decision.
+  const asTemperament = (key) => g(`(function(){
+    var c = state.character;
+    c.name = 'Fixture';
+    c.temperament = ${JSON.stringify(key)};
+    c.bonds = [];
+    c.appliedBondEffects = [];
+    c.currentSpirit = 1;
+  })()`);
+  const driveFx = (extra) => ({ id: `dv${Math.random()}`, t: Date.now(), kind: "drive", drive: "maverick", from: "GM", amount: 3, ...extra });
+
+  asTemperament("maverick");
+  before = spirit();
+  result = drain([driveFx()]);
+  ok("a Maverick regains 1 Spirit when the GM spends 3 at once",
+    spirit() === before + 1 && result && result.gained === 1);
+  ok("and the entry is named a Drive, not a Bond", result.label === "Drive");
+  ok("saying how much was spent", /spent 3 Threat at once/.test(result.detail));
+
+  // Every other temperament reads the same effect and is owed nothing by it.
+  const others = JSON.parse(g("JSON.stringify(Object.keys(DM_DATA.temperaments))")).filter((k) => k !== "maverick");
+  ok("there are other temperaments to check", others.length >= 4);
+  const wrongly = others.filter((key) => {
+    asTemperament(key);
+    const start = spirit();
+    drain([driveFx()]);
+    return spirit() !== start;
+  });
+  ok(`no other temperament is paid by it${wrongly.length ? " — PAID: " + wrongly.join(", ") : ""}`,
+    wrongly.length === 0);
+
+  // A drive key this build does not know must do nothing rather than pay out on the
+  // strength of being a drive at all. The other five drives are not detectable by the
+  // sheet and are claimed by hand; an effect naming one is a message from a future
+  // version, and paying it would be inventing a rule.
+  asTemperament("maverick");
+  before = spirit();
+  drain([driveFx({ drive: "circumspect" })]);
+  ok("a drive this build does not implement pays nothing", spirit() === before);
+
+  // Unlike the two bonds there is no self-guard: the sender is the GM rather than a
+  // character, and a GM playing a Maverick alongside is entitled to their own drive.
+  asTemperament("maverick");
+  before = spirit();
+  drain([driveFx({ from: "Fixture" })]);
+  ok("a GM who also plays a Maverick is not excluded from their own drive",
+    spirit() === before + 1);
+
+  g("state.character.temperament = Object.keys(DM_DATA.temperaments)[0];");
 
   // --- the ally picker ---
   g(`(function(){

@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.27</h1>
-    <p class="lead">Pressing + three times is one change, not three. Threat and Momentum nudges are added up and posted once, so the log says &ldquo;added 3 Threat&rdquo; instead of three separate lines &mdash; and a Maverick can finally see when the GM has spent 3 or more at once.</p>
+    <h1>Version v.1.28</h1>
+    <p class="lead">The Maverick drive now fires on its own: when the GM spends 3 or more Threat at once, every Maverick gets their Spirit, announced to the table. It rests on 1.27, which started adding a run of +/&minus; presses together instead of posting each one separately.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -334,6 +334,10 @@ h1 {
         <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
       </article>
       <article class="feature-card">
+        <h3>Maverick Drive</h3>
+        <p>Fires by itself when the GM spends 3 or more Threat at once. The Spirit arrives, the log says so, and closed sheets catch up.</p>
+      </article>
+      <article class="feature-card">
         <h3>One Change, One Line</h3>
         <p>A run of +/&minus; presses on Threat or Momentum is added up and posted once. The number moves as you press; it reads dimmed until the table confirms it.</p>
       </article>
@@ -355,7 +359,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.27 needs extension 0.9.7; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.28 needs extension 0.9.8; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -366,6 +370,22 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.28</span>
+          <span class="version-title">The Maverick drive fires by itself</span>
+        </summary>
+        <ul>
+        <li><strong>&ldquo;When the GM spends 3 or more Threat at once, regain 1 Spirit&rdquo; now happens on its own.</strong> Every Maverick at the table gets the Spirit, whether their sheet is open or not &mdash; a closed one catches up the next time it is opened, the same way rests do.</li>
+        <li><strong>Nothing happens quietly.</strong> The GM sees &ldquo;Spent 3 Threat at once&rdquo; when they do it. Each Maverick gets their own message and a line in the shared log, marked <em>Drive</em> so it is not mistaken for a bond.</li>
+        <li>&ldquo;At once&rdquo; means at once. Two presses is two; two presses, a pause, then two more is still two runs and not a spend of four. Adding Threat never counts &mdash; only spending it.</li>
+        <li>This is the one drive the sheet can see. The other five &mdash; being first to act in a round, creating a scheming Truth, and so on &mdash; are things it has no way of knowing about, so they stay yours to claim.</li>
+        <li>Requires extension 0.9.8. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.27</span>
           <span class="version-title">Pressing + three times is one change, not three</span>
