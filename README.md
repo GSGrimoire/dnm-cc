@@ -41,7 +41,7 @@ scaffolding rather than source, so stage it before every run:
 npm install jsdom playwright --no-save
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in creator party security; do node tests/$t.test.mjs; done
+for t in creator embedded party popout security; do node tests/$t.test.mjs; done
 ```
 
 The jsdom suites cannot run the module block or anything needing a live room. Whatever they

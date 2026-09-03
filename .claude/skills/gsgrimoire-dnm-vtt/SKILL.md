@@ -105,6 +105,36 @@ Before claiming a deploy: **verify `main` actually moved.** Check `git rev-parse
 `origin/main`. Pushing `main` while checked out on another branch succeeds and does nothing —
 it has happened, and the release was reported as live when it was not.
 
+## Three ways the sheet runs
+
+`OBR.isAvailable` is `!!ee.origin`, read from the `obrref` query parameter — not from
+being framed. But the transport sends through `window.parent.postMessage` and throws
+"not ready" until that parent completes an `OBR_READY` handshake. So:
+
+| | SDK | how it reaches the room |
+|---|---|---|
+| Framed by Owlbear | works | directly |
+| A popped-out window | dead | BroadcastChannel to `background.js` |
+| A plain browser tab | dead | it does not; the creator runs alone |
+
+**A separate window can never use the SDK.** Do not try to make `window.open` work by
+copying `obrref` into the URL: `isAvailable` will then be true and every call will still
+throw, which is worse than the honest failure.
+
+Everything Owlbear-shaped goes through `bridge` (v1.29), which has a `direct` and a
+`relay` implementation. Add a capability by adding it to BOTH, and to the host's switch
+in `background.js` — `popout.test.mjs` compares the op names on each side and fails if
+one knows something the other does not.
+
+Keep the bridge surface NARROW. A general SDK proxy cannot work: the token write is
+`scene.items.updateItems(ids, mutator)` and a mutator function cannot be
+structured-cloned across a channel.
+
+**Reply envelopes are reserved.** Nest an answer under `data`; never spread it into the
+message. Spreading it once meant the reply to `self` overwrote the correlation `id` with
+the player's `id`, and every read hung until it timed out while the window rendered a
+complete, editable sheet that reached nobody.
+
 ## The two halves
 
 `dnm-cc/index.html` is the whole creator in one file: a classic `<script>` with the app, then
@@ -222,7 +252,7 @@ cd dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in creator party security; do node tests/$t.test.mjs; done
+for t in creator embedded party popout security; do node tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -230,6 +260,7 @@ and playwright in ONE command or the next run dies on a missing module.
 
 - `creator.test.mjs` — the creator in jsdom, module block stripped
 - `embedded.test.mjs` — the module block itself, run against a stub SDK
+- `popout.test.mjs` — the module block as a popped-out window, against a fake channel
 - `party.test.mjs` — party status, the GM-only rule, the bond queue, the pool batcher
 - `security.test.mjs` — written from the attacker's side: forged events into the reducer,
   hostile codes into the parser
@@ -250,6 +281,12 @@ Two rules earned the hard way:
 **Build fixtures the way the app builds them** — an origin, archetype and temperament that
 exist in `DM_DATA`, then `computeStats()`. A fixture that assigns state directly confirms
 whatever the code already does. That is how a forced-talent bug survived a full release.
+
+**Untrusted input is anything that arrives in a character code.** It is pasted from chat
+and read off tokens any player can write to. Clamp it on the way OUT of storage, not on
+the way in, and clamp hardest whatever the renderer LOOPS over — `recentRolls` in the
+creator, `detail` in the extension's `sanitizeEntry()`. An entry claiming a hundred
+thousand dice freezes whoever draws it.
 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.

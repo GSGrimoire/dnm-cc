@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.28B</h1>
-    <p class="lead">The Maverick drive now fires on its own: when the GM spends 3 or more Threat at once, every Maverick gets their Spirit, announced to the table. It rests on 1.27, which started adding a run of +/&minus; presses together instead of posting each one separately.</p>
+    <h1>Version v.1.29</h1>
+    <p class="lead">The character sheet can now open in its own browser window, so you can keep it beside the map and the log instead of opening and closing it all evening. It also remembers your last three rolls.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -334,6 +334,14 @@ h1 {
         <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
       </article>
       <article class="feature-card">
+        <h3>Sheet in Its Own Window</h3>
+        <p>Press <em>Pop out</em> and the sheet becomes a real browser window you can move, resize, or put on a second screen. The map and the log stay where they are.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Recent Rolls</h3>
+        <p>Your last three rolls stay on the sheet after you close it, and travel with your character code.</p>
+      </article>
+      <article class="feature-card">
         <h3>Maverick Drive</h3>
         <p>Fires by itself when the GM spends 3 or more Threat at once. The Spirit arrives, the log says so, and closed sheets catch up.</p>
       </article>
@@ -359,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.28B needs extension 0.9.8B; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.29 needs extension 0.9.9; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -370,6 +378,24 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.29</span>
+          <span class="version-title">The sheet in its own window, and it remembers your rolls</span>
+        </summary>
+        <ul>
+        <li><strong>The sheet can open in its own browser window.</strong> Open it from the token as usual, then press <em>Pop out</em>. It becomes a normal window you can move, resize, or drag to a second screen &mdash; and the map, the log and the roller all stay where they are. No more opening the sheet to roll, closing it to see the log, and opening it again.</li>
+        <li>Everything works from that window: rolls reach the table, Threat and Momentum move the shared pools, edits save back to the token.</li>
+        <li>Popping out closes the sheet inside Owlbear on purpose. Two copies of one character open at once would each keep overwriting the other.</li>
+        <li>If your browser blocks the window, the button tells you so and nothing else changes &mdash; allow pop-ups for Owlbear Rodeo and press it again.</li>
+        <li>If you close Owlbear while the window is still open, the window says plainly that it has lost the room rather than quietly doing nothing.</li>
+        <li><strong>Your last three rolls now stay on the sheet.</strong> They used to vanish the moment you closed it. They are kept with the character, so they are still there when you reopen it and they travel with your character code. Each one is shown as it read when you made it, even if the GM has changed the Complication range since.</li>
+        <li>Requires extension 0.9.9. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.28B</span>
           <span class="version-title">The Maverick drive fires by itself</span>

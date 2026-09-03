@@ -1503,6 +1503,27 @@ body::after {
 .die.success { color: var(--bg); background: var(--teal); border-color: var(--teal); }
 .die.crit { color: var(--bg); background: var(--warning); border-color: var(--warning); box-shadow: 0 0 12px rgba(255,209,102,0.5); }
 .die.complication { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
+
+/* v1.29 Recent Rolls. Smaller dice and no glow: this is a memory of a roll, not the
+   roll happening, and three rows of full-size results would out-shout the live one
+   directly above them. */
+.die.small { width: 26px; height: 26px; font-size: 0.8rem; box-shadow: none; }
+.recent-rolls { margin-top: 12px; }
+.recent-roll {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.recent-roll:first-of-type { border-top: none; }
+.recent-roll .dice-faces { gap: 5px; margin-bottom: 5px; }
+.recent-roll-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px;
+}
+.recent-roll-when { color: var(--teal-dim); white-space: nowrap; }
+.recent-roll-sum { font-size: 0.72rem; color: var(--text-dim); }
+.recent-roll-sum.pass { color: var(--teal); }
+.recent-roll-sum.fail { color: var(--text-dim); }
 .dice-summary {
   font-family: var(--font-display);
   font-size: 1.1rem;
@@ -2283,6 +2304,18 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
   text-underline-offset: 3px;
 }
 
+/* v1.29 popout. startEmbedded() adds `obr-embedded` here as it does in the modal, so
+   the sheet already lays out as the embedded sheet — this class is only a hook, and
+   deliberately changes no layout. What it does carry is the failure banner: a window
+   that has lost its room still renders a complete, editable sheet, which is the worst
+   possible way to fail silently. */
+.popout-lost {
+  position: sticky; top: 0; z-index: 100;
+  padding: 10px 14px;
+  background: var(--accent); color: #fff;
+  font-size: 0.8rem; line-height: 1.45;
+}
+
 .ally-picker { margin: 0 0 6px; }
 .ally-input {
   width: 100%;
@@ -2646,7 +2679,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.28B';
+const APP_VERSION = '1.29';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -8872,12 +8905,17 @@ function getCompAt() {
   return Number.isFinite(n) ? Math.max(15, Math.min(20, n)) : 20;
 }
 
-function classifyDie(value, attrValue, skillValue) {
+// v1.29: `compAt` is a parameter with the live room value as its default, matching
+// classifyDie() in dnm.js. Recent Rolls needs it, because a roll kept from an hour ago
+// must keep reading the way it read when it was made — the GM may have moved the
+// threshold since, and redrawing an old roll under the new one would rewrite history.
+function classifyDie(value, attrValue, skillValue, compAt) {
+  const threshold = compAt === undefined ? getCompAt() : compAt;
   // D&M: <= attribute is a success; <= skill is a critical (2 successes); a die at or
   // above the Complication threshold is a Complication. Order matters and has not
   // changed — a Complication is never also a success, even where a lowered threshold
   // overlaps the Attribute.
-  if (value >= getCompAt()) return 'complication';
+  if (value >= threshold) return 'complication';
   if (value <= skillValue) return 'crit';
   if (value <= attrValue) return 'success';
   return 'fail';
@@ -8928,9 +8966,111 @@ function renderDicePanel() {
       ${selectedAttrExhausted ? `<div class="dice-disabled-note">${attrName} is shut down by an active Exhaustion state. Rolls using this attribute are disabled.</div>` : ''}
       ${renderDiceContextNotes(diceUI.attr, diceUI.skill)}
       <div id="diceResultArea">${diceUI.lastResult ? renderDiceResult(diceUI.lastResult) : ''}</div>
+      <div id="recentRollsArea">${renderRecentRolls()}</div>
     </div>
 
   </div>`;
+}
+
+// ============================================================
+// RECENT ROLLS (v1.29)
+// ============================================================
+// The result of a roll lived in `diceUI.lastResult`, a module binding, so it was gone
+// the moment the sheet closed — and in Owlbear the sheet is a modal that gets closed
+// constantly. The shared log kept the roll, but only for people with the roller open,
+// and only until forty entries pushed it off.
+//
+// Three is the cap because this is a memory aid, not a second log. What a player
+// actually needs after reopening is "what did I just roll", and occasionally the one
+// before it.
+//
+// Stored on the CHARACTER rather than in localStorage, so it travels with the code and
+// is there whichever way the sheet was opened — a token in Owlbear, a saved character,
+// a pasted code on another machine.
+const MAX_RECENT_ROLLS = 3;
+const RECENT_ROLL_MAX_DICE = 5;
+
+// The dice kind is NOT stored. It is recomputed from the Attribute, the Skill and the
+// Complication threshold that were in force at the time, all of which are stored — so
+// an old roll keeps reading the way it read when it was made, even if the GM has since
+// moved the threshold or the character has grown.
+function recordRecentRoll(res) {
+  if (!res || !state.character) return;
+  const entry = {
+    t: Date.now(),
+    an: String(res.attrName || '').slice(0, 16),
+    av: clampNumber(res.attrValue, 0, 20),
+    sn: String(res.skillName || '').slice(0, 16),
+    sv: clampNumber(res.skillValue, 0, 20),
+    d: (res.dice || []).slice(0, RECENT_ROLL_MAX_DICE).map(n => clampNumber(n, 1, 20)),
+    df: clampNumber(res.difficulty, 0, 5),
+    su: clampNumber(res.successes, 0, 99),
+    co: clampNumber(res.complications, 0, 99),
+    pa: !!res.passed,
+    gn: clampNumber(res.momentumGained, 0, 99),
+    at: getCompAt(),
+  };
+  const list = normalizeRecentRolls();
+  state.character.recentRolls = [entry, ...list].slice(0, MAX_RECENT_ROLLS);
+}
+
+// A character code is untrusted input — it arrives pasted from a chat window, or off a
+// token any player at the table can write to — and this is the only field in the file
+// whose renderer LOOPS. An entry claiming a hundred thousand dice would build a hundred
+// thousand nodes and freeze the sheet, which is the exact failure the extension's
+// sanitizeEntry() exists to prevent. So it is clamped on the way out of storage rather
+// than trusted on the way in.
+function normalizeRecentRolls() {
+  const raw = state.character && Array.isArray(state.character.recentRolls)
+    ? state.character.recentRolls : [];
+  return raw.slice(0, MAX_RECENT_ROLLS).filter(e => e && typeof e === 'object').map(e => ({
+    t: Number.isFinite(Number(e.t)) ? Number(e.t) : 0,
+    an: String(e.an == null ? '' : e.an).slice(0, 16),
+    av: clampNumber(e.av, 0, 20),
+    sn: String(e.sn == null ? '' : e.sn).slice(0, 16),
+    sv: clampNumber(e.sv, 0, 20),
+    d: (Array.isArray(e.d) ? e.d : []).slice(0, RECENT_ROLL_MAX_DICE).map(n => clampNumber(n, 1, 20)),
+    df: clampNumber(e.df, 0, 5),
+    su: clampNumber(e.su, 0, 99),
+    co: clampNumber(e.co, 0, 99),
+    pa: !!e.pa,
+    gn: clampNumber(e.gn, 0, 99),
+    at: clampNumber(e.at, 15, 20) || 20,
+  }));
+}
+
+function renderRecentRolls() {
+  const list = normalizeRecentRolls();
+  if (!list.length) return '';
+  const rows = list.map(e => {
+    const dice = e.d.map(n => `<div class="die small ${classifyDie(n, e.av, e.sv, e.at)}">${n}</div>`).join('');
+    const bits = [`${e.su} success${e.su === 1 ? '' : 'es'} vs D${e.df}`, e.pa ? 'passed' : 'failed'];
+    if (e.gn > 0) bits.push(`+${e.gn} Momentum`);
+    if (e.co > 0) bits.push(`${e.co} complication${e.co === 1 ? '' : 's'}`);
+    return `<div class="recent-roll">
+      <div class="recent-roll-head">${escHtml(e.an)} ${e.av} (${escHtml(e.sn)} ${e.sv})<span class="recent-roll-when">${formatRollAge(e.t)}</span></div>
+      <div class="dice-faces">${dice}</div>
+      <div class="recent-roll-sum ${e.pa ? 'pass' : 'fail'}">${bits.join(' · ')}</div>
+    </div>`;
+  }).join('');
+  return `<details class="sheet-collapse recent-rolls" open>
+    <summary class="sheet-collapse-summary dm-tip" tabindex="0">Recent Rolls (${list.length})<span class="dm-tip-body"><span class="dm-tip-title">Your last ${MAX_RECENT_ROLLS} rolls</span><span class="dm-tip-desc">Kept with the character, so they are still here when you close the sheet and open it again. They travel with your character code too. Each one is shown as it read when it was made, using the Complication threshold that was in force at the time.</span></span></summary>
+    ${rows}
+  </details>`;
+}
+
+// Relative rather than a clock time: "4 min ago" answers the question a player has,
+// and a wall clock would be wrong the moment a code crosses a time zone.
+function formatRollAge(t) {
+  const then = Number(t) || 0;
+  if (!then) return '';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
 function updateDiceLabels() {
@@ -9040,8 +9180,17 @@ function doRoll() {
   }
   const res = computeRoll(diceUI.count, diceUI.attr, diceUI.skill);
   diceUI.lastResult = res;
+  // v1.29. Recorded here rather than in postRoll(), so it works in a plain browser tab
+  // as well as in Owlbear — postRoll is the Owlbear bridge and does nothing standalone.
+  recordRecentRoll(res);
+  saveCharacterLocal(true);
   const area = document.getElementById('diceResultArea');
   if (area) area.innerHTML = renderDiceResult(res);
+  // The result area is patched in place above, so the Recent Rolls block below it needs
+  // its own redraw. A full renderAll() would work and would also rebuild the dice
+  // selects mid-interaction, which loses the focus a keyboard user is holding.
+  const recent = document.getElementById('recentRollsArea');
+  if (recent) recent.innerHTML = renderRecentRolls();
 
   // postRoll() is a no-op here and is REPLACED by the module block in embedded
   // mode, which is what carries the roll to the shared log. Keeping the call site
@@ -9185,7 +9334,161 @@ const CHAR_KEY = `${EXT_ID}/char`;
 const CHANNEL  = `${EXT_ID}/events`;
 const ROOM_KEY = "com.thuknights.dnm-rolls/state";
 
+// These two match dnm.js as well. See the note there for why a separate browser window
+// needs a courier at all: the SDK talks through window.parent.postMessage and refuses
+// to send until that parent completes a handshake, so a popped-out window can never
+// reach Owlbear on its own.
+const POPOUT_CHANNEL = `${EXT_ID}/popout`;
+const POPOUT_PROTOCOL = 1;
+
 const SAVE_DEBOUNCE_MS = 400;
+
+// ---------------------------------------------------------------------------
+// The bridge (v1.29)
+// ---------------------------------------------------------------------------
+// Everything this file needs from Owlbear, in one place and in one shape, with two
+// implementations behind it:
+//
+//   DIRECT — the sheet is framed by Owlbear and has a working SDK.
+//   RELAY  — the sheet is its own browser window and posts to the extension's
+//            background page over a BroadcastChannel, which does the work and answers.
+//
+// The surface is narrow on purpose. A general proxy of the SDK could not work anyway:
+// the token write is `scene.items.updateItems(ids, mutator)` and a mutator function
+// cannot be structured-cloned across a channel. Naming the four things the sheet
+// actually does to a token — read it, write it, clear it, list the party — sidesteps
+// that and gives something small enough to test.
+const isPopout = new URLSearchParams(location.search).get("popout") === "1";
+
+function makeDirectBridge() {
+  return {
+    kind: "direct",
+    async ready() { return true; },
+    async getSelf() {
+      const [role, name, id] = await Promise.all([
+        OBR.player.getRole(), OBR.player.getName(), OBR.player.getId(),
+      ]);
+      return { role, name, id };
+    },
+    onPlayerChange(cb) {
+      OBR.player.onChange((p) => cb({ role: p.role, name: p.name, id: p.id }));
+    },
+    async getMetadata() { return OBR.room.getMetadata(); },
+    onMetadataChange(cb) { OBR.room.onMetadataChange(cb); },
+    async getTokenCode(itemId) {
+      const items = await OBR.scene.items.getItems([itemId]);
+      const stored = items && items[0] && items[0].metadata && items[0].metadata[CHAR_KEY];
+      return stored && stored.code ? stored.code : null;
+    },
+    async writeTokenCode(itemId, code) {
+      await OBR.scene.items.updateItems([itemId], (items) => {
+        for (const it of items) it.metadata[CHAR_KEY] = { v: 1, code };
+      });
+    },
+    async clearTokenCode(itemId) {
+      await OBR.scene.items.updateItems([itemId], (items) => {
+        for (const it of items) delete it.metadata[CHAR_KEY];
+      });
+    },
+    async getPartyCodes() {
+      const all = await OBR.scene.items.getItems();
+      return all
+        .filter((i) => typeof i.metadata?.[CHAR_KEY]?.code === "string" && i.metadata[CHAR_KEY].code)
+        .map((i) => ({ id: i.id, code: i.metadata[CHAR_KEY].code }));
+    },
+    onItemsChange(cb) {
+      try {
+        OBR.scene.items.onChange(cb);
+        OBR.scene.onReadyChange((sceneReady) => { if (sceneReady) cb(); });
+      } catch (err) {
+        console.warn("[dnm] could not watch the scene", err);
+      }
+    },
+    broadcast(ev) {
+      OBR.broadcast.sendMessage(CHANNEL, ev, { destination: "ALL" })
+        .catch((err) => console.warn("[dnm] broadcast failed", err));
+    },
+    closeSheet() {
+      // OBR.modal.close needs the exact id the modal was opened with, and that differs
+      // between the beta background page and the stable one. Rather than hardcode
+      // either and break under the other, close both: closing an id that is not open
+      // is a no-op.
+      for (const id of [`${EXT_ID}/sheet-modal-beta`, `${EXT_ID}/sheet-modal`]) {
+        try { OBR.modal.close(id); } catch (err) { /* not the one that is open */ }
+      }
+    },
+  };
+}
+
+function makeRelayBridge(roomId) {
+  const channel = new BroadcastChannel(POPOUT_CHANNEL);
+  const me = `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+  const pending = new Map();
+  const listeners = { room: [], player: [], items: [] };
+  let seq = 0;
+
+  channel.onmessage = (ev) => {
+    const msg = ev.data;
+    if (!msg || msg.v !== POPOUT_PROTOCOL) return;
+    if (msg.dir === "res") {
+      const waiting = pending.get(msg.id);
+      if (!waiting) return;
+      pending.delete(msg.id);
+      clearTimeout(waiting.timer);
+      if (msg.error) waiting.reject(new Error(msg.error));
+      // The answer is nested, never spread into the envelope. Spreading looked tidier
+      // and was wrong: the reply to "self" carries the player's `id`, which overwrote
+      // the envelope's correlation `id`, so no response could ever be matched to its
+      // request and every read hung until it timed out.
+      else waiting.resolve(msg.data || {});
+      return;
+    }
+    if (msg.room && roomId && msg.room !== roomId) return;
+    if (msg.event === "room") listeners.room.forEach((cb) => cb(msg.metadata));
+    else if (msg.event === "player") listeners.player.forEach((cb) => cb(msg));
+    else if (msg.event === "items") listeners.items.forEach((cb) => cb());
+  };
+
+  // Every request is answered or it rejects. A popout whose room has been closed would
+  // otherwise hang on a promise that never settles, and the sheet would sit there
+  // looking like it was still loading.
+  function call(op, extra = {}, timeoutMs = 6000) {
+    const id = `${me}-${++seq}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`the Owlbear room did not answer (${op})`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+      channel.postMessage({ dir: "req", id, from: me, room: roomId, v: POPOUT_PROTOCOL, op, ...extra });
+    });
+  }
+
+  // Keeps this window in the host's live set, which is what stops the host posting
+  // scene changes into an empty channel once every popout has been closed.
+  setInterval(() => { call("ping").catch(() => {}); }, 20000);
+  window.addEventListener("pagehide", () => {
+    channel.postMessage({ dir: "req", id: `${me}-bye`, from: me, room: roomId, v: POPOUT_PROTOCOL, op: "bye" });
+  });
+
+  return {
+    kind: "relay",
+    async ready() { await call("hello", {}, 8000); return true; },
+    async getSelf() { const r = await call("self"); return { role: r.role, name: r.name, id: r.id }; },
+    onPlayerChange(cb) { listeners.player.push(cb); },
+    async getMetadata() { const r = await call("metadata"); return r.metadata || {}; },
+    onMetadataChange(cb) { listeners.room.push(cb); },
+    async getTokenCode(itemId) { const r = await call("tokenCode", { itemId }); return r.code || null; },
+    async writeTokenCode(itemId, code) { await call("writeToken", { itemId, code }); },
+    async clearTokenCode(itemId) { await call("clearToken", { itemId }); },
+    async getPartyCodes() { const r = await call("partyCodes"); return r.codes || []; },
+    onItemsChange(cb) { listeners.items.push(cb); },
+    broadcast(ev) {
+      call("broadcast", { event: ev }).catch((err) => console.warn("[dnm] broadcast failed", err));
+    },
+    closeSheet() { window.close(); },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Coalescing pool nudges (v1.27)
@@ -9268,8 +9571,7 @@ function createPoolBatcher(send, opts = {}) {
 const MANUAL_POOL_LABEL = " manual";
 
 const poolBatch = createPoolBatcher(({ pool, delta, label }) => {
-  OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool, delta }, { destination: "ALL" })
-    .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+  bridge.broadcast({ type: "pool", pool, delta });
 
   const momentum = pool === "momentum";
   const down = delta < 0;
@@ -9350,9 +9652,7 @@ async function commit() {
   }
   if (code === lastSaved) { setSaveState("saved"); return; }
   try {
-    await OBR.scene.items.updateItems([tokenId], (items) => {
-      for (const it of items) it.metadata[CHAR_KEY] = { v: 1, code };
-    });
+    await bridge.writeTokenCode(tokenId, code);
     lastSaved = code;
     setSaveState("saved");
   } catch (err) {
@@ -9408,8 +9708,7 @@ function installRollBridge() {
       // this table plays — watched the GM claim their Momentum for them.
       by: obrPlayerId,
     };
-    OBR.broadcast.sendMessage(CHANNEL, { type: "roll", entry }, { destination: "ALL" })
-      .catch((err) => console.warn("[dnm] roll broadcast failed", err));
+    bridge.broadcast({ type: "roll", entry });
   };
 }
 
@@ -9478,12 +9777,10 @@ function bindMomentumToRoom(character) {
         // Bookkeeping, not an action — but it still has to reach the room, and it must
         // not be summed into whatever the player was doing before it.
         poolBatch.flush();
-        OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
-          .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+        bridge.broadcast({ type: "pool", pool: "momentum", delta });
       } else if (parked) {
         poolBatch.flush();
-        OBR.broadcast.sendMessage(CHANNEL, { type: "pool", pool: "momentum", delta }, { destination: "ALL" })
-          .catch((err) => console.warn("[dnm] pool broadcast failed", err));
+        bridge.broadcast({ type: "pool", pool: "momentum", delta });
         sendAction({ label: parked.label, detail: parked.detail, pool: "momentum", delta });
       } else {
         poolBatch.add("momentum", delta, MANUAL_POOL_LABEL);
@@ -9557,33 +9854,23 @@ let playerName = "Someone";
 // before this.
 let obrPlayerId = null;
 
-async function resolvePlayerId() {
+// v1.29: one round trip for all three. They were three separate awaits, which is two
+// more than the relay needs — and over a BroadcastChannel each one is a real message.
+//
+// Every failure here is non-fatal and each falls back differently on purpose. The role
+// fails CLOSED to a player: showing a player the GM's Threat controls produces presses
+// the room will refuse, which is exactly the confusion the role gate exists to remove.
+// The name falls back to "Someone", because an entry attributed vaguely is far better
+// than no entry. The id falls back to null, which makes a roll unattributable and so
+// claimable by anyone — the same state every sheet roll was in before v1.28B.
+async function resolveSelf() {
   try {
-    obrPlayerId = await OBR.player.getId();
+    const self = await bridge.getSelf();
+    obrRole = self.role || null;
+    obrPlayerId = self.id || null;
+    if (self.name) playerName = self.name;
   } catch (err) {
-    console.warn("[dnm] could not read the player id", err);
-  }
-}
-
-async function resolveRole() {
-  try {
-    obrRole = await OBR.player.getRole();
-  } catch (err) {
-    // Left null, which renders as a player. Failing closed is right here: showing a
-    // player the GM's Threat controls produces presses the room will refuse, which is
-    // the exact confusion this change exists to remove.
-    console.warn("[dnm] could not read the role", err);
-  }
-}
-
-async function resolvePlayerName() {
-  try {
-    const name = await OBR.player.getName();
-    if (name) playerName = name;
-  } catch (err) {
-    // Non-fatal. A log entry attributed to "Someone" is worse than one attributed
-    // correctly and far better than no entry, so this never blocks an action.
-    console.warn("[dnm] could not read player name", err);
+    console.warn("[dnm] could not read this player", err);
   }
 }
 
@@ -9603,8 +9890,7 @@ function sendAction({ label, detail, pool, delta }) {
     pool: pool || null,
     delta: typeof delta === "number" ? delta : 0,
   };
-  OBR.broadcast.sendMessage(CHANNEL, { type: "action", entry }, { destination: "ALL" })
-    .catch((err) => console.warn("[dnm] action broadcast failed", err));
+  bridge.broadcast({ type: "action", entry });
 }
 
 // The creator's logAction() only parks a label; this is what makes it travel. The
@@ -9638,8 +9924,7 @@ function sendBondEffect(effect) {
     from: (state.character?.name || playerName || "Someone").slice(0, 24),
     ...effect,
   };
-  OBR.broadcast.sendMessage(CHANNEL, { type: "bond", effect: payload }, { destination: "ALL" })
-    .catch((err) => console.warn("[dnm] bond broadcast failed", err));
+  bridge.broadcast({ type: "bond", effect: payload });
 }
 
 function installBondBridge() {
@@ -9663,15 +9948,14 @@ const partyNameCache = new Map();
 let partyNameTimer = null;
 
 async function refreshPartyNames() {
-  let items = [];
+  let entries = [];
   try {
-    items = await OBR.scene.items.getItems();
+    entries = await bridge.getPartyCodes();
   } catch (err) {
-    return; // no scene open, or the read raced a scene change
+    return; // no scene open, the read raced a scene change, or the room did not answer
   }
   const names = [];
-  for (const item of items) {
-    const code = item.metadata && item.metadata[CHAR_KEY] && item.metadata[CHAR_KEY].code;
+  for (const { code } of entries) {
     if (typeof code !== "string" || !code) continue;
     if (!partyNameCache.has(code)) {
       let name = "";
@@ -9842,14 +10126,61 @@ function insertBar(name) {
     return b;
   };
 
+  actions.append(button("Copy code", "", copyCodeToClipboard));
+  // v1.29. Only offered by the framed sheet: a popout has nothing to pop out of, and
+  // two live sheets on one token would both write the code and clobber each other.
+  if (bridge && bridge.kind === "direct") actions.append(button("Pop out", "", popOutSheet));
   actions.append(
-    button("Copy code", "", copyCodeToClipboard),
     button("Detach", "danger", detachFromToken),
-    button("Close", "primary", closeModal),
+    button(isPopout ? "Close window" : "Close", "primary", closeModal),
   );
 
   el.append(who, on, save, actions);
   document.getElementById("app").prepend(el);
+}
+
+// v1.29. Opens this sheet in its own browser window, then closes the modal.
+//
+// CLOSING THE MODAL IS NOT TIDINESS. Two live sheets on one token would both hold the
+// character and both write the code back on every edit, and the later write wins — so
+// whichever window you were not typing in would quietly undo you.
+//
+// The save is flushed first because the modal is about to go: the popout reads the
+// token, and reading it a few hundred milliseconds before the debounced save lands
+// would open the window on a slightly older character.
+//
+// If the window does not open — a popup blocker, or an Owlbear frame that does not
+// permit it — nothing else changes. The modal stays exactly where it was and says so.
+async function popOutSheet() {
+  clearTimeout(saveTimer);
+  await commit();
+
+  const url = new URL(location.href);
+  url.searchParams.set("popout", "1");
+  if (tokenId) url.searchParams.set("item", tokenId);
+  try {
+    url.searchParams.set("room", OBR.room.id || "");
+  } catch (err) {
+    url.searchParams.delete("room");
+  }
+
+  // Named after the token, so a second press focuses the window that is already open
+  // rather than opening a rival sheet on the same character.
+  const name = `dnm-sheet-${tokenId || "new"}`;
+  let win = null;
+  try {
+    win = window.open(url.toString(), name, "width=940,height=1000,menubar=no,toolbar=no");
+  } catch (err) {
+    win = null;
+  }
+  if (!win) {
+    setSaveState("the browser blocked the window", "failed");
+    setTimeout(() => setSaveState("saved"), 5000);
+    showToast("Your browser blocked the pop-out window. Allow pop-ups for Owlbear Rodeo and try again.", "error");
+    return;
+  }
+  try { win.focus(); } catch (err) { /* focus is a courtesy */ }
+  closeModal();
 }
 
 async function copyCodeToClipboard() {
@@ -9896,9 +10227,7 @@ async function copyCodeToClipboard() {
 async function detachFromToken() {
   if (!confirm("Remove this character from the token? The token keeps no copy, so copy the code first if you want to keep it.")) return;
   try {
-    await OBR.scene.items.updateItems([tokenId], (items) => {
-      for (const it of items) delete it.metadata[CHAR_KEY];
-    });
+    await bridge.clearTokenCode(tokenId);
     ready = false;
     closeModal();
   } catch (err) {
@@ -9907,13 +10236,10 @@ async function detachFromToken() {
   }
 }
 
-// OBR.modal.close needs the exact id the modal was opened with, and that differs
-// between the beta background page and the stable one. Rather than hardcode either
-// and break under the other, close both: closing an id that is not open is a no-op.
+// Framed, this closes the Owlbear modal. Popped out, it closes the window. Which one
+// it is belongs to the bridge, not to every caller.
 function closeModal() {
-  for (const id of [`${EXT_ID}/sheet-modal-beta`, `${EXT_ID}/sheet-modal`]) {
-    try { OBR.modal.close(id); } catch (err) { /* not the one that is open */ }
-  }
+  bridge.closeSheet();
 }
 
 function loadIntoCreator(code) {
@@ -10051,69 +10377,90 @@ async function startEmbedded() {
   // Resolved once at start rather than per entry. sendAction() prefers the character
   // name when there is one; this is the fallback for a sheet opened on a token that
   // has no character on it yet.
-  await resolvePlayerName();
-  // v1.28B. Must land before the first roll can be made, which is why it is awaited
-  // here rather than left to resolve on its own.
-  await resolvePlayerId();
-
-  // v1.23. The sheet needs the role to decide whether the manual Threat controls
-  // belong to this person. Resolved before the first render, so a player never sees
-  // the buttons appear and then vanish, and refreshed on change because the room
-  // owner can promote someone mid-session.
-  await resolveRole();
-  OBR.player.onChange((player) => {
+  // Awaited before the first render and before any roll can be made: the sheet needs
+  // the role to decide whether the manual Threat controls belong to this person, so a
+  // player never sees them appear and then vanish, and a roll must carry the player id
+  // that makes its Momentum claimable.
+  await resolveSelf();
+  bridge.onPlayerChange((player) => {
     if (!player || player.role === obrRole) return;
     obrRole = player.role;
     if (ready) renderAll();
   });
 
   try {
-    adoptRoom(await OBR.room.getMetadata());
+    adoptRoom(await bridge.getMetadata());
   } catch (err) {
     console.warn("[dnm] could not read room state", err);
   }
-  OBR.room.onMetadataChange(adoptRoom);
+  bridge.onMetadataChange(adoptRoom);
 
   // v1.26. Feeds the ally pickers. Failing here is not fatal: the pickers fall back to
   // the character's own bond names, which is the set that matters most anyway.
   refreshPartyNames();
-  try {
-    OBR.scene.items.onChange(schedulePartyNameRefresh);
-    // A scene change swaps the whole item set out, and this modal can outlive one.
-    // Mirrors the roller's party panel, which needs the same subscription for the
-    // same reason.
-    OBR.scene.onReadyChange((sceneReady) => { if (sceneReady) schedulePartyNameRefresh(); });
-  } catch (err) {
-    console.warn("[dnm] could not watch the scene for party names", err);
-  }
+  // A scene change swaps the whole item set out, and this sheet can outlive one.
+  bridge.onItemsChange(schedulePartyNameRefresh);
 
   const params = new URLSearchParams(location.search);
   tokenId = params.get("item");
   if (!tokenId) return; // opened without a token: leave the import screen up
 
-  let item = null;
+  let code = null;
   try {
-    const items = await OBR.scene.items.getItems([tokenId]);
-    item = items && items[0];
+    code = await bridge.getTokenCode(tokenId);
   } catch (err) {
     console.error("[dnm] could not read the token", err);
   }
-  if (!item) return;
+  if (!code) return; // fresh token, or unreadable: the import screen is the prompt
 
-  const stored = item.metadata && item.metadata[CHAR_KEY];
-  if (!stored || !stored.code) return; // fresh token: the import screen is the prompt
-
-  const error = loadIntoCreator(stored.code);
+  const error = loadIntoCreator(code);
   if (error) {
     const box = document.getElementById("importError");
     if (box) box.textContent = "⚠ " + error;
   }
 }
 
-// OBR.isAvailable is the SDK's own check for whether it is running inside Owlbear.
-// False in a normal browser tab, in which case nothing above runs and the creator
-// behaves exactly as it always has.
-if (OBR.isAvailable) {
+let bridge = null;
+
+// Three ways this file can be running, and only the middle one is new.
+//
+//   Framed by Owlbear      — the SDK works. Unchanged since v1.14.
+//   A popped-out window    — no SDK; talk to the background page over the channel.
+//   A plain browser tab    — no room at all. Nothing below runs and the creator
+//                            behaves exactly as it always has.
+//
+// The popout is told which room it belongs to in its URL. Without that, two rooms open
+// in one browser would each answer the other's requests.
+async function bootPopout() {
+  const params = new URLSearchParams(location.search);
+  const roomId = params.get("room") || "";
+  document.body.classList.add("obr-popout");
+  bridge = makeRelayBridge(roomId);
+  try {
+    await bridge.ready();
+  } catch (err) {
+    // The room is gone, or Owlbear is not open in this browser any more. Said plainly
+    // on the page: a window that silently does nothing is the worst outcome here,
+    // because the sheet still renders and looks like it is working.
+    console.error("[dnm] the popout could not reach the room", err);
+    showPopoutLost();
+    return;
+  }
+  startEmbedded();
+}
+
+function showPopoutLost() {
+  const bar = document.createElement("div");
+  bar.className = "popout-lost";
+  bar.textContent = "This window has lost its Owlbear room. Rolls and changes here will "
+    + "not reach the table. Close it and open the sheet again from the token.";
+  document.body.prepend(bar);
+}
+
+if (isPopout) {
+  bootPopout();
+} else if (OBR.isAvailable) {
+  bridge = makeDirectBridge();
   OBR.onReady(startEmbedded);
 } else {
   console.info("[dnm] not running inside Owlbear; character creator only.");

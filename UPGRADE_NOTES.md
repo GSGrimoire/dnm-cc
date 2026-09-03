@@ -2,6 +2,141 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.29 / 0.9.9 — The sheet in its own window, and it remembers its rolls
+
+Creator **v1.29**, extension **0.9.9**. Both change; deploy the extension first. No room
+metadata schema change.
+
+## ROLLBACK
+
+This release adds a whole new way for the sheet to run. If it goes wrong at the table,
+the known-good state is:
+
+| repo | commit | version |
+|---|---|---|
+| `dnm-cc` | `c21e8ac` | 1.28B |
+| `dnm-obr` | `bd3586c` | 0.9.8B |
+
+`git push origin <sha>:main --force-with-lease` on each, or download
+`https://github.com/GSGrimoire/dnm-cc/archive/c21e8ac.zip` and its `dnm-obr` twin.
+
+**A failure should not need the rollback.** The popout is additive: a new button and a
+second boot path. If the window will not open, the button says so and the modal stays
+exactly where it was. Nothing on the existing path changed behaviour — what it changed
+is who it calls, and that is covered below.
+
+## Why a separate window needs a courier
+
+The SDK talks to Owlbear through `window.parent.postMessage` and refuses to send
+anything until that parent completes an `OBR_READY` handshake — traced in the vendored
+bundle, where `isAvailable` is `!!ee.origin` from the `obrref` query parameter and
+`send()` throws "Unable to send message: not ready" without a `ref`. A window opened
+with `window.open()` is its own top-level context: `window.parent` is itself, the
+handshake never arrives, every call throws. **There is no way to fix that from inside
+the page.**
+
+So the popout talks to `background.js` over a **BroadcastChannel**. Both halves are
+published from `gsgrimoire.github.io` — the creator under `/dnm-cc/`, the extension
+under `/dnm-obr/` — and an origin is scheme, host and port, so the differing paths do
+not matter. **Verified in a real Chromium**, serving both repos from one origin: the
+handshake crossed and the popout adopted the room's Threat.
+
+`background.js` is the host because it is the one extension page that lives for the
+whole room session. The obvious alternative, the modal that opened the popout, is
+exactly the window the user is about to close.
+
+## The bridge
+
+Every Owlbear call in the module block now goes through a `bridge` with two
+implementations: `direct` (the SDK) and `relay` (the channel). The surface is **narrow
+on purpose** — `getSelf`, `getMetadata`/`onMetadataChange`, `getTokenCode`/
+`writeTokenCode`/`clearTokenCode`, `getPartyCodes`/`onItemsChange`, `broadcast`,
+`closeSheet`.
+
+A general SDK proxy could not work anyway: the token write is
+`scene.items.updateItems(ids, mutator)` and **a mutator function cannot be
+structured-cloned across a channel**. Naming the four things the sheet does to a token
+sidesteps that and gives something small enough to test.
+
+Scoped by room id, because one browser can have two rooms open and both background
+pages would otherwise answer the same popout.
+
+## The defect the tests caught before deploy
+
+The host replied `{ dir, id, v, ...payload }`. That read more neatly and was wrong: the
+answer to `self` carries the player's **`id`**, which overwrote the envelope's
+correlation `id`. No response could be matched to its request, so **every read from a
+popped-out sheet hung until it timed out** — and the window sat there rendering a
+complete, editable sheet that reached nobody.
+
+The answer is nested under `data` now, and `popout.test.mjs` pins it from both sides:
+the host must contain `data: payload` and must not spread a payload into a reply.
+
+## Two live sheets on one token would fight
+
+Popping out **closes the modal**, and that is not tidiness. Both sheets would hold the
+character and both would write the code back on every edit, last write winning — so
+whichever window you were not typing in would quietly undo you.
+
+The save is flushed before the window opens, or the popout would read a token a few
+hundred milliseconds out of date.
+
+## When the room is gone
+
+A popout whose room has closed shows a banner across the top saying so. Without it the
+window renders a complete, editable sheet that reaches nobody, which is the worst way
+this could fail. Every relay call also has a **6-second timeout** rather than a promise
+that never settles.
+
+## Recent Rolls
+
+The result of a roll lived in `diceUI.lastResult`, a module binding, so it was gone the
+moment the sheet closed — and in Owlbear the sheet is a modal that gets closed
+constantly. The last **three** are now kept on the character, so they survive closing
+and travel with the code.
+
+Three because this is a memory aid, not a second log. Recorded in `doRoll()` rather than
+`postRoll()`, so it works in a plain browser tab as well as in Owlbear.
+
+`classifyDie()` takes the Complication threshold as a parameter now, defaulting to the
+live one and matching the signature in `dnm.js`. **A stored roll keeps the threshold it
+was made under**, or the GM lowering it would redraw every old roll and rewrite how it
+read after the fact.
+
+`normalizeRecentRolls()` clamps on the way OUT of storage. This is the only field in the
+creator whose renderer **loops**, and a character code is untrusted input — an entry
+claiming a hundred thousand dice would build a hundred thousand nodes and freeze the
+sheet, which is exactly what `sanitizeEntry()` exists to prevent on the extension side.
+
+## Testing
+
+Creator 167, embedded 43, party 102, popout 24, security 68.
+
+`popout.test.mjs` is new: it runs the real module block with `?popout=1` against a fake
+channel and a fake host. Every guard mutation-tested — room scoping, the roll stamp, the
+token write going through the relay, the response nesting, the history clamp, the stored
+threshold, the three-roll cap.
+
+Also verified in a real Chromium: a genuine BroadcastChannel between `/dnm-cc/` and
+`/dnm-obr/`, and the lost-room banner appearing when no host answers.
+
+## Live checks
+
+1. Open a sheet from a token, press **Pop out**. A window opens and the modal closes.
+2. In that window: roll. It appears in the roller's log at the table.
+3. Nudge Threat as GM from the window. The pool moves for everyone.
+4. Edit something, close the window, reopen the sheet from the token. The edit is there.
+5. Press Pop out twice. The second press focuses the window already open; it does not
+   open a rival sheet.
+6. **If the window does not open at all**, the button says the browser blocked it and
+   the modal stays put. Allow pop-ups for Owlbear and try again. That is the one thing
+   this design cannot verify without a live room.
+7. Close the Owlbear tab with the popout still open. The window shows the lost-room
+   banner rather than pretending to work.
+8. Roll three times, close the sheet, open it again. The three rolls are still there.
+
+---
+
 # v1.28B / 0.9.8B — A sheet roll says who made it
 
 Letter release: this corrects something 0.9.5 got wrong. No behaviour was added.

@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.28B", g("APP_VERSION") === "1.28B");
+ok("APP_VERSION is 1.29", g("APP_VERSION") === "1.29");
 
 // -------------------------------------------------------------
 // Fixture
@@ -845,6 +845,67 @@ const reset = () => g("window.__cap.length = 0;");
     (html.match(/pool:\s*["']threat["']/g) || []).length === 0);
 
   g("obrRole = null; obrThreat = null;");
+}
+
+// -------------------------------------------------------------
+// Recent Rolls (v1.29)
+// -------------------------------------------------------------
+// The result of a roll lived in a module binding, so it vanished the moment the sheet
+// closed — and in Owlbear the sheet is a modal that gets closed constantly. Three
+// rolls are now kept on the CHARACTER, so they survive closing and travel with the code.
+{
+  buildCharacter();
+  g("state.character.recentRolls = []; diceUI.difficulty = 1;");
+  g("doRoll(); doRoll(); doRoll(); doRoll();");
+  const kept = JSON.parse(g("JSON.stringify(state.character.recentRolls)"));
+  ok("only the last three are kept", kept.length === 3);
+  ok("newest first", kept[0].t >= kept[1].t && kept[1].t >= kept[2].t);
+  ok("each records the dice that were rolled", kept.every((e) => Array.isArray(e.d) && e.d.length));
+  ok("and the Attribute and Skill they were read against",
+    kept.every((e) => e.an && e.av > 0 && e.sn && e.sv >= 0));
+  // Without the threshold, an old roll would be redrawn under whatever the GM has set
+  // since — rewriting how a roll read after the fact.
+  ok("and the Complication threshold in force at the time",
+    kept.every((e) => e.at >= 15 && e.at <= 20));
+
+  ok("they survive a round trip through the character code", g(`(function(){
+    var back = parseCharacterCode(buildCharacterCode()).character;
+    return Array.isArray(back.recentRolls) && back.recentRolls.length === 3
+      && back.recentRolls[0].d.length === state.character.recentRolls[0].d.length;
+  })()`));
+
+  ok("the block renders", g("renderRecentRolls()").includes("Recent Rolls (3)"));
+  ok("and is absent entirely for a character that has not rolled", g(`(function(){
+    state.character.recentRolls = [];
+    return renderRecentRolls();
+  })()`) === "");
+
+  // classifyDie now takes the threshold as a parameter so history stays true. The live
+  // default must not have moved.
+  ok("a stored roll is classified by ITS threshold, not the current one",
+    g("classifyDie(17, 9, 2, 17)") === "complication" && g("classifyDie(17, 9, 2, 20)") === "fail");
+  ok("and the live default is unchanged when no threshold is passed",
+    g("classifyDie(20, 9, 2)") === "complication" && g("classifyDie(19, 9, 2)") === "fail");
+
+  // A character code is untrusted — pasted from a chat window, or read off a token any
+  // player can write to — and this is the only field in the file whose renderer LOOPS.
+  ok("a hostile roll history is clamped rather than rendered", g(`(function(){
+    state.character.recentRolls = [
+      { d: new Array(50000).fill(20), av: 1e9, sv: -5, su: 1e9, co: 1e9, an: 'x'.repeat(5000), at: 1 },
+      {}, {}, {}, {}, {}, {}, {}, {}, {}
+    ];
+    var out = normalizeRecentRolls();
+    return out.length === 3
+      && out[0].d.length === 5
+      && out[0].av === 20 && out[0].sv === 0
+      && out[0].an.length === 16
+      && out[0].at === 15;
+  })()`));
+  ok("and junk entries do not throw the renderer", g(`(function(){
+    state.character.recentRolls = [null, 'nope', 42];
+    try { renderRecentRolls(); return true; } catch (e) { return 'threw: ' + e.message; }
+  })()`) === true);
+  g("state.character.recentRolls = [];");
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);
