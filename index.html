@@ -2646,7 +2646,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.28';
+const APP_VERSION = '1.28B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -9401,6 +9401,12 @@ function installRollBridge() {
       comp: res.complications,
       pass: typeof res.passed === "boolean" ? res.passed : res.successes > 0,
       gain: res.momentumGained || 0,
+      // v1.28B. Who rolled it. The roller has stamped this since 0.9.4 and the sheet
+      // never has, which quietly broke the Add Momentum button: the roller offers a
+      // roll's surplus to the person who made it and to the GM, and an entry with no
+      // `by` matches nobody. So a player rolling from their own sheet — which is how
+      // this table plays — watched the GM claim their Momentum for them.
+      by: obrPlayerId,
     };
     OBR.broadcast.sendMessage(CHANNEL, { type: "roll", entry }, { destination: "ALL" })
       .catch((err) => console.warn("[dnm] roll broadcast failed", err));
@@ -9544,6 +9550,20 @@ function installPendingThreatBridge() {
 // a missing `kind` as "roll" rather than requiring one — the entries already sitting in
 // a live room's metadata have to keep rendering.
 let playerName = "Someone";
+
+// v1.28B. The Owlbear player id, stamped onto every roll this sheet sends so the
+// roller can tell whose roll it was. Null until resolved, and null is survivable:
+// an unstamped roll is claimable by the GM, which is what every sheet roll was
+// before this.
+let obrPlayerId = null;
+
+async function resolvePlayerId() {
+  try {
+    obrPlayerId = await OBR.player.getId();
+  } catch (err) {
+    console.warn("[dnm] could not read the player id", err);
+  }
+}
 
 async function resolveRole() {
   try {
@@ -10032,6 +10052,9 @@ async function startEmbedded() {
   // name when there is one; this is the fallback for a sheet opened on a token that
   // has no character on it yet.
   await resolvePlayerName();
+  // v1.28B. Must land before the first roll can be made, which is why it is awaited
+  // here rather than left to resolve on its own.
+  await resolvePlayerId();
 
   // v1.23. The sheet needs the role to decide whether the manual Threat controls
   // belong to this person. Resolved before the first render, so a player never sees

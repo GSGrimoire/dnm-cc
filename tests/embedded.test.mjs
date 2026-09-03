@@ -197,6 +197,32 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
 }
 
 // -------------------------------------------------------------
+// A roll says who made it (v1.28B)
+// -------------------------------------------------------------
+// Reported from play: "Add Momentum" in the roller was clickable for the GM and for
+// nobody else. The roller offers a roll's surplus to the person who made it and to the
+// GM, matching on `by` — and the sheet had never stamped it. Every roll made from a
+// character sheet was therefore unattributable, so a player rolling their own dice
+// watched the GM claim their Momentum for them.
+//
+// The roller has stamped its own rolls since 0.9.4, which is why this only ever showed
+// up for tables that roll from the sheet.
+{
+  sent.length = 0;
+  g(`(function(){
+    state.character.currentSpirit = 3;
+    postRoll('Tester', { dice: [4, 12], attrValue: 9, skillValue: 2, attrName: 'Might',
+      skillName: 'Fight', difficulty: 1, successes: 2, complications: 0, passed: true,
+      momentumGained: 1 });
+  })()`);
+  const rolls = sent.filter((e) => e.type === "roll");
+  ok("a sheet roll reaches the room", rolls.length === 1);
+  ok("stamped with the player who made it", rolls[0].entry.by === "p1");
+  ok("and still carries its surplus, which is what there is to claim",
+    rolls[0].entry.gain === 1);
+}
+
+// -------------------------------------------------------------
 // The bond bridge (v1.26)
 // -------------------------------------------------------------
 {

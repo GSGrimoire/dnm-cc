@@ -2,6 +2,51 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.28B / 0.9.8B — A sheet roll says who made it
+
+Letter release: this corrects something 0.9.5 got wrong. No behaviour was added.
+
+**The report:** "Add Momentum" in the roller was clickable for the GM and for nobody
+else.
+
+**The cause:** the roller offers a roll's surplus to the person who made it and to the
+GM, matching on `entry.by`. The roller has stamped `by` on its own rolls since 0.9.4.
+**The character sheet never has.** Every roll made from a sheet was therefore
+unattributable, matched nobody, and fell through to the GM-only branch — so a player
+rolling their own dice watched the GM claim their Momentum for them.
+
+It only ever showed up at a table that rolls from the sheet, which is why three releases
+went past it.
+
+Two halves:
+
+- `installRollBridge()` now stamps `by: obrPlayerId`, resolved once in `startEmbedded()`
+  via `OBR.player.getId()` and **awaited**, because it has to be there before the first
+  roll can be made.
+- The roller treats an entry with **no** `by` as claimable by anyone. Every sheet roll
+  made before this release is one of those and some will sit in live rooms for a while;
+  offering them to nobody but the GM is exactly what the bug looked like from a player's
+  seat. The pool is the group's, the claim is one-way and idempotent, and refusing it
+  helps no one.
+
+A roll that IS stamped keeps the original rule: the person who rolled, or the GM.
+
+## Testing
+
+Creator 155, embedded 43, party 102, security 68. Both halves of the fix were reverted
+in turn and the new assertion watched to fail.
+
+`embedded.test.mjs` is what made this testable at all — it drives the real
+`postRoll()` through the module block and reads what would have been broadcast. Before
+v1.27 there was no suite that could see a bridged roll's fields.
+
+## Live check
+
+A **player** rolls from their character sheet, then opens the roller. The roll's *Add
+Momentum* button is theirs to press, not just the GM's.
+
+---
+
 # v1.28 / 0.9.8 — The Maverick drive fires by itself
 
 Creator **v1.28**, extension **0.9.8**. Both change; deploy the extension first. No room

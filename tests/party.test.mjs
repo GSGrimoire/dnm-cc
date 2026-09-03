@@ -146,6 +146,14 @@ ok("a zero Threat delta is not a spend",
     applyEvent(rolled, { type: "claim", id: "nope" }).log[0].claimed === false);
   ok("anyone may claim as far as the reducer is concerned — the check is in the UI",
     isGmOnlyEvent({ type: "claim", id: "r9" }) === false);
+
+  // 0.9.8B. `by` is what the roller matches on to decide whose roll it was, so it has
+  // to survive the round trip through room metadata like `conceal` does. Losing it
+  // would turn every persisted roll into one nobody is recorded as having made — which
+  // is the state every sheet roll was in before v1.28B stamped it.
+  ok("`by` survives the reducer", rolled.log[0].by === "p-1");
+  ok("a roll with no `by` is stored as null rather than undefined",
+    applyEvent(fresh(), { type: "roll", entry: { id: "r10", who: "K", detail: [], gain: 2 } }).log[0].by === null);
 }
 
 // -------------------------------------------------------------
