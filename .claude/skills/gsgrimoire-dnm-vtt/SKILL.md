@@ -130,6 +130,16 @@ Keep the bridge surface NARROW. A general SDK proxy cannot work: the token write
 `scene.items.updateItems(ids, mutator)` and a mutator function cannot be
 structured-cloned across a channel.
 
+**Owlbear caches the background page for the whole room session.** A new extension
+version is not running until the ROOM is reloaded; a tab refresh is not enough. This is
+the first thing to suspect when a new relay feature does nothing, and it is why the host
+reports `EXT_VERSION` in its `hello` reply — change that constant with `manifest.json`.
+
+**Third-party storage partitioning is NOT why a popout cannot reach the host.** It is the
+obvious theory, the shapes match, and it is wrong: tested in Chromium with
+`--enable-features=ThirdPartyStoragePartitioning` and the loopback exemption off, the
+channel crosses every time. Do not spend the afternoon on it again.
+
 **Reply envelopes are reserved.** Nest an answer under `data`; never spread it into the
 message. Spreading it once meant the reply to `self` overwrote the correlation `id` with
 the player's `id`, and every read hung until it timed out while the window rendered a
@@ -174,6 +184,15 @@ What is privileged, and why:
   Nanobarrier, Adrenaline Rush and several items all add it. The direction is privileged, not
   the pool.
 - **Momentum** — open to everyone. It is the group's pool.
+
+**A room with NO GM writes nothing at all.** `persist()` runs only on the GM's client, so
+with nobody in that seat every pool change, rest and log entry is dropped. That is the
+single-writer rule working, and it stays — but warn, do not fail silently: a player whose
+Momentum moves on their sheet and nowhere else will report the sheet as broken.
+`roomHasGM()` exists in the roller, the creator's direct bridge and the relay host.
+`getPlayers()` lists everyone EXCEPT this client, so check the caller's own role too or a
+lone GM is told there is no GM — and fail OPEN, because a party read racing a disconnect
+must not cry wolf at the whole table.
 - **Bond effects** — open. A forged one can only pay a sheet that already holds the
   matching bond, and blocking them would break every bond at a table whose GM has the
   extension closed.

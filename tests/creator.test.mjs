@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 1.29", g("APP_VERSION") === "1.29");
+ok("APP_VERSION is 1.30", g("APP_VERSION") === "1.30");
 
 // -------------------------------------------------------------
 // Fixture

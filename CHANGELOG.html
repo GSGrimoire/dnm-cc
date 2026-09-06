@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.29</h1>
-    <p class="lead">The character sheet can now open in its own browser window, so you can keep it beside the map and the log instead of opening and closing it all evening. It also remembers your last three rolls.</p>
+    <h1>Version v.1.30</h1>
+    <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.29 needs extension 0.9.9; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.30 needs extension 0.9.10; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,22 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.1.30</span>
+          <span class="version-title">A room with no GM says so</span>
+        </summary>
+        <ul>
+        <li><strong>A room with no GM now warns you.</strong> Without a GM present, nothing saves to the room &mdash; Momentum, Threat, rests and the shared log all need the GM&apos;s connection to write them. You could add Momentum, watch your own sheet change, and never see the pool move. It still works that way, but the roller and the sheet both say so now instead of looking broken.</li>
+        <li>The warning clears by itself the moment a GM joins or someone is promoted.</li>
+        <li><strong>A raised Complication range is now in Threat&apos;s colour</strong>, on its own line under the rest of the dice hint. It wrapped to two lines anyway, so the break is somewhere useful &mdash; and playing on the wrong odds because you did not notice the change is worth avoiding.</li>
+        <li><strong>The pop-out window is still not working, and this release does not fix it.</strong> What it does is tell you why it failed. Most likely your Owlbear room is still running the older extension: reload the room, then try again. The window now says which of the three possible causes it hit, and offers a Try again button.</li>
+        <li>Requires extension 0.9.10. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.29</span>
           <span class="version-title">The sheet in its own window, and it remembers your rolls</span>

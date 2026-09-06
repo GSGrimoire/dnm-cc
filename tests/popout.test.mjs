@@ -66,6 +66,7 @@ const room = {
   metadata: { "com.thuknights.dnm-rolls/state": { v: 4, momentum: 2, threat: 5, log: [], epochs: {}, compAt: 20, bonds: [] } },
   tokens: { "token-1": null },
   self: { role: "GM", name: "Tester", id: "p-popout" },
+  hasGM: true,
   partyCodes: [],
 };
 
@@ -74,9 +75,12 @@ hostChannel.onmessage = (ev) => {
   const msg = ev.data;
   if (!msg || msg.dir !== "req") return;
   seen.push(msg);
-  if (msg.room && msg.room !== "room-1") return;   // a different room must stay silent
-  let payload = { ok: true };
-  if (msg.op === "self") payload = { ...room.self };
+  // "hello" is answered whatever room it names (0.9.10), so a window opened for the
+  // wrong room can be TOLD that rather than sitting in a silence indistinguishable from
+  // an extension that has no relay. Everything else is still scoped.
+  if (msg.op !== "hello" && msg.room && msg.room !== "room-1") return;
+  let payload = { ok: true, room: "room-1", ext: "0.9.10" };
+  if (msg.op === "self") payload = { ...room.self, hasGM: room.hasGM };
   else if (msg.op === "metadata") payload = { metadata: room.metadata };
   else if (msg.op === "tokenCode") payload = { code: room.tokens[msg.itemId] || null };
   else if (msg.op === "writeToken") { room.tokens[msg.itemId] = msg.code; payload = { ok: true }; }
@@ -215,6 +219,47 @@ ok("it adopted the room's Threat", g("obrThreat") === 5);
   ok("and does not spread a payload anywhere in the reply",
     !/postMessage\(\{[^}]*\.\.\.payload/.test(host));
   ok("the popout reads the nested answer", body.includes("waiting.resolve(msg.data"));
+}
+
+// -------------------------------------------------------------
+// It says what went wrong (v1.30)
+// -------------------------------------------------------------
+// The first QA of the popout produced "it just opens the character creator and then
+// says it lost the room" — with no way to tell an extension that has no relay from a
+// room id that did not match from a room that had closed. All three looked identical.
+// They need different things done about them, so they are now named.
+{
+  const bootAlone = async (url) => {
+    const d = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true, url });
+    const win = d.window;
+    await new Promise((r) => { if (win.document.readyState === "complete") r(); else win.addEventListener("load", r); });
+    win.BroadcastChannel = FakeChannel;
+    win.eval(`const OBR = { isAvailable: false, onReady: () => {}, room: { get id() { return ""; } } };\n` + body);
+    return win;
+  };
+
+  // ANSWERED BY THE WRONG ROOM. The host replies to "hello" whatever room it is in
+  // (0.9.10) precisely so this case can be told apart from silence.
+  const wrong = await bootAlone("https://gsgrimoire.github.io/dnm-cc/?popout=1&item=t&room=some-other-room");
+  await wait(500);
+  const wrongBar = wrong.document.querySelector(".popout-lost");
+  ok("a window answered by a different room says which", !!wrongBar && /room-1/.test(wrongBar.textContent));
+  ok("and names the room it was opened for", !!wrongBar && /some-other-room/.test(wrongBar.textContent));
+  ok("and does NOT offer a retry, since retrying would fail the same way",
+    !wrong.document.querySelector(".popout-retry"));
+
+  // NOBODY ANSWERS. This is what a room running an older extension looks like, and it
+  // is the likeliest cause by far — Owlbear caches the background page for the whole
+  // room session, so a new version is not running until the room is reloaded.
+  hostChannel.close();
+  const silent = await bootAlone("https://gsgrimoire.github.io/dnm-cc/?popout=1&item=t&room=nobody-home");
+  await wait(9000);
+  const bar = silent.document.querySelector(".popout-lost");
+  ok("a window nobody answers says so", !!bar);
+  ok("and points at the likeliest cause rather than shrugging",
+    !!bar && /reload the room/i.test(bar.textContent));
+  ok("and offers a retry, because reloading the room may have just fixed it",
+    !!silent.document.querySelector(".popout-retry"));
 }
 
 console.log(`\npopout: ${pass} passed, ${fail} failed`);

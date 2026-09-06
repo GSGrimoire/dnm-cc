@@ -2311,9 +2311,32 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
    possible way to fail silently. */
 .popout-lost {
   position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 12px;
   padding: 10px 14px;
   background: var(--accent); color: #fff;
   font-size: 0.8rem; line-height: 1.45;
+}
+.popout-retry {
+  flex: none;
+  background: #fff; color: var(--accent);
+  border: none; border-radius: 2px;
+  padding: 5px 12px;
+  font-family: var(--font-mono); font-size: 0.7rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* v1.30. Warning colour rather than Threat's orange: nothing is wrong with the game,
+   something is missing from the room. */
+.no-gm-warning {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  background: rgba(255,209,102,0.10);
+  border: 1px solid var(--warning);
+  border-radius: 2px;
+  color: var(--warning);
+  font-size: 0.74rem;
+  line-height: 1.5;
 }
 
 .ally-picker { margin: 0 0 6px; }
@@ -2679,7 +2702,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.29';
+const APP_VERSION = '1.30';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -7020,6 +7043,22 @@ let obrThreat = null;
 // Null standalone, where there is no room and no GM.
 let obrRole = null;
 
+// v1.30. Whether ANYONE in this room is the GM. Reported from play: with no GM, a
+// player presses + on Momentum, the sheet moves and the room's pool never does — only
+// the GM's client writes room metadata, so with nobody in that seat every pool change
+// is dropped. The rule is right and stays; the silence was the bug.
+//
+// True by default so a sheet in a plain browser tab, or one whose party read failed,
+// never shows a warning about a room it is not in.
+let obrHasGM = true;
+
+function renderNoGmWarning() {
+  if (obrHasGM) return '';
+  return `<div class="no-gm-warning obr-only">No GM in this room. Rolls still show in the
+    log, but Momentum, Threat and rests will not save for the table until a GM joins.
+    Anything you change here stays on your own sheet.</div>`;
+}
+
 // v1.27. What the pool batcher is holding but has not had confirmed by the room. Zero
 // standalone, where there is no room and nothing to wait for; the module block replaces
 // it. Threat is display-only here — it is not a field on the character — so unlike
@@ -7069,6 +7108,7 @@ function renderSheetResourcesSection(c) {
 
   return `<div class="sheet-section">
     <div class="sheet-section-title">Resources</div>
+    ${renderNoGmWarning()}
     <div class="resource-grid">
       ${renderResourceCounter('spirit', 'Spirit', getEffectiveResource('spirit'), maxes.spirit)}
       ${renderResourceCounter('supply', 'Supply Points', getEffectiveResource('supply'), maxes.supply, '', renderResourceBonusBreakdown('supplyPoints'), supplyReset)}
@@ -9368,10 +9408,33 @@ function makeDirectBridge() {
       const [role, name, id] = await Promise.all([
         OBR.player.getRole(), OBR.player.getName(), OBR.player.getId(),
       ]);
-      return { role, name, id };
+      return { role, name, id, hasGM: await this.roomHasGM(role) };
+    },
+    // getPlayers() lists everyone EXCEPT this client, so this client's own role has to
+    // be checked separately — without it a lone GM would be told there is no GM.
+    async roomHasGM(ownRole) {
+      if (ownRole === "GM") return true;
+      try {
+        const players = await OBR.party.getPlayers();
+        return players.some((p) => p.role === "GM");
+      } catch (err) {
+        return true;   // fails OPEN: a racing party read must not cry wolf
+      }
     },
     onPlayerChange(cb) {
-      OBR.player.onChange((p) => cb({ role: p.role, name: p.name, id: p.id }));
+      OBR.player.onChange(async (p) => {
+        cb({ role: p.role, name: p.name, id: p.id, hasGM: await this.roomHasGM(p.role) });
+      });
+    },
+    onPartyChange(cb) {
+      try {
+        OBR.party.onChange(async () => {
+          try { cb({ hasGM: await this.roomHasGM(await OBR.player.getRole()) }); }
+          catch (err) { /* the read raced a disconnect */ }
+        });
+      } catch (err) {
+        console.warn("[dnm] could not watch the party", err);
+      }
     },
     async getMetadata() { return OBR.room.getMetadata(); },
     onMetadataChange(cb) { OBR.room.onMetadataChange(cb); },
@@ -9424,7 +9487,7 @@ function makeRelayBridge(roomId) {
   const channel = new BroadcastChannel(POPOUT_CHANNEL);
   const me = `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
   const pending = new Map();
-  const listeners = { room: [], player: [], items: [] };
+  const listeners = { room: [], player: [], items: [], party: [] };
   let seq = 0;
 
   channel.onmessage = (ev) => {
@@ -9447,6 +9510,7 @@ function makeRelayBridge(roomId) {
     if (msg.event === "room") listeners.room.forEach((cb) => cb(msg.metadata));
     else if (msg.event === "player") listeners.player.forEach((cb) => cb(msg));
     else if (msg.event === "items") listeners.items.forEach((cb) => cb());
+    else if (msg.event === "party") listeners.party.forEach((cb) => cb(msg));
   };
 
   // Every request is answered or it rejects. A popout whose room has been closed would
@@ -9473,9 +9537,16 @@ function makeRelayBridge(roomId) {
 
   return {
     kind: "relay",
-    async ready() { await call("hello", {}, 8000); return true; },
-    async getSelf() { const r = await call("self"); return { role: r.role, name: r.name, id: r.id }; },
+    // Returns what the host said about itself, so the window can name the problem
+    // rather than only report that there was one.
+    async ready() { return call("hello", {}, 8000); },
+    get roomId() { return roomId; },
+    async getSelf() {
+      const r = await call("self");
+      return { role: r.role, name: r.name, id: r.id, hasGM: r.hasGM !== false };
+    },
     onPlayerChange(cb) { listeners.player.push(cb); },
+    onPartyChange(cb) { listeners.party.push(cb); },
     async getMetadata() { const r = await call("metadata"); return r.metadata || {}; },
     onMetadataChange(cb) { listeners.room.push(cb); },
     async getTokenCode(itemId) { const r = await call("tokenCode", { itemId }); return r.code || null; },
@@ -9868,6 +9939,7 @@ async function resolveSelf() {
     const self = await bridge.getSelf();
     obrRole = self.role || null;
     obrPlayerId = self.id || null;
+    obrHasGM = self.hasGM !== false;
     if (self.name) playerName = self.name;
   } catch (err) {
     console.warn("[dnm] could not read this player", err);
@@ -10383,8 +10455,20 @@ async function startEmbedded() {
   // that makes its Momentum claimable.
   await resolveSelf();
   bridge.onPlayerChange((player) => {
-    if (!player || player.role === obrRole) return;
+    if (!player) return;
+    const changed = player.role !== obrRole || (player.hasGM !== false) !== obrHasGM;
     obrRole = player.role;
+    if (player.hasGM !== undefined) obrHasGM = player.hasGM !== false;
+    if (changed && ready) renderAll();
+  });
+
+  // v1.30. Someone else being promoted or leaving decides whether this room has a GM,
+  // and onPlayerChange only reports THIS client.
+  bridge.onPartyChange((party) => {
+    if (!party || party.hasGM === undefined) return;
+    const next = party.hasGM !== false;
+    if (next === obrHasGM) return;
+    obrHasGM = next;
     if (ready) renderAll();
   });
 
@@ -10437,23 +10521,51 @@ async function bootPopout() {
   document.body.classList.add("obr-popout");
   bridge = makeRelayBridge(roomId);
   try {
-    await bridge.ready();
+    const host = await bridge.ready();
+    // v1.30. The host now answers "hello" even when the room id does not match, so a
+    // mismatch reports itself instead of looking exactly like an extension that has no
+    // relay at all. That ambiguity cost a QA round.
+    if (roomId && host && host.room && host.room !== roomId) {
+      showPopoutLost(`Another Owlbear room answered this window. It was opened for room
+        ${roomId} and the extension in this browser is in room ${host.room}. Close this
+        window and open the sheet again from the token in the room you are playing in.`);
+      return;
+    }
   } catch (err) {
-    // The room is gone, or Owlbear is not open in this browser any more. Said plainly
-    // on the page: a window that silently does nothing is the worst outcome here,
-    // because the sheet still renders and looks like it is working.
     console.error("[dnm] the popout could not reach the room", err);
-    showPopoutLost();
+    // Named precisely, because these need different things done about them and the
+    // first one is by far the most likely: Owlbear caches the extension's background
+    // page for the whole room session, so a NEW extension version is not running until
+    // the room itself is reloaded. A tab refresh is not enough.
+    showPopoutLost(`This window got no answer from the Dreams & Machines extension.
+      Most often that means the Owlbear room is still running an older version of the
+      extension: go to the Owlbear tab, reload the room, then open the sheet and press
+      Pop out again. It also looks like this if the room has been closed. Nothing you
+      do in this window will reach the table until it connects.`, true);
     return;
   }
   startEmbedded();
 }
 
-function showPopoutLost() {
+// `offerRetry` only for the no-answer case: reloading is worth a try when the room may
+// simply have been reloaded since. A wrong-room window has to be reopened from the
+// right token, so retrying it would only fail again more slowly.
+function showPopoutLost(message, offerRetry) {
+  const existing = document.querySelector(".popout-lost");
+  if (existing) existing.remove();
   const bar = document.createElement("div");
   bar.className = "popout-lost";
-  bar.textContent = "This window has lost its Owlbear room. Rolls and changes here will "
-    + "not reach the table. Close it and open the sheet again from the token.";
+  const text = document.createElement("span");
+  text.textContent = String(message || "").replace(/\s+/g, " ").trim();
+  bar.append(text);
+  if (offerRetry) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "popout-retry";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => location.reload());
+    bar.append(retry);
+  }
   document.body.prepend(bar);
 }
 

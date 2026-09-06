@@ -2,6 +2,94 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v1.30 / 0.9.10 — A room with no GM says so, and the popout says why it failed
+
+Creator **v1.30**, extension **0.9.10**. Both change; deploy the extension first. No room
+metadata schema change. Rollback point is still `dnm-cc c21e8ac` / `dnm-obr bd3586c`.
+
+From QA of 1.29. Carries both fixes and deliberate changes, so it is a number.
+
+## A room with no GM
+
+Reported: a player adds Momentum, the sheet moves, the roller's pool does not. Traced by
+the reporter to a room with no GM, and they are exactly right.
+
+**This is `background.js` working as designed.** `persist()` only runs on the GM's client,
+so with nobody in that seat no one writes room metadata and every pool change is dropped
+on the floor. The single-writer rule is what stops two clients clobbering each other and
+it stays. What was wrong is that it happened **silently**, so the tools looked broken
+rather than unattended.
+
+Both halves now warn. `roomHasGM()` exists in three places — the roller, the creator's
+direct bridge, and the relay host — because each has a different way to ask. All three
+share two rules:
+
+- **`getPlayers()` lists everyone EXCEPT this client**, so the caller's own role has to be
+  checked separately or a lone GM is told there is no GM.
+- **Fail OPEN.** A party read that races a disconnect must not put "the GM has vanished"
+  on every sheet at the table.
+
+## The popout: not fixed, but no longer mute
+
+QA: the window opens, shows the character creator's import screen, and a while later says
+it lost the room. **I could not reproduce it and I have not fixed it.** What 0.9.10 does is
+make the three causes tell themselves apart, because all three looked identical and that
+ambiguity cost the round.
+
+What was ruled out, so nobody repeats it:
+
+- **Third-party storage partitioning was my first theory and it is wrong.** The host is an
+  iframe under `owlbear.rodeo`; the popout is a first-party window on
+  `gsgrimoire.github.io`. That is the partitioned shape. Tested in Chromium with
+  `--enable-features=ThirdPartyStoragePartitioning` and with the loopback exemption
+  disabled: **the channel crosses in every configuration.** Not the cause.
+- **An opaque origin from a sandboxed popup** is also out: the window listed the
+  characters saved in browser storage, so it has a normal origin.
+
+What is left, in order of likelihood:
+
+1. **The room is running an older extension.** Owlbear caches the background page for the
+   whole room session, so 0.9.9's relay is not running until the room itself is reloaded —
+   a tab refresh is not enough. This is the likeliest by a distance and it is exactly what
+   "no answer at all" looks like.
+2. A room id mismatch.
+3. The room has closed.
+
+So: the host answers `hello` **regardless of room** now, and includes its room id and
+`EXT_VERSION`. A window that gets no reply says "no answer from the extension — reload the
+Owlbear room and press Pop out again" and offers a **Try again** button. A window answered
+by a different room names both rooms and offers no retry, because retrying would fail the
+same way.
+
+`EXT_VERSION` in `dnm.js` must be changed with `manifest.json`. It exists so a window that
+cannot reach the room can say what the room is running.
+
+## The dice hint
+
+The Complication clause is on its own line — it wrapped to two lines anyway, so the break
+is now somewhere it reads — and a **raised** range is drawn in Threat's colour, because
+raising it is extra danger and a player who does not notice is playing on the wrong odds.
+
+## Testing
+
+Creator 167, embedded 43, party 102, popout 30, security 68. The three popout failure
+messages are mutation-tested. Verified in Chromium: the clause is `display: block` and
+orange only when raised, and both no-GM warnings appear and are hidden when a GM is present.
+
+**One test was written to the old protocol and had to be corrected**: the fake host in
+`popout.test.mjs` still dropped non-matching rooms, so the wrong-room case could not fire.
+A fake that lags the real contract tests the fake.
+
+## Live checks
+
+1. **Reload the Owlbear room first**, then press Pop out. If it still fails, the banner now
+   says which of the three causes it is — send that sentence back.
+2. Leave the room with no GM. Both the roller and the sheet show a warning.
+3. Promote someone to GM. Both warnings clear without a reload.
+4. As GM, lower the Complication range. Players see the clause on its own line, in orange.
+
+---
+
 # v1.29 / 0.9.9 — The sheet in its own window, and it remembers its rolls
 
 Creator **v1.29**, extension **0.9.9**. Both change; deploy the extension first. No room
