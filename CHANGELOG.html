@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.0</h1>
+    <h1>Version v.2.0B</h1>
     <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.0 needs extension 1.0; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.0B needs extension 1.0; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,21 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.0B</span>
+          <span class="version-title">Character codes are treated as untrusted</span>
+        </summary>
+        <ul>
+        <li><strong>A character code can no longer run code on the sheet that opens it.</strong> The Growth section printed a purchase&apos;s description straight into the page without checking it first, so a code could carry something other than text and have it run in whoever opened the sheet &mdash; and because the sheet sits inside Owlbear, that meant acting at the table as whoever was reading, the GM included. Codes are pasted out of chat and read off tokens anyone can write to, so they are treated as untrusted now. Nothing you type yourself changes.</li>
+        <li><strong>A character from a newer version of the creator now says so instead of opening blank.</strong> If a code names an origin, archetype or temperament this version does not have, you get a message telling you to reload. Before, the sheet came up empty with nothing to explain it. Half-built characters still import exactly as they did.</li>
+        <li><strong>A damaged character code no longer opens an empty sheet either.</strong> A code with a corrupted Growth entry used to stop the sheet drawing partway through, with nothing to say why. It is skipped now.</li>
+        <li>No change to the extension. Still requires extension 1.0, and no reinstall.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.0</span>
           <span class="version-title">The sheet beside the map</span>

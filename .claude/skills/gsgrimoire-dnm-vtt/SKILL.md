@@ -347,11 +347,46 @@ the way in, and clamp hardest whatever the renderer LOOPS over — `recentRolls`
 creator, `detail` in the extension's `sanitizeEntry()`. An entry claiming a hundred
 thousand dice freezes whoever draws it.
 
+**And ESCAPE it.** `buildCharacterCode()` embeds the whole character object as a base64
+JSON payload, so every field in it is attacker-controlled, and the creator renders with
+`innerHTML` in twenty places. v2.0B fixed a code that could run script in whoever opened
+the sheet, through an unescaped growth purchase label. That is not defacement: the sheet
+is framed by Owlbear with a working SDK, so the script holds the reader's seat at the
+table, and `background.js` verifying connection ids cannot help — XSS in the GM's sheet
+IS the GM's connection.
+
+Three rules from that one:
+
+- **Every character field reaching `innerHTML` goes through `escHtml()`**, or through a
+  normaliser that coerces it to a number. The discipline was already right in eleven
+  places; three were missed.
+- **Find every render of the same data.** The growth list is rendered twice, in the play
+  view and in the wizard, and fixing only the first left the second live.
+- **Fuzz it, do not read it.** Poison every character field with a marker and check which
+  come back as live DOM. Reading found one sink; the harness found the rest and proved
+  the others safe. Distinguish "escaped" from "never rendered" or the clean result is
+  meaningless.
+
+**Validate a key AFTER the CP payload is applied, not before.** `parseCharacterCode()`
+checked the origin, archetype and temperament segment codes and then `Object.assign`ed the
+payload over the top without re-checking, so a character naming a key this build does not
+have parsed cleanly and threw on render — a blank sheet with no message. The likely cause
+is a character from a newer creator meeting a room serving the cached older one, or a
+renamed key. Refuse only a key that is SET and does not RESOLVE: an EMPTY origin is an
+unfinished character and has always imported.
+
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.
 
-Do it against `out/`, not the source — mutate the staged copy, run, restage. And when the
-behaviour is about TIMING, space the test out like a hand does. The pool batcher's
+Do it against `out/`, not the source — mutate the staged copy, run, restage.
+
+**Assert through the DOM, not a regex over rendered HTML.** A regex encodes a guess about
+how the markup was written; the parser decides what it actually IS. An escaping assertion
+written as a regex passed under mutation and proved nothing. And **do not reuse a fixture
+the assertions above have already mutated** — a block that ran after the play view had
+rendered was asserting against data the play view had normalised.
+
+And when the behaviour is about TIMING, space the test out like a hand does. The pool batcher's
 headline test drove three presses in one tick, which coalesce under any deferral at all
 including `setTimeout(…, 0)` — so it passed with the debounce removed. Only a test with
 real gaps between the presses caught it.

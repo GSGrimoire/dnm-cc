@@ -334,6 +334,244 @@ const rollEv = (entry) => ({ type: "roll", entry });
     readBondQueue({ bonds: [null, 42, "x", { id: "ok", t: Date.now(), kind: "rivalry", from: "K" }] }).length === 1);
 }
 
+// -------------------------------------------------------------
+// A character code cannot inject markup (v2.0B)
+// -------------------------------------------------------------
+// A character code is pasted out of a chat window and read off tokens any player at the
+// table can write to. The sheet renders it with innerHTML, and the sheet is FRAMED BY
+// OWLBEAR with a working SDK — so markup that survives into the DOM does not merely
+// deface a sheet, it runs script holding the reader's seat at the table, the GM's
+// included. Every field that reaches a render has to be escaped or clamped.
+//
+// Three sinks were missed until v2.0B: the growth purchase label and detail, in BOTH
+// places the purchase list is rendered, and the inventory quantity. They are asserted
+// here per FIELD and per RENDERER, because the first fix covered the play view and left
+// the wizard's copy of the same list live.
+{
+  const raw = fs.readFileSync(new URL("../out/dnm-cc/index.html", import.meta.url), "utf8");
+  const modStart = raw.indexOf('<script type="module">');
+  const modEnd = raw.indexOf("</script>", modStart);
+  const html = raw.slice(0, modStart) + raw.slice(modEnd + "</script>".length);
+  const dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true,
+    url: "https://gsgrimoire.github.io/dnm-cc/" });
+  const w = dom.window;
+  await new Promise((r) => { if (w.document.readyState === "complete") r(); else w.addEventListener("load", r); });
+  const g = (code) => w.eval(code);
+
+  const realItem = g(`(DM_DATA.items && DM_DATA.items[0] && DM_DATA.items[0].id) || null`);
+  ok("the catalogue has an item to hang the inventory test on", !!realItem);
+
+  // A complete, valid character — built the way the app builds one — carrying a payload
+  // an attacker controls. The character has to be valid or the renderers bail early and
+  // the test proves nothing.
+  g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    c.name = 'Fixture';
+    c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = Object.keys(DM_DATA.archetypes)[0];
+    c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    c.finalized = true;
+    normalizeEditableLists();
+    if (!computeStats()) throw new Error('fixture does not compute');
+    c.growthPurchases = [{ type:'increaseSkill', cost:1,
+      label: '<img src=x onerror="window.__pwn=1">',
+      detail: '<img src=y onerror="window.__pwn=1">' }];
+    c.items = [{ id: ${JSON.stringify("PLACEHOLDER")}, qty: '<img src=z onerror="window.__pwn=1">', equipped:true, discharged:false }];
+  })()`.replace('"PLACEHOLDER"', JSON.stringify(realItem)));
+
+  // Asserted on the RAW output string. An escaped payload appears as &lt;img, a live one
+  // as <img, and the difference is the whole finding.
+  const renderers = ["renderFinalizedCharacterView", "renderGrowthStep", "renderInventorySection"];
+  for (const fn of renderers) {
+    const out = g(`(function(){ try { return String(${fn}()); } catch(e) { return '__THREW__' + e.message; } })()`);
+    ok(`${fn} does not throw on a hostile character`, !String(out).startsWith("__THREW__"));
+    ok(`${fn} emits no live <img> from the code`, !/<img\s+src=[xyz]/.test(String(out)));
+  }
+
+  // And the same thing through the DOM, which is what actually decides whether a
+  // handler gets compiled. A string assertion alone would miss an encoding the parser
+  // undoes.
+  const live = g(`(function(){
+    var d = document.createElement('div');
+    d.innerHTML = renderFinalizedCharacterView() + renderGrowthStep() + renderInventorySection();
+    return d.querySelectorAll('img[src="x"], img[src="y"], img[src="z"]').length;
+  })()`);
+  ok("no injected element reaches the DOM", live === 0);
+  ok("and nothing of the payload executed", g("window.__pwn") === undefined);
+
+  // The ✕ button in the wizard passes an index straight to removeGrowthPurchase(), so
+  // the normaliser must not renumber the entries it keeps. A junk entry in the middle of
+  // the list is exactly what a hostile or half-written code produces.
+  const idx = g(`(function(){
+    // finalized:false — the ✕ button only exists in the wizard, and renderGrowthStep()
+    // renders nothing for a finalized character. With it left true this returned an
+    // empty list and the assertion passed on nothing at all.
+    state.character.finalized = false;
+    state.character.growthPool = 10;
+    state.character.growthPurchases = [
+      { type:'a', label:'first',  detail:'', cost:1 },
+      null,
+      { type:'c', label:'third',  detail:'', cost:3 },
+    ];
+    // Wrapped: an unguarded getGrowthSpent() throws on the null entry, and an
+    // uncaught throw here kills the whole run instead of failing one assertion.
+    var out;
+    try { out = String(renderGrowthStep()); }
+    catch (e) { state.character.finalized = true; return JSON.stringify("THREW: " + e.message); }
+    // Split, do not match. Any regex written here has to survive TWO rounds of escape
+    // processing on the way into the page — the template literal carrying this code,
+    // then the string or literal itself — and both rounds eat backslashes. Two earlier
+    // attempts compiled to patterns that matched nothing and passed green. Splitting on
+    // a plain substring cannot be got wrong.
+    var calls = out.split("removeGrowthPurchase(").slice(1)
+      .map(function(chunk){ return Number(chunk.slice(0, chunk.indexOf(")"))); });
+    state.character.finalized = true;
+    return JSON.stringify(calls);
+  })()`);
+  ok("a junk entry does not renumber the purchases after it", idx === "[0,2]");
+
+  // The inventory quantity, DEFENCE IN DEPTH and labelled as such. Unlike the growth
+  // label this was never exploitable end to end: normalizeCurrentValues() coerces qty
+  // to a number before any render, and loadIntoCreator() always calls it. The renderer
+  // still should not depend on an upstream caller having tidied up first, so it clamps
+  // — and this asserts the renderer ALONE is safe, by poisoning the state and calling
+  // it without the normalisation the app would have done.
+  const qtyRaw = g(`(function(){
+    // Rebuilt from scratch: the renderers above already ran normalizeCurrentValues()
+    // through the play view, which coerces qty and would leave this asserting nothing.
+    var c = state.character = getDefaultCharacter();
+    c.name = 'Fixture';
+    c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = Object.keys(DM_DATA.archetypes)[0];
+    c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    c.finalized = true;
+    normalizeEditableLists();
+    if (!computeStats()) return JSON.stringify({ error: 'fixture does not compute' });
+    c.items = [{ id: ${JSON.stringify(realItem)}, qty: '<img src=z onerror="window.__pwn=1">', equipped:true, discharged:false }];
+    var out = String(renderInventorySection());       // deliberately NOT normalised first
+    // Through the DOM rather than a regex over the string. A regex has to guess how the
+    // markup was written; the parser decides what it actually IS, which is the only
+    // thing that matters for whether a handler gets compiled.
+    var d = document.createElement('div');
+    d.innerHTML = out;
+    var cell = d.querySelector('.owned-qty-val');
+    return JSON.stringify({
+      rendered: !!cell,
+      qty: cell ? cell.textContent : null,
+      live: d.querySelectorAll('img[src="z"]').length > 0,
+    });
+  })()`);
+  const qtyInfo = JSON.parse(qtyRaw);
+  // Without this, "no live markup" would also pass on a row that never rendered.
+  ok("the inventory row actually rendered", qtyInfo.rendered === true);
+  ok("the inventory renderer clamps a quantity without help", !qtyInfo.live);
+  ok("and renders it as a number", qtyInfo.qty !== null && /^\d+$/.test(qtyInfo.qty));
+}
+
+// -------------------------------------------------------------
+// A code naming something this creator does not have (v2.0B)
+// -------------------------------------------------------------
+// The segment checks reject an unknown origin CODE, and then the CP payload overwrote
+// all three keys without being re-checked. computeStats() then looked up a key that
+// resolved to undefined and threw, taking renderAll() with it: a blank sheet and no
+// message. The likeliest cause is not malice but a character built in a newer creator
+// meeting a room still serving the cached older one.
+{
+  const raw = fs.readFileSync(new URL("../out/dnm-cc/index.html", import.meta.url), "utf8");
+  const modStart = raw.indexOf('<script type="module">');
+  const modEnd = raw.indexOf("</script>", modStart);
+  const html = raw.slice(0, modStart) + raw.slice(modEnd + "</script>".length);
+  const dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true,
+    url: "https://gsgrimoire.github.io/dnm-cc/" });
+  const w = dom.window;
+  await new Promise((r) => { if (w.document.readyState === "complete") r(); else w.addEventListener("load", r); });
+  const g = (code) => w.eval(code);
+
+  const good = g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    c.name='Fixture'; c.origin=Object.keys(DM_DATA.origins)[0];
+    c.archetype=Object.keys(DM_DATA.archetypes)[0];
+    c.temperament=Object.keys(DM_DATA.temperaments)[0];
+    c.finalized=true; normalizeEditableLists(); computeStats();
+    return buildCharacterCode();
+  })()`);
+
+  // A COMPLETE character with exactly one key changed, so this is the real-world shape
+  // rather than a payload that happens to omit everything else.
+  const withKey = (over) => g(`(function(){
+    var code = ${JSON.stringify(good)};
+    var seg = code.split('-').find(function(p){ return p.slice(0,2) === 'CP'; });
+    var pad = seg.slice(2); while (pad.length % 4) pad += '=';
+    var obj = JSON.parse(decodeURIComponent(atob(pad)));
+    Object.assign(obj, ${JSON.stringify(over)});
+    var b64 = btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=/g,'');
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+  })()`);
+
+  for (const [what, over] of [
+    ["archetype", { archetype: "no-such-archetype" }],
+    ["origin", { origin: "no-such-origin" }],
+    ["temperament", { temperament: "no-such-temperament" }],
+  ]) {
+    const code = withKey(over);
+    const res = g(`parseCharacterCode(${JSON.stringify(code)})`);
+    ok(`an unknown ${what} in the payload is refused with a message`,
+      !!res.error && /newer version/.test(res.error));
+    // Even if something reaches the renderer anyway, it must not throw.
+    const r = g(`(function(){
+      try {
+        var res = parseCharacterCode(${JSON.stringify(code)});
+        state.character = Object.assign({}, getDefaultCharacter(), res.character || {});
+        state.character.finalized = true;
+        normalizeCurrentValues();
+        renderFinalizedCharacterView();
+        return 'ok';
+      } catch(e) { return '__THREW__' + e.message; }
+    })()`);
+    ok(`and an unknown ${what} never throws on render`, r === "ok");
+  }
+
+  // The other half of that rule: an UNFINISHED character has no origin or archetype
+  // yet, and has always imported. Refusing those would break sharing a half-built
+  // character, which is a thing people do.
+  const unfinished = g(`(function(){
+    var code = ${JSON.stringify(good)};
+    var payload = { name: 'Half Built', origin: '', archetype: '', temperament: '' };
+    var b64 = btoa(encodeURIComponent(JSON.stringify(payload))).replace(/=/g,'');
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+  })()`);
+  const half = g(`parseCharacterCode(${JSON.stringify(unfinished)})`);
+  ok("an unfinished character still imports", !half.error);
+  ok("computeStats declines it rather than throwing", g(`(function(){
+    try { state.character = Object.assign({}, getDefaultCharacter(), parseCharacterCode(${JSON.stringify(unfinished)}).character);
+      return computeStats() === null ? 'null' : 'computed'; } catch(e) { return '__THREW__'; }
+  })()`) === "null");
+
+  // computeStats' own guard, DEFENCE IN DEPTH. The parser now refuses these codes, so
+  // the render path no longer reaches an unresolved key — which means asserting it
+  // through the parser proves nothing about computeStats. It has a dozen callers and
+  // only one of them is behind the parser, so it is asserted directly.
+  for (const [what, over] of [
+    ["archetype", "state.character.archetype = 'no-such-archetype';"],
+    ["origin", "state.character.origin = 'no-such-origin';"],
+    ["temperament", "state.character.temperament = 'no-such-temperament';"],
+  ]) {
+    const r = g(`(function(){
+      try {
+        var c = state.character = getDefaultCharacter();
+        c.origin = Object.keys(DM_DATA.origins)[0];
+        c.archetype = Object.keys(DM_DATA.archetypes)[0];
+        c.temperament = Object.keys(DM_DATA.temperaments)[0];
+        normalizeEditableLists();
+        if (!computeStats()) return 'fixture invalid';
+        ${over}
+        return computeStats() === null ? 'null' : 'computed';
+      } catch(e) { return '__THREW__' + e.message; }
+    })()`);
+    ok(`computeStats returns null for an unresolved ${what} instead of throwing`, r === "null");
+  }
+}
+
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — needs a live room:

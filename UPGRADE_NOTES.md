@@ -2,6 +2,171 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.0B / 1.0 — A character code is untrusted input, and the parser now says so
+
+Creator **v2.0B**. The extension is unchanged and stays at **1.0**, so there is nothing to
+deploy on that side. No room metadata schema change.
+
+A letter, not a number: this fixes what earlier releases got wrong and adds no capability.
+Both findings came out of a deliberate sweep rather than from play.
+
+## The one that mattered: a character code could run script
+
+`buildCharacterCode()` embeds the whole character object as a base64 JSON payload, so
+every field in it is attacker-controlled. `growthPurchases[].label` and `.detail` were
+interpolated into the Growth section with `innerHTML` and **no escaping**, in BOTH places
+that list is rendered — `renderFinalizedCharacterView()` and `renderGrowthStep()`.
+
+Confirmed end to end against the shipped 2.0, not reasoned about: a code built by the
+app's own encoder carrying `<img src=x onerror=...>` in a growth label produced a live
+`<img>` element in the victim's sheet with a compiled event handler. `src=x` fails to
+load immediately, so it fires with no interaction.
+
+**Why it is worse than defacing a sheet.** The sheet is framed by Owlbear with a working
+SDK. Script running there holds the reader's seat at the table: it can broadcast forged
+events, and if the reader is the GM it reaches `persist()` and the room metadata. The
+trust boundary is built on `background.js` verifying connection ids — and XSS in the GM's
+own sheet passes that check trivially, because it **is** the GM's connection. Delivery
+needs no special access: a code is pasted out of chat, and token metadata is writable by
+any player in the room.
+
+Fixed by escaping both fields at both render sites and routing them through
+`normalizeGrowthPurchases()`, which clamps them the way `normalizeRecentRolls()` already
+clamped its own list. Clamp on the way OUT of storage, the rule this file has stated for
+several releases and which this list was simply missing.
+
+**How it was found, and what nearly hid it.** Reading found the first sink. A fuzz harness
+that poisons every character field with a marker and checks which ones come back as live
+DOM found that it was rendered in two places, not one — the first fix left the wizard's
+copy live. Reading would not have caught that.
+
+## The other one: an unknown key opened a blank sheet
+
+`parseCharacterCode()` validates the origin, archetype and temperament SEGMENT codes and
+returns a readable error for each. Then the CP payload is applied with `Object.assign`
+**after** those checks and re-validates nothing, so the payload could set any key it
+liked. `computeStats()` guards with `if (!c.origin || !c.archetype) return null`, which
+checks the keys are SET, not that they RESOLVE — and dereferenced `originData.attributes`
+one line later.
+
+Result: a complete, valid character naming an origin, archetype or temperament this build
+does not have parsed with **no error** and then threw on render, taking `renderAll()` with
+it. The player got an empty sheet and no message.
+
+The likely cause is not malice. It is a character built in a newer creator opened in a
+room still serving the cached older one, or any key that gets renamed — which these notes
+have warned orphans characters since the move to GSGrimoire.
+
+Two layers, on purpose:
+
+- **The parser** re-validates after the payload and refuses with a message naming the key
+  and telling the reader to reload. That is the fix a player sees.
+- **`computeStats()`** returns null rather than throwing. It has a dozen callers and only
+  one is behind the parser, and `normalizeCurrentValuesInner()` already gates on
+  `statsReady`, so null was always the supported answer.
+
+**The narrowing that mattered.** The first version of the parser check refused any key
+that did not resolve, including an EMPTY one — and `security.test.mjs` caught it
+immediately, because an unfinished character has no origin yet and has always imported.
+Only a key that is set and unresolvable is refused now. That test earned its place.
+
+## A third one, found by the test written for the second
+
+`getGrowthSpent()` reduced over the RAW `growthPurchases` array with `sum + p.cost`. A
+code carrying `growthPurchases: [null]` — trivially expressible in the JSON payload —
+threw there, and `getGrowthRemaining()` and `renderGrowthStep()` went with it. Another
+blank sheet, from a different direction.
+
+It surfaced because the regression test for the index-stability point above put a `null`
+in the middle of the list, which nothing had ever done before. `getGrowthSpent()` and the
+second-archetype check now both read through `normalizeGrowthPurchases()`, and
+`removeGrowthPurchase()` splices a junk entry out rather than trying to reverse it.
+
+**And the reason the normaliser carries `at`.** It drops entries that are not objects, so
+numbering the survivors 0,1,2 would have made the wizard's ✕ button delete the wrong
+purchase — a security fix quietly introducing data loss. Each entry carries its index in
+the real array, and the button uses that.
+
+## Not a vulnerability, kept anyway
+
+`items[].qty` was also interpolated unescaped. It was **never exploitable**:
+`normalizeCurrentValues()` coerces it to a number before any render and
+`loadIntoCreator()` always calls it. Verified against the shipped 2.0 on the full victim
+path — the growth payload fired, the quantity payload did not. It is clamped now because a
+renderer should not depend on an upstream caller having tidied up first, and the fix is
+one function call. **Do not report this one as a live vulnerability.**
+
+## What the sweep found and did NOT change
+
+- **89% of the rendered sheet is the equipment catalogue.** The finalized view is 441,568
+  characters, of which `renderInventorySection()` is 395,108 — all 118 catalogue items with
+  full descriptions, rebuilt and re-parsed into the DOM on *every* render, including every
+  Momentum press and every keystroke, while sitting inside a collapsed `<details>` almost
+  nobody has open. Rendering the catalogue lazily when that section is opened is the single
+  biggest performance win available and is left for its own release. Generating the string
+  is only ~1.7ms; the cost is the browser parsing and laying out 440KB.
+- **940 tooltip bodies** account for another 48% of the markup, inlined on every render.
+- **Dead code.** `compactInjuryList`, `renderKnowledgeFragmentsCounter`, `snapshotEffects`,
+  `snapshotItemTags` and `updateDiceLabels` are defined and never referenced. In `dnm.js`,
+  `rebuildCode` is unused everywhere, and `bondNamesMatch` is used only by `party.test.mjs`.
+- **A naming split worth knowing about.** The creator calls it `bondNamesEqual`, the
+  extension `bondNamesMatch`. The implementations agree today, and someone changing one
+  will not find the other by searching for its name.
+
+## What the sweep checked and found sound
+
+Worth recording so it is not re-derived: `sanitizeEntry()` and `cleanText()` clamp every
+log field and whitelist die kinds; the roller builds its DOM with `textContent` and its
+only `innerHTML` uses are `= ""`; `relay()` verifies connection ids against `gmConnections`
+and `isGmOnlyEvent()` covers epochs, clearing, Threat downward and the Maverick drive;
+`stripUnsafeKeys()` and `sanitizeImageUrl()` are both correct; `trimState()` bounds the
+room metadata; `normalizeRecentRolls()` clamps every field it loops over; the ally picker,
+bond names, goals, truths, injuries, fragments and custom items are all escaped. The
+creator makes **no network requests of its own** — no `fetch`, `XMLHttpRequest`,
+`WebSocket` or `sendBeacon` anywhere — and its only external resources are Google Fonts.
+
+A Content-Security-Policy `<meta>` was considered and NOT added. The app is built on
+inline `onclick` handlers, so `script-src` would need `unsafe-inline`, under which an
+injected `onerror` still runs. It would restrict exfiltration over `fetch`, but the SDK
+talks by `postMessage`, which CSP does not govern — so against this specific threat it
+buys much less than it appears to. Escaping is the fix.
+
+## Testing
+
+```sh
+cd dnm-cc
+npm install jsdom playwright --no-save
+mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
+rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
+for t in creator embedded party dock security; do node tests/$t.test.mjs; done
+```
+
+Current: creator 167, embedded 69, party 102, dock 62, security 92. All passing.
+
+Eight mutations were run against the staged copies to prove the new assertions fail
+without the fix: un-escaping each of the two growth lists, un-clamping the quantity,
+removing the parser's post-payload validation, removing each half of the `computeStats()`
+guard, renumbering the surviving growth purchases, and putting `getGrowthSpent()` back on
+the raw array.
+
+Three harness lessons, every one of which produced a passing test that proved nothing
+before it was caught:
+
+- **A regex over rendered HTML is a guess about how the markup was written.** The quantity
+  assertion used one and did not fail under mutation. Parsing the output and querying for
+  the element is what the browser actually does, and it fails correctly.
+- **A fixture the previous assertions already mutated is not a fixture.** The quantity
+  block ran after the play view had rendered, which normalises the inventory — so it was
+  asserting against tidied data. It rebuilds its own character now. The same trap caught
+  the index test from the other side: it inherited `finalized: true`, and
+  `renderGrowthStep()` renders no purchase list for a finalized character, so it matched
+  an empty string and passed.
+- **A regex written inside the template literal that carries code into the page loses its
+  backslashes twice** — once to the template literal, once to the string or literal
+  itself. `/removeGrowthPurchase\((\d+)\)/` arrived as `/removeGrowthPurchase((d+))/`
+  and matched nothing; rewriting it as `new RegExp("...")` collapsed the same way. It
+  splits on a plain substring now, which cannot be got wrong.
+
 # v2.0 / 1.0 — The sheet beside the map
 
 Creator **v2.0**, extension **1.0**. Both change; deploy the extension first. No room

@@ -2707,7 +2707,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.0B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4456,6 +4456,17 @@ function computeStats() {
   const originData = DM_DATA.origins[c.origin];
   const archetypeData = DM_DATA.archetypes[c.archetype] || DM_DATA.advancedArchetypes[c.archetype];
 
+  // v2.0B. The guard above checks the keys are SET, not that they RESOLVE, and a key
+  // that does not resolve threw one line later on `originData.attributes`. The parser
+  // now refuses such a character with a readable message, which is the fix a player
+  // sees; this is the second layer, because computeStats() is called from a dozen
+  // places and only one of them is behind the parser. Returning null is already the
+  // "not enough character to compute" answer and every caller handles it — see
+  // normalizeCurrentValuesInner(), which gates on statsReady.
+  if (!originData || !archetypeData) return null;
+  const temperamentData = c.temperament ? DM_DATA.temperaments[c.temperament] : null;
+  if (c.temperament && !temperamentData) return null;
+
   // Base attributes from origin
   const attrs = { ...originData.attributes };
 
@@ -4476,9 +4487,8 @@ function computeStats() {
   }
 
   // Temperament attr boosts
-  if (c.temperament) {
-    const tempData = DM_DATA.temperaments[c.temperament];
-    if (tempData.attributeBonus.forced) attrs[tempData.attributeBonus.forced] = (attrs[tempData.attributeBonus.forced] || 0) + 1;
+  if (temperamentData) {
+    if (temperamentData.attributeBonus.forced) attrs[temperamentData.attributeBonus.forced] = (attrs[temperamentData.attributeBonus.forced] || 0) + 1;
     if (c.temperamentAttrBoost) attrs[c.temperamentAttrBoost] = (attrs[c.temperamentAttrBoost] || 0) + 1;
   }
 
@@ -5310,8 +5320,13 @@ function getAbilities() {
   return abilities;
 }
 
+// v2.0B. Through the normaliser, not the raw array. growthPurchases arrives in the
+// character code's CP payload, so an entry can be null, a string, or an object whose
+// cost is "lots" — and `p.cost` on a null threw here, blanking the sheet exactly as the
+// unresolved-key bug did. The normaliser drops what is not an object and clamps the
+// rest, which is the same rule normalizeRecentRolls() follows.
 function getGrowthSpent() {
-  return state.character.growthPurchases.reduce((sum, p) => sum + p.cost, 0);
+  return normalizeGrowthPurchases().reduce((sum, p) => sum + p.cost, 0);
 }
 
 function getGrowthRemaining() {
@@ -5805,6 +5820,34 @@ function parseCharacterCode(code) {
       } catch (e) {
         // Ignore malformed payload and fall back to older fields.
       }
+    }
+
+    // v2.0B. The segment checks above reject an unknown origin, archetype or
+    // temperament CODE — and then the CP payload overwrites all three with whatever it
+    // likes, because Object.assign runs after them and does not re-check. So the
+    // validation had a hole exactly the width of the payload.
+    //
+    // What came through it was not an exploit but a BLANK SHEET. computeStats() looked
+    // up a key that resolved to undefined and threw, renderAll() went with it, and the
+    // player got a sheet with nothing on it and no message. The likeliest way to meet
+    // that is not malice: it is a character built on a newer creator that added an
+    // archetype, opened in a room still serving the cached older one — or any key that
+    // gets renamed, which the notes have warned orphans characters.
+    //
+    // Only a key that is SET and does not RESOLVE. An EMPTY origin or archetype is an
+    // unfinished character — a code shared from the middle of the wizard — and that has
+    // always imported and must keep importing. This is the same distinction
+    // computeStats() draws before it will compute anything, and getting it wrong here
+    // would refuse perfectly good half-built characters.
+    const unresolved = [];
+    if (c.origin && !DM_DATA.origins[c.origin]) unresolved.push('origin "' + c.origin + '"');
+    if (c.archetype && !DM_DATA.archetypes[c.archetype] && !DM_DATA.advancedArchetypes[c.archetype]) {
+      unresolved.push('archetype "' + c.archetype + '"');
+    }
+    if (c.temperament && !DM_DATA.temperaments[c.temperament]) unresolved.push('temperament "' + c.temperament + '"');
+    if (unresolved.length) {
+      return { error: 'This character names an unknown ' + unresolved.join(' and an unknown ')
+        + '. It was most likely built in a newer version of the creator — reload this page, and reload the Owlbear room, then try again.' };
     }
 
     return { character: c };
@@ -6735,14 +6778,18 @@ function renderGrowthStep() {
   }
 
   // Show purchases
-  if (c.growthPurchases.length) {
+  // v2.0B. The wizard's own copy of the purchase list. Escaped and clamped through the
+  // same normaliser as the play view's — the sheet has two places that render this and
+  // fixing only the one the report came from would have left the other live.
+  const purchases = normalizeGrowthPurchases();
+  if (purchases.length) {
     html += `<div class="section-label">Purchases</div>`;
     html += `<div class="growth-item-list">`;
-    c.growthPurchases.forEach((p, i) => {
+    purchases.forEach((p) => {
       html += `<div class="growth-item">
-        <div class="growth-item-text">${p.label}${p.detail ? ': ' + p.detail : ''}</div>
+        <div class="growth-item-text">${escHtml(p.label)}${p.detail ? ': ' + escHtml(p.detail) : ''}</div>
         <div class="growth-item-cost">${p.cost} Growth</div>
-        <button class="growth-item-remove" onclick="removeGrowthPurchase(${i})">✕</button>
+        <button class="growth-item-remove" onclick="removeGrowthPurchase(${p.at})">✕</button>
       </div>`;
     });
     html += '</div>';
@@ -8332,7 +8379,7 @@ function renderGrowthSummarySection() {
   }
   return `<div class="sheet-section sheet-section-ruled">
     <div class="sheet-section-title">Available: ${getGrowthRemaining()} / Max: 10 / Spent: ${getGrowthSpent()}</div>
-    ${(c.growthPurchases || []).map(p => `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">◆ ${p.label}${p.detail ? ': ' + p.detail : ''} <span style="color:var(--warning);">(${p.cost}g)</span></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-dim);">No Growth spent.</div>'}
+    ${normalizeGrowthPurchases().map(p => `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:4px;">◆ ${escHtml(p.label)}${p.detail ? ': ' + escHtml(p.detail) : ''} <span style="color:var(--warning);">(${p.cost}g)</span></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-dim);">No Growth spent.</div>'}
     ${renderGrowthEditButton()}
   </div>`;
 }
@@ -8537,7 +8584,7 @@ function addGrowthAttr(attr, cost) {
 function addGrowthArchetype(key, name) {
   const cost = 3;
   if (getGrowthRemaining() < cost) { alert('Not enough Growth remaining!'); return; }
-  if (state.character.growthPurchases.some(p => p.type === 'addArchetype')) {
+  if (normalizeGrowthPurchases().some(p => p.type === 'addArchetype')) {
     alert('You can only add one second archetype!'); return;
   }
   state.character.growthPurchases.push({ type: 'addArchetype', label: `Learn ${name} archetype`, cost, detail: name });
@@ -8554,6 +8601,14 @@ function addGrowthTalent(key, name, source, cost) {
 
 function removeGrowthPurchase(i) {
   const p = state.character.growthPurchases[i];
+  // v2.0B. A junk entry still occupies its index — the normaliser deliberately keeps the
+  // real one on `at` so this button removes what it points at — but there is nothing to
+  // reverse for an entry that never granted anything. Splice it out and stop.
+  if (!p || typeof p !== 'object') {
+    if (Array.isArray(state.character.growthPurchases)) state.character.growthPurchases.splice(i, 1);
+    renderAll();
+    return;
+  }
   // Reverse numeric counters
   if (p.type === 'increaseSpirit') state.character.growthSpiritIncreases = Math.max(0, (state.character.growthSpiritIncreases || 0) - 1);
   if (p.type === 'increaseSupply') state.character.growthSupplyIncreases = Math.max(0, (state.character.growthSupplyIncreases || 0) - 1);
@@ -8871,10 +8926,10 @@ function renderInventorySection() {
               <button class="mini-btn equip-btn ${entry.equipped ? 'active' : 'inactive'} no-print" onclick="event.stopPropagation(); toggleItemEquipped('${it.id}')">${entry.equipped ? 'Equipped' : 'Equip'}</button>
               <div class="owned-qty no-print" onclick="event.stopPropagation();">
                 <button onclick="changeItemQty('${it.id}',-1)">−</button>
-                <span class="owned-qty-val">${entry.qty}</span>
+                <span class="owned-qty-val">${clampNumber(entry.qty, 0, 999)}</span>
                 <button onclick="changeItemQty('${it.id}',1)">+</button>
               </div>
-              <div class="owned-item-meta" style="display:none;" data-print-qty>×${entry.qty}</div>
+              <div class="owned-item-meta" style="display:none;" data-print-qty>×${clampNumber(entry.qty, 0, 999)}</div>
             </div>
           </summary>
           <div class="owned-description">${escHtml(expandedDescription)}</div>
@@ -9082,6 +9137,38 @@ function normalizeRecentRolls() {
     gn: clampNumber(e.gn, 0, 99),
     at: clampNumber(e.at, 15, 20) || 20,
   }));
+}
+
+// v2.0B. The same rule normalizeRecentRolls() follows, applied to the one list that
+// was missing it: clamp on the way OUT of storage rather than trusting what went in.
+//
+// growthPurchases rides in the character code's CP payload, so `label` and `detail` are
+// whatever the code said they were. They were interpolated into the Growth section
+// unescaped, which made a character code a way to run script in whoever opened the
+// sheet — and that sheet is framed by Owlbear with a working SDK, so the script got the
+// reader's seat at the table, GM's included. A code is pasted out of chat and read off
+// tokens any player can write to, which is the definition of untrusted here.
+//
+// The lengths are what a real purchase produces ("Learn Nanotech Adept archetype"),
+// with room to spare. The cost is a number and is treated as one.
+const GROWTH_LABEL_MAX = 80;
+const GROWTH_DETAIL_MAX = 80;
+const MAX_GROWTH_PURCHASES = 60;
+
+// `at` is the entry's index in the REAL array. The wizard's ✕ button passes an index
+// straight to removeGrowthPurchase(), so a normaliser that filtered entries out and
+// renumbered the survivors would delete the wrong purchase — a security fix quietly
+// introducing a data-loss bug. Map first, filter after, and carry the original index.
+function normalizeGrowthPurchases() {
+  const raw = state.character && Array.isArray(state.character.growthPurchases)
+    ? state.character.growthPurchases : [];
+  return raw.slice(0, MAX_GROWTH_PURCHASES).map((p, at) => (p && typeof p === 'object' ? {
+    at,
+    type: String(p.type == null ? '' : p.type).slice(0, 32),
+    label: String(p.label == null ? '' : p.label).slice(0, GROWTH_LABEL_MAX),
+    detail: String(p.detail == null ? '' : p.detail).slice(0, GROWTH_DETAIL_MAX),
+    cost: clampNumber(p.cost, 0, 99),
+  } : null)).filter(Boolean);
 }
 
 function renderRecentRolls() {
