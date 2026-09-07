@@ -36,41 +36,45 @@ later is a convention nobody followed.
 
 ## The versioning rule
 
-**A number goes up only when something changed on purpose. Fixing what a release got wrong
-gets a letter.**
+**Three sizes, and the size is decided by INTENT, not by how much code moved.**
 
 ```
-1.23   a deliberate change — a feature, a redesign, a decision
-1.23B  fixing what 1.23 got wrong
-1.23C  still fixing it
-1.24   the next deliberate change
+1.30    a real feature — something the table could not do before
+1.30.1  a minor edit — layout, wording, a tooltip, a colour
+1.30.1B fixing what 1.30.1 got wrong
+1.30.1C still fixing it
+1.31    the next real feature
+2.0     a major feature, the kind the product is remembered for
 ```
-
-Why it matters: a run of numbers reads like a run of progress. Three numbers in an evening
-says three things were built, when what actually happened was one thing built and two attempts
-to make it work. The letter is honest about that, and it keeps the number meaning "we decided
-to do this".
-
-The distinction is **intent**, not size:
 
 | Change | Version |
 |---|---|
-| A bug found in play on the release you just shipped | letter |
-| A regression you introduced fixing something else | letter |
-| Restoring behaviour that used to work | letter |
-| A new panel, a new control, a new rule | number |
-| A deliberate reversal of an earlier decision | number |
-| A security fix that changes what users can do | number — the behaviour changed on purpose |
+| A bug found in play on the release you just shipped | **letter** |
+| A regression you introduced fixing something else | **letter** |
+| Restoring behaviour that used to work | **letter** |
+| Layout, spacing, wording, colour, a label | **.x** |
+| Rearranging a panel, renaming a control | **.x** |
+| A new panel, a new control, a new rule, a new automation | **number** |
+| A deliberate reversal of an earlier decision | **number** |
+| A security fix that changes what users can do | **number** — behaviour changed on purpose |
+| A headline capability: the sheet usable beside the map, or similar | **whole number** (2.0) |
 
-When a release carries **both** a fix and a deliberate change, it is a number. The deliberate
-part is what the release is for.
+**The default is the smallest thing that fits.** Numbers ran away in the first weeks of
+this project — 1.24 to 1.30 in a handful of evenings, most of it tooltips and line
+breaks — and a number that goes up for a tooltip stops meaning anything. When in doubt
+between `.x` and a number, take `.x`.
 
-Apply the rule to whatever is actually deployed, not to what someone remembers being deployed.
-If 1.23 is live and it needs a fix, that is **1.23B** — not 1.22B, even if the conversation
-said 1.22.
+When a release carries **both** a fix and a deliberate change, take the larger of the
+two: the deliberate part is what the release is for.
 
-The extension carries its own number (`0.9.x`) and follows the same rule. The two do not have
-to move together; a creator-only release leaves the extension where it is, and says so.
+Apply the rule to whatever is actually DEPLOYED, not to what someone remembers being
+deployed. If 1.30 is live and needs a fix, that is **1.30B** — not 1.29B, even if the
+conversation said 1.29.
+
+The extension carries its own number (`0.9.x`) and follows the same shape. The two do not
+have to move together; a creator-only release leaves the extension where it is and says
+so. **When the creator reaches 2.0 the extension goes to 1.0** — they are one product and
+a headline release should read that way on both halves.
 
 ## Where the version lives
 
@@ -135,10 +139,27 @@ version is not running until the ROOM is reloaded; a tab refresh is not enough. 
 the first thing to suspect when a new relay feature does nothing, and it is why the host
 reports `EXT_VERSION` in its `hello` reply — change that constant with `manifest.json`.
 
-**Third-party storage partitioning is NOT why a popout cannot reach the host.** It is the
-obvious theory, the shapes match, and it is wrong: tested in Chromium with
-`--enable-features=ThirdPartyStoragePartitioning` and the loopback exemption off, the
-channel crosses every time. Do not spend the afternoon on it again.
+**Third-party storage partitioning IS the likeliest reason a popped-out window cannot
+reach the host, and the popout has never worked.** An earlier note here said the opposite.
+It was wrong, and the way it was wrong is worth keeping:
+
+The theory is that Chrome partitions the BroadcastChannel by top-level site, so the
+extension's iframe (third-party under `owlbear.rodeo`) and a popped-out window
+(first-party on `gsgrimoire.github.io`) sit in different partitions and cannot hear each
+other. It was "disproved" by a Chromium test that ran on `localhost` and `127.0.0.1` —
+**and Chrome exempts loopback from partitioning**, so the test could never have shown the
+effect. Forcing the feature flag changed nothing for the same reason. The note even said
+Chrome exempts loopback, immediately before relying on a loopback test.
+
+What settled it was play, not the test bench: a BRAND NEW room, so the extension was
+certainly current, and the relay still answered nothing.
+
+**A test run on the wrong shape is worse than no test**, because it gets written down as
+a fact. To test partitioning you need two real cross-site hostnames.
+
+The route out is not a detached OS window. It is a movable or docked panel INSIDE
+Owlbear — `OBR.popover.open` takes `anchorReference: "POSITION"`, an `anchorPosition`,
+and `disableClickAway`, and `OBR.modal` takes `hideBackdrop` and `disablePointerEvents`.
 
 **Reply envelopes are reserved.** Nest an answer under `data`; never spread it into the
 message. Spreading it once meant the reply to `self` overwrote the correlation `id` with
