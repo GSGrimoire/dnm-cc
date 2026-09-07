@@ -54,6 +54,9 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 // the right SHAPE — an empty scene, an empty room, a GM.
 const sent = [];
 w.__sent = sent;
+// v2.0. What the sheet asked Owlbear to do to its own popover.
+const obrCalls = [];
+w.__obrCalls = obrCalls;
 const stub = `const OBR = {
   isAvailable: true,
   onReady: (f) => f(),
@@ -63,13 +66,24 @@ const stub = `const OBR = {
   },
   room: { getMetadata: async () => ({}), setMetadata: async () => {}, onMetadataChange: () => {} },
   scene: {
-    items: { getItems: async () => [], onChange: () => {}, updateItems: async () => {} },
+    items: {
+      getItems: async () => [],
+      onChange: () => {},
+      updateItems: async () => { window.__obrCalls.push(["items.updateItems", null]); },
+    },
     onReadyChange: () => {},
   },
   player: { getRole: async () => "GM", getName: async () => "Tester", getId: async () => "p1", onChange: () => {} },
   party: { getPlayers: async () => [] },
-  modal: { close: () => {} },
+  modal: { close: (id) => { window.__obrCalls.push(["modal.close", id]); } },
   action: { setHeight: async () => {} },
+  viewport: { getWidth: async () => 1600, getHeight: async () => 900 },
+  popover: {
+    open: async (cfg) => { window.__obrCalls.push(["popover.open", cfg]); },
+    close: async (id) => { window.__obrCalls.push(["popover.close", id]); },
+    setWidth: async (id, w) => { window.__obrCalls.push(["popover.setWidth", w]); },
+    setHeight: async (id, h) => { window.__obrCalls.push(["popover.setHeight", h]); },
+  },
 };
 `;
 
@@ -299,12 +313,111 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   g("obrRole = 'GM';");
 }
 
+// -------------------------------------------------------------
+// The docked sheet (v2.0)
+// -------------------------------------------------------------
+// dock.test.mjs proves the geometry and that the creator's copy of it matches the
+// extension's. This is the other half: that the BUTTONS do what they say, which is
+// where the v1.29 Pop out button failed — it was wired correctly to a route that could
+// never work, and nothing in any suite noticed for two releases.
+{
+  const calls = (name) => obrCalls.filter((c) => c[0] === name);
+
+  ok("the dock controls are built", g("typeof buildDockControls") === "function");
+  ok("redock exists", g("typeof redock") === "function");
+  ok("resizeDock exists", g("typeof resizeDock") === "function");
+  ok("the Pop out button is gone", !g("typeof popOutSheet === 'function'"));
+
+  // Built directly rather than through insertBar(), which needs a character on a token.
+  const bar = g("buildDockControls()");
+  const labels = [...bar.querySelectorAll("button")].map((b) => b.textContent);
+  ok("it offers all three sides", ["Left", "Right", "Bottom"].every((l) => labels.includes(l)));
+  ok("it offers narrower and wider", labels.includes("−") && labels.includes("+"));
+
+  // The side it is already on is a readout, not a button: pressing it would close and
+  // reopen the popover to arrive exactly where it already is.
+  const right = [...bar.querySelectorAll("button")].find((b) => b.textContent === "Right");
+  const left = [...bar.querySelectorAll("button")].find((b) => b.textContent === "Left");
+  ok("the current side is marked", right.getAttribute("aria-pressed") === "true");
+  ok("and cannot be pressed", right.disabled === true);
+  ok("another side is not marked", left.getAttribute("aria-pressed") === "false");
+  ok("and can be pressed", left.disabled === false);
+
+  // Resizing does not move the popover, so it must not close and reopen it — that is
+  // the whole reason size is a live control and position is not.
+  obrCalls.length = 0;
+  await g("resizeDock(80)");
+  await wait(20);
+  ok("wider calls setWidth", calls("popover.setWidth").length === 1);
+  ok("wider does not reopen the sheet", calls("popover.open").length === 0 && calls("popover.close").length === 0);
+  ok("wider adds one step", calls("popover.setWidth")[0][1] === 640);
+
+  obrCalls.length = 0;
+  await g("resizeDock(-80)");
+  await wait(20);
+  ok("narrower takes one step back", calls("popover.setWidth")[0][1] === 560);
+
+  // The clamp holds against a hand that keeps pressing.
+  obrCalls.length = 0;
+  for (let i = 0; i < 20; i++) await g("resizeDock(80)");
+  await wait(20);
+  const widths = calls("popover.setWidth").map((c) => c[1]);
+  ok("width stops at the limit rather than running off", Math.max(...widths) === 1280);
+
+  obrCalls.length = 0;
+  for (let i = 0; i < 20; i++) await g("resizeDock(-80)");
+  await wait(20);
+  ok("and does not go below the minimum", Math.min(...calls("popover.setWidth").map((c) => c[1])) === 380);
+
+  // A bottom dock is full width, so its live axis is height. Resizing the wrong axis
+  // would silently do nothing at all, which is the failure that is hardest to see.
+  g("writeDock(dockStorage(), { side: 'bottom', width: 560, height: 420 })");
+  obrCalls.length = 0;
+  await g("resizeDock(80)");
+  await wait(20);
+  ok("a bottom dock resizes its height, not its width", calls("popover.setHeight").length === 1 && calls("popover.setWidth").length === 0);
+  ok("by one step", calls("popover.setHeight")[0][1] === 500);
+
+  // Moving IS a close and a reopen, and the save has to be flushed first: the reopened
+  // sheet reads the character back off the token, so an unsaved edit would be undone by
+  // the move that was meant to be cosmetic.
+  g("writeDock(dockStorage(), { side: 'right', width: 560, height: 420 })");
+  obrCalls.length = 0;
+  await g("redock('left')");
+  await wait(50);
+  // This window has no token, so there is nothing to flush. That the save IS flushed
+  // before the move — the reopened sheet reads the character back off the token, so an
+  // unsaved edit would be undone by a move meant to be cosmetic — needs a sheet booted
+  // onto a real token, and is tested in dock.test.mjs.
+  ok("moving closes the popover", calls("popover.close").length === 1);
+  ok("and opens it again", calls("popover.open").length === 1);
+  const reopened = calls("popover.open")[0][1];
+  ok("on the side that was asked for", reopened.anchorPosition.left === 0 && reopened.transformOrigin.horizontal === "LEFT");
+  ok("using the live viewport", reopened.height === 900);
+  ok("and the side is remembered", g("readDock(dockStorage()).side") === "left");
+
+  // Which is what makes the sheet reopen where it was left: the bar redraws with the
+  // new side marked.
+  const bar2 = g("buildDockControls()");
+  const left2 = [...bar2.querySelectorAll("button")].find((b) => b.textContent === "Left");
+  ok("the rebuilt bar marks the new side", left2.getAttribute("aria-pressed") === "true" && left2.disabled === true);
+
+  // Closing the sheet closes the popover AND both legacy modal ids: a room that was
+  // already open when the extension updated still has the old modal on screen, because
+  // Owlbear caches the background page for the whole room session.
+  obrCalls.length = 0;
+  g("closeModal()");
+  ok("closing closes the popover", calls("popover.close").length === 1);
+  ok("and both legacy modal ids", calls("modal.close").length === 2);
+}
+
 console.log(`\nembedded: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — the SDK is a stub, so this is the block's logic, not Owlbear:
   · that a broadcast is actually delivered, and the GM's relay accepting or refusing it
   · room metadata round trips, and epoch or bond catch-up against a real room
-  · role changes, the modal, token reads and writes
+  · role changes, token reads and writes, and whether Owlbear honours the popover
+    geometry the dock controls ask for
   · the party panel, which is extension code in roller.js
 Those stay as live checks in UPGRADE_NOTES.md.`);
 process.exit(fail ? 1 : 0);

@@ -2304,27 +2304,32 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
   text-underline-offset: 3px;
 }
 
-/* v1.29 popout. startEmbedded() adds `obr-embedded` here as it does in the modal, so
-   the sheet already lays out as the embedded sheet — this class is only a hook, and
-   deliberately changes no layout. What it does carry is the failure banner: a window
-   that has lost its room still renders a complete, editable sheet, which is the worst
-   possible way to fail silently. */
-.popout-lost {
-  position: sticky; top: 0; z-index: 100;
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px;
-  background: var(--accent); color: #fff;
-  font-size: 0.8rem; line-height: 1.45;
+/* v2.0 dock bar. The sheet now lives in a popover pinned to an edge of the Owlbear
+   window rather than in a centred modal, and these are the controls that decide which
+   edge and how wide. They sit in the same header row as Copy code and Close, because
+   that row is already the sheet's "what do I do with this window" strip. Styled as one
+   segmented control rather than five loose .obr-btn, so a row that now has eight
+   controls in it still reads as three groups. */
+.obr-dock {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--border); border-radius: 3px;
+  overflow: hidden;
 }
-.popout-retry {
-  flex: none;
-  background: #fff; color: var(--accent);
-  border: none; border-radius: 2px;
-  padding: 5px 12px;
-  font-family: var(--font-mono); font-size: 0.7rem;
-  letter-spacing: 0.1em; text-transform: uppercase;
-  cursor: pointer;
+.obr-dock-btn {
+  font-family: var(--font-display); font-size: 0.62rem; font-weight: 600;
+  letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
+  padding: 5px 9px; border: none; background: transparent; color: var(--text-dim);
 }
+.obr-dock-btn:hover:not(:disabled) { background: var(--teal-dim); color: var(--text-bright); }
+/* The side you are already on is not a button that does nothing — it is the readout of
+   where the sheet is. Pressing it would cost a reload for no change, so it is disabled
+   rather than merely highlighted. */
+.obr-dock-btn[aria-pressed="true"] {
+  background: var(--teal-dim); color: var(--text-bright);
+}
+.obr-dock-btn:disabled { cursor: default; }
+.obr-dock-btn:disabled:not([aria-pressed="true"]) { opacity: 0.35; }
+.obr-dock-sep { width: 1px; background: var(--border); }
 
 /* v1.30. Warning colour rather than Threat's orange: nothing is wrong with the game,
    something is missing from the room. */
@@ -2702,7 +2707,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '1.30';
+const APP_VERSION = '2.0';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -9374,32 +9379,137 @@ const CHAR_KEY = `${EXT_ID}/char`;
 const CHANNEL  = `${EXT_ID}/events`;
 const ROOM_KEY = "com.thuknights.dnm-rolls/state";
 
-// These two match dnm.js as well. See the note there for why a separate browser window
-// needs a courier at all: the SDK talks through window.parent.postMessage and refuses
-// to send until that parent completes a handshake, so a popped-out window can never
-// reach Owlbear on its own.
-const POPOUT_CHANNEL = `${EXT_ID}/popout`;
-const POPOUT_PROTOCOL = 1;
+// v2.0. A COPY of the dock helpers in dnm.js. Change one, change both — the same rule
+// the four shared constants above and createPoolBatcher() follow, and for the same
+// reason: this file cannot import from the extension without becoming a page that needs
+// the network to work, which is the property the vendored SDK exists to protect.
+// dock.test.mjs runs both copies over the same inputs and fails if they disagree.
+//
+// v1.29's Pop out button and its BroadcastChannel relay are GONE as of v2.0. They never
+// once connected, and the likeliest reason is Chrome partitioning storage by top-level
+// site: the extension is a third-party frame under owlbear.rodeo and a window.open()ed
+// sheet is first-party on gsgrimoire.github.io, so their channels sit in different
+// partitions. Do not rebuild it. A popover is still FRAMED BY OWLBEAR, so the sheet
+// keeps a working SDK and needs no courier at all.
+const SHEET_POPOVER_ID = `${EXT_ID}/sheet-panel`;
+const SHEET_MODAL_IDS = [`${EXT_ID}/sheet-modal`, `${EXT_ID}/sheet-modal-beta`];
+const DOCK_KEY = `${EXT_ID}/dock`;
+const DOCK_SIDES = ["right", "left", "bottom"];
+const DOCK_DEFAULT = { side: "right", width: 560, height: 420 };
+const DOCK_LIMITS = { width: [380, 1280], height: [260, 1000] };
+const DOCK_FALLBACK_VIEWPORT = { width: 1600, height: 900 };
+// One press of Wider or Narrower. Big enough to be worth pressing, small enough that
+// three presses do not throw the sheet off the screen.
+const DOCK_STEP = 80;
+
+const clampDockTo = ([lo, hi], n, fallback) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(lo, Math.min(hi, Math.round(v)));
+};
+
+function clampDock(dock) {
+  const d = dock && typeof dock === "object" ? dock : {};
+  return {
+    side: DOCK_SIDES.includes(d.side) ? d.side : DOCK_DEFAULT.side,
+    width: clampDockTo(DOCK_LIMITS.width, d.width, DOCK_DEFAULT.width),
+    height: clampDockTo(DOCK_LIMITS.height, d.height, DOCK_DEFAULT.height),
+  };
+}
+
+function fitDockViewport(viewport) {
+  const w = Number(viewport && viewport.width);
+  const h = Number(viewport && viewport.height);
+  return {
+    width: Number.isFinite(w) && w > 0 ? Math.round(w) : DOCK_FALLBACK_VIEWPORT.width,
+    height: Number.isFinite(h) && h > 0 ? Math.round(h) : DOCK_FALLBACK_VIEWPORT.height,
+  };
+}
+
+function sheetPopover({ url, dock, viewport }) {
+  const d = clampDock(dock);
+  const v = fitDockViewport(viewport);
+  const geometry = {
+    right: {
+      width: Math.min(d.width, Math.round(v.width * 0.75)),
+      height: v.height,
+      anchorPosition: { left: v.width, top: 0 },
+      transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+    },
+    left: {
+      width: Math.min(d.width, Math.round(v.width * 0.75)),
+      height: v.height,
+      anchorPosition: { left: 0, top: 0 },
+      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+    },
+    bottom: {
+      width: v.width,
+      height: Math.min(d.height, Math.round(v.height * 0.75)),
+      anchorPosition: { left: 0, top: v.height },
+      transformOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
+    },
+  }[d.side];
+
+  return {
+    id: SHEET_POPOVER_ID,
+    url,
+    width: geometry.width,
+    height: geometry.height,
+    anchorReference: "POSITION",
+    anchorPosition: geometry.anchorPosition,
+    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+    transformOrigin: geometry.transformOrigin,
+    disableClickAway: true,
+    marginThreshold: 0,
+  };
+}
+
+// localStorage throws outright in a frame whose cookies are blocked, rather than
+// returning null, so every touch of it goes through these two.
+function readDock(storage) {
+  try {
+    return clampDock(JSON.parse(storage.getItem(DOCK_KEY)));
+  } catch (err) {
+    return clampDock(null);
+  }
+}
+
+function writeDock(storage, dock) {
+  const d = clampDock(dock);
+  try {
+    storage.setItem(DOCK_KEY, JSON.stringify(d));
+  } catch (err) {
+    /* private mode, or a full quota: the dock just does not persist */
+  }
+  return d;
+}
+
+function dockStorage() {
+  try {
+    return window.localStorage;
+  } catch (err) {
+    return null;
+  }
+}
 
 const SAVE_DEBOUNCE_MS = 400;
 
 // ---------------------------------------------------------------------------
-// The bridge (v1.29)
+// The bridge (v1.29, single implementation since v2.0)
 // ---------------------------------------------------------------------------
-// Everything this file needs from Owlbear, in one place and in one shape, with two
-// implementations behind it:
+// Everything this file needs from Owlbear, in one place and in one shape.
 //
-//   DIRECT — the sheet is framed by Owlbear and has a working SDK.
-//   RELAY  — the sheet is its own browser window and posts to the extension's
-//            background page over a BroadcastChannel, which does the work and answers.
+// It was built in v1.29 to hold two implementations — a DIRECT one for the framed
+// sheet and a RELAY one for a popped-out window — and v2.0 removed the relay along
+// with the window it served. The seam stays: it is the one place that touches the SDK,
+// which is what lets embedded.test.mjs assert against a stub, and it is where the
+// popover controls the dock bar presses belong.
 //
-// The surface is narrow on purpose. A general proxy of the SDK could not work anyway:
-// the token write is `scene.items.updateItems(ids, mutator)` and a mutator function
-// cannot be structured-cloned across a channel. Naming the four things the sheet
+// The surface is narrow on purpose, and should stay narrow. A general proxy of the SDK
+// could not work anyway: the token write is `scene.items.updateItems(ids, mutator)` and
+// a mutator function cannot be structured-cloned. Naming the four things the sheet
 // actually does to a token — read it, write it, clear it, list the party — sidesteps
 // that and gives something small enough to test.
-const isPopout = new URLSearchParams(location.search).get("popout") === "1";
-
 function makeDirectBridge() {
   return {
     kind: "direct",
@@ -9472,92 +9582,44 @@ function makeDirectBridge() {
         .catch((err) => console.warn("[dnm] broadcast failed", err));
     },
     closeSheet() {
-      // OBR.modal.close needs the exact id the modal was opened with, and that differs
-      // between the beta background page and the stable one. Rather than hardcode
-      // either and break under the other, close both: closing an id that is not open
-      // is a no-op.
-      for (const id of [`${EXT_ID}/sheet-modal-beta`, `${EXT_ID}/sheet-modal`]) {
+      // v2.0: the sheet is a popover. The two modal ids stay in the list because a room
+      // that was already open when the extension updated still has the old modal on
+      // screen — Owlbear caches the background page for the whole room session — and
+      // for that one session the thing being closed really is a modal. Closing an id
+      // that is not open is a no-op, so closing all three costs nothing.
+      try { OBR.popover.close(SHEET_POPOVER_ID); } catch (err) { /* not open */ }
+      for (const id of SHEET_MODAL_IDS) {
         try { OBR.modal.close(id); } catch (err) { /* not the one that is open */ }
       }
     },
-  };
-}
 
-function makeRelayBridge(roomId) {
-  const channel = new BroadcastChannel(POPOUT_CHANNEL);
-  const me = `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
-  const pending = new Map();
-  const listeners = { room: [], player: [], items: [], party: [] };
-  let seq = 0;
-
-  channel.onmessage = (ev) => {
-    const msg = ev.data;
-    if (!msg || msg.v !== POPOUT_PROTOCOL) return;
-    if (msg.dir === "res") {
-      const waiting = pending.get(msg.id);
-      if (!waiting) return;
-      pending.delete(msg.id);
-      clearTimeout(waiting.timer);
-      if (msg.error) waiting.reject(new Error(msg.error));
-      // The answer is nested, never spread into the envelope. Spreading looked tidier
-      // and was wrong: the reply to "self" carries the player's `id`, which overwrote
-      // the envelope's correlation `id`, so no response could ever be matched to its
-      // request and every read hung until it timed out.
-      else waiting.resolve(msg.data || {});
-      return;
-    }
-    if (msg.room && roomId && msg.room !== roomId) return;
-    if (msg.event === "room") listeners.room.forEach((cb) => cb(msg.metadata));
-    else if (msg.event === "player") listeners.player.forEach((cb) => cb(msg));
-    else if (msg.event === "items") listeners.items.forEach((cb) => cb());
-    else if (msg.event === "party") listeners.party.forEach((cb) => cb(msg));
-  };
-
-  // Every request is answered or it rejects. A popout whose room has been closed would
-  // otherwise hang on a promise that never settles, and the sheet would sit there
-  // looking like it was still loading.
-  function call(op, extra = {}, timeoutMs = 6000) {
-    const id = `${me}-${++seq}`;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`the Owlbear room did not answer (${op})`));
-      }, timeoutMs);
-      pending.set(id, { resolve, reject, timer });
-      channel.postMessage({ dir: "req", id, from: me, room: roomId, v: POPOUT_PROTOCOL, op, ...extra });
-    });
-  }
-
-  // Keeps this window in the host's live set, which is what stops the host posting
-  // scene changes into an empty channel once every popout has been closed.
-  setInterval(() => { call("ping").catch(() => {}); }, 20000);
-  window.addEventListener("pagehide", () => {
-    channel.postMessage({ dir: "req", id: `${me}-bye`, from: me, room: roomId, v: POPOUT_PROTOCOL, op: "bye" });
-  });
-
-  return {
-    kind: "relay",
-    // Returns what the host said about itself, so the window can name the problem
-    // rather than only report that there was one.
-    async ready() { return call("hello", {}, 8000); },
-    get roomId() { return roomId; },
-    async getSelf() {
-      const r = await call("self");
-      return { role: r.role, name: r.name, id: r.id, hasGM: r.hasGM !== false };
+    // v2.0. Size is live and free: PopoverApi has setWidth and setHeight, so widening
+    // the sheet does not reload it.
+    async resizeSheet(width, height) {
+      if (width) await OBR.popover.setWidth(SHEET_POPOVER_ID, width);
+      if (height) await OBR.popover.setHeight(SHEET_POPOVER_ID, height);
     },
-    onPlayerChange(cb) { listeners.player.push(cb); },
-    onPartyChange(cb) { listeners.party.push(cb); },
-    async getMetadata() { const r = await call("metadata"); return r.metadata || {}; },
-    onMetadataChange(cb) { listeners.room.push(cb); },
-    async getTokenCode(itemId) { const r = await call("tokenCode", { itemId }); return r.code || null; },
-    async writeTokenCode(itemId, code) { await call("writeToken", { itemId, code }); },
-    async clearTokenCode(itemId) { await call("clearToken", { itemId }); },
-    async getPartyCodes() { const r = await call("partyCodes"); return r.codes || []; },
-    onItemsChange(cb) { listeners.items.push(cb); },
-    broadcast(ev) {
-      call("broadcast", { event: ev }).catch((err) => console.warn("[dnm] broadcast failed", err));
+
+    // v2.0. Position is NOT live: there is no setPosition, and anchorPosition is read
+    // once at open. Moving the sheet is a close and a reopen, which reloads it — which
+    // is exactly why the sheet offers three snap sides rather than a drag.
+    async redock(dock) {
+      const viewport = await this.viewport();
+      const url = new URL(location.href);
+      await OBR.popover.close(SHEET_POPOVER_ID);
+      await OBR.popover.open(sheetPopover({ url: url.toString(), dock, viewport }));
     },
-    closeSheet() { window.close(); },
+
+    async viewport() {
+      try {
+        const [width, height] = await Promise.all([
+          OBR.viewport.getWidth(), OBR.viewport.getHeight(),
+        ]);
+        return { width, height };
+      } catch (err) {
+        return null;
+      }
+    },
   };
 }
 
@@ -9925,8 +9987,9 @@ let playerName = "Someone";
 // before this.
 let obrPlayerId = null;
 
-// v1.29: one round trip for all three. They were three separate awaits, which is two
-// more than the relay needs — and over a BroadcastChannel each one is a real message.
+// v1.29: one round trip for all three, where they had been three separate awaits.
+// Written for the relay, which paid a real message for each one; kept after v2.0
+// removed the relay because one await is simply better than three.
 //
 // Every failure here is non-fatal and each falls back differently on purpose. The role
 // fails CLOSED to a player: showing a player the GM's Threat controls produces presses
@@ -10198,61 +10261,111 @@ function insertBar(name) {
     return b;
   };
 
-  actions.append(button("Copy code", "", copyCodeToClipboard));
-  // v1.29. Only offered by the framed sheet: a popout has nothing to pop out of, and
-  // two live sheets on one token would both write the code and clobber each other.
-  if (bridge && bridge.kind === "direct") actions.append(button("Pop out", "", popOutSheet));
+  actions.append(buildDockControls(), button("Copy code", "", copyCodeToClipboard));
   actions.append(
     button("Detach", "danger", detachFromToken),
-    button(isPopout ? "Close window" : "Close", "primary", closeModal),
+    button("Close", "primary", closeModal),
   );
 
   el.append(who, on, save, actions);
   document.getElementById("app").prepend(el);
 }
 
-// v1.29. Opens this sheet in its own browser window, then closes the modal.
+// v2.0. The dock controls: which edge the sheet is pinned to, and how big it is.
 //
-// CLOSING THE MODAL IS NOT TIDINESS. Two live sheets on one token would both hold the
-// character and both write the code back on every edit, and the later write wins — so
-// whichever window you were not typing in would quietly undo you.
+// Three snap sides rather than a drag, and the reason is in PopoverApi: it has
+// setWidth and setHeight but no setPosition, and anchorPosition is read once at open.
+// So SIZE is live and free, and POSITION costs a close and a reopen, which reloads the
+// sheet. A deliberate press that reloads is honest; a drag that reloads on every frame
+// is not. See the note on sheetPopover().
 //
-// The save is flushed first because the modal is about to go: the popout reads the
+// Only offered by the framed sheet. In a plain browser tab there is no popover to move
+// and no Owlbear to ask, and the creator has to keep working there on its own.
+function buildDockControls() {
+  const wrap = document.createElement("div");
+  wrap.className = "obr-dock";
+  if (!bridge || bridge.kind !== "direct") {
+    wrap.hidden = true;
+    return wrap;
+  }
+
+  const dock = readDock(dockStorage() || { getItem: () => null });
+
+  const dockBtn = (label, title, handler, pressed) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "obr-dock-btn";
+    b.textContent = label;
+    b.title = title;
+    if (pressed !== undefined) b.setAttribute("aria-pressed", pressed ? "true" : "false");
+    // The side it is already on would reload the sheet to arrive where it already is.
+    if (pressed) b.disabled = true;
+    else b.addEventListener("click", handler);
+    return b;
+  };
+  const sep = () => {
+    const d = document.createElement("span");
+    d.className = "obr-dock-sep";
+    return d;
+  };
+
+  wrap.append(
+    dockBtn("Left", "Dock the sheet to the left edge (reloads the sheet)",
+      () => redock("left"), dock.side === "left"),
+    dockBtn("Right", "Dock the sheet to the right edge (reloads the sheet)",
+      () => redock("right"), dock.side === "right"),
+    dockBtn("Bottom", "Dock the sheet along the bottom (reloads the sheet)",
+      () => redock("bottom"), dock.side === "bottom"),
+    sep(),
+    dockBtn("−", "Narrower", () => resizeDock(-DOCK_STEP)),
+    dockBtn("+", "Wider", () => resizeDock(DOCK_STEP)),
+  );
+  return wrap;
+}
+
+// Moving the sheet reloads it, so the save is flushed first for exactly the reason the
+// old Pop out button flushed it: the reopened sheet reads the character back off the
 // token, and reading it a few hundred milliseconds before the debounced save lands
-// would open the window on a slightly older character.
-//
-// If the window does not open — a popup blocker, or an Owlbear frame that does not
-// permit it — nothing else changes. The modal stays exactly where it was and says so.
-async function popOutSheet() {
+// would reopen on a slightly older character.
+async function redock(side) {
+  const storage = dockStorage();
+  const next = writeDock(storage || { setItem: () => {} },
+    { ...readDock(storage || { getItem: () => null }), side });
+
   clearTimeout(saveTimer);
-  await commit();
-
-  const url = new URL(location.href);
-  url.searchParams.set("popout", "1");
-  if (tokenId) url.searchParams.set("item", tokenId);
   try {
-    url.searchParams.set("room", OBR.room.id || "");
+    await commit();
   } catch (err) {
-    url.searchParams.delete("room");
+    console.error("[dnm] could not save before moving the sheet", err);
   }
 
-  // Named after the token, so a second press focuses the window that is already open
-  // rather than opening a rival sheet on the same character.
-  const name = `dnm-sheet-${tokenId || "new"}`;
-  let win = null;
   try {
-    win = window.open(url.toString(), name, "width=940,height=1000,menubar=no,toolbar=no");
+    await bridge.redock(next);
   } catch (err) {
-    win = null;
+    // The close half may well have succeeded, so there is no sheet left to put a
+    // message in. The console is the honest place for this one.
+    console.error("[dnm] could not move the sheet", err);
   }
-  if (!win) {
-    setSaveState("the browser blocked the window", "failed");
-    setTimeout(() => setSaveState("saved"), 5000);
-    showToast("Your browser blocked the pop-out window. Allow pop-ups for Owlbear Rodeo and try again.", "error");
-    return;
+}
+
+// Resizing does NOT reload, so there is nothing to flush and the bar can just be
+// redrawn. The axis that moves is the one the dock does not pin: a side dock is full
+// height and changes width, the bottom dock is full width and changes height.
+async function resizeDock(delta) {
+  const storage = dockStorage();
+  const current = readDock(storage || { getItem: () => null });
+  const axis = current.side === "bottom" ? "height" : "width";
+  const next = writeDock(storage || { setItem: () => {} },
+    { ...current, [axis]: current[axis] + delta });
+
+  try {
+    await bridge.resizeSheet(
+      axis === "width" ? next.width : 0,
+      axis === "height" ? next.height : 0,
+    );
+  } catch (err) {
+    console.error("[dnm] could not resize the sheet", err);
   }
-  try { win.focus(); } catch (err) { /* focus is a courtesy */ }
-  closeModal();
 }
 
 async function copyCodeToClipboard() {
@@ -10506,72 +10619,22 @@ async function startEmbedded() {
 
 let bridge = null;
 
-// Three ways this file can be running, and only the middle one is new.
+// Two ways this file can be running, and neither is new.
 //
-//   Framed by Owlbear      — the SDK works. Unchanged since v1.14.
-//   A popped-out window    — no SDK; talk to the background page over the channel.
-//   A plain browser tab    — no room at all. Nothing below runs and the creator
-//                            behaves exactly as it always has.
+//   Framed by Owlbear      — the SDK works. Unchanged since v1.14, and as of v2.0 that
+//                            frame is a docked popover rather than a centred modal,
+//                            which changes where the sheet sits and nothing else.
+//   A plain browser tab    — no room at all. Nothing below runs and the creator behaves
+//                            exactly as it always has.
 //
-// The popout is told which room it belongs to in its URL. Without that, two rooms open
-// in one browser would each answer the other's requests.
-async function bootPopout() {
-  const params = new URLSearchParams(location.search);
-  const roomId = params.get("room") || "";
-  document.body.classList.add("obr-popout");
-  bridge = makeRelayBridge(roomId);
-  try {
-    const host = await bridge.ready();
-    // v1.30. The host now answers "hello" even when the room id does not match, so a
-    // mismatch reports itself instead of looking exactly like an extension that has no
-    // relay at all. That ambiguity cost a QA round.
-    if (roomId && host && host.room && host.room !== roomId) {
-      showPopoutLost(`Another Owlbear room answered this window. It was opened for room
-        ${roomId} and the extension in this browser is in room ${host.room}. Close this
-        window and open the sheet again from the token in the room you are playing in.`);
-      return;
-    }
-  } catch (err) {
-    console.error("[dnm] the popout could not reach the room", err);
-    // Named precisely, because these need different things done about them and the
-    // first one is by far the most likely: Owlbear caches the extension's background
-    // page for the whole room session, so a NEW extension version is not running until
-    // the room itself is reloaded. A tab refresh is not enough.
-    showPopoutLost(`This window got no answer from the Dreams & Machines extension.
-      Most often that means the Owlbear room is still running an older version of the
-      extension: go to the Owlbear tab, reload the room, then open the sheet and press
-      Pop out again. It also looks like this if the room has been closed. Nothing you
-      do in this window will reach the table until it connects.`, true);
-    return;
-  }
-  startEmbedded();
-}
-
-// `offerRetry` only for the no-answer case: reloading is worth a try when the room may
-// simply have been reloaded since. A wrong-room window has to be reopened from the
-// right token, so retrying it would only fail again more slowly.
-function showPopoutLost(message, offerRetry) {
-  const existing = document.querySelector(".popout-lost");
-  if (existing) existing.remove();
-  const bar = document.createElement("div");
-  bar.className = "popout-lost";
-  const text = document.createElement("span");
-  text.textContent = String(message || "").replace(/\s+/g, " ").trim();
-  bar.append(text);
-  if (offerRetry) {
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "popout-retry";
-    retry.textContent = "Try again";
-    retry.addEventListener("click", () => location.reload());
-    bar.append(retry);
-  }
-  document.body.prepend(bar);
-}
-
-if (isPopout) {
-  bootPopout();
-} else if (OBR.isAvailable) {
+// v1.29's third way — a popped-out browser window talking to the extension over a
+// BroadcastChannel — is gone as of v2.0. It never once connected in play, including in
+// a brand new room where the extension was certainly current. The likeliest reason is
+// Chrome partitioning storage by top-level site, which puts a third-party frame under
+// owlbear.rodeo and a first-party window on gsgrimoire.github.io in different
+// partitions. Do not rebuild it: a popover is framed by Owlbear, so it keeps a working
+// SDK and needs no courier at all.
+if (OBR.isAvailable) {
   bridge = makeDirectBridge();
   OBR.onReady(startEmbedded);
 } else {

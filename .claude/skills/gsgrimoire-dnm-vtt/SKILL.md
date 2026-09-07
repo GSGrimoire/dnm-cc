@@ -109,7 +109,7 @@ Before claiming a deploy: **verify `main` actually moved.** Check `git rev-parse
 `origin/main`. Pushing `main` while checked out on another branch succeeds and does nothing —
 it has happened, and the release was reported as live when it was not.
 
-## Three ways the sheet runs
+## Two ways the sheet runs
 
 `OBR.isAvailable` is `!!ee.origin`, read from the `obrref` query parameter — not from
 being framed. But the transport sends through `window.parent.postMessage` and throws
@@ -118,53 +118,72 @@ being framed. But the transport sends through `window.parent.postMessage` and th
 | | SDK | how it reaches the room |
 |---|---|---|
 | Framed by Owlbear | works | directly |
-| A popped-out window | dead | BroadcastChannel to `background.js` |
 | A plain browser tab | dead | it does not; the creator runs alone |
+
+Since v2.0 "framed by Owlbear" means a **docked popover**, not a centred modal. A popover
+is still framed, so it keeps a working SDK — which is the whole reason the route works.
 
 **A separate window can never use the SDK.** Do not try to make `window.open` work by
 copying `obrref` into the URL: `isAvailable` will then be true and every call will still
 throw, which is worse than the honest failure.
 
-Everything Owlbear-shaped goes through `bridge` (v1.29), which has a `direct` and a
-`relay` implementation. Add a capability by adding it to BOTH, and to the host's switch
-in `background.js` — `popout.test.mjs` compares the op names on each side and fails if
-one knows something the other does not.
-
-Keep the bridge surface NARROW. A general SDK proxy cannot work: the token write is
-`scene.items.updateItems(ids, mutator)` and a mutator function cannot be
-structured-cloned across a channel.
-
-**Owlbear caches the background page for the whole room session.** A new extension
-version is not running until the ROOM is reloaded; a tab refresh is not enough. This is
-the first thing to suspect when a new relay feature does nothing, and it is why the host
-reports `EXT_VERSION` in its `hello` reply — change that constant with `manifest.json`.
-
-**Third-party storage partitioning IS the likeliest reason a popped-out window cannot
-reach the host, and the popout has never worked.** An earlier note here said the opposite.
-It was wrong, and the way it was wrong is worth keeping:
-
-The theory is that Chrome partitions the BroadcastChannel by top-level site, so the
-extension's iframe (third-party under `owlbear.rodeo`) and a popped-out window
-(first-party on `gsgrimoire.github.io`) sit in different partitions and cannot hear each
-other. It was "disproved" by a Chromium test that ran on `localhost` and `127.0.0.1` —
-**and Chrome exempts loopback from partitioning**, so the test could never have shown the
-effect. Forcing the feature flag changed nothing for the same reason. The note even said
-Chrome exempts loopback, immediately before relying on a loopback test.
-
-What settled it was play, not the test bench: a BRAND NEW room, so the extension was
-certainly current, and the relay still answered nothing.
+**v1.29's popped-out window and its BroadcastChannel relay were deleted in v2.0.** It
+never once connected in play, including in a brand new room where the extension was
+certainly current. The likeliest cause is Chrome partitioning storage by top-level site:
+the extension is a third-party frame under `owlbear.rodeo` and a popped-out window is
+first-party on `gsgrimoire.github.io`, so their channels sit in different partitions. It
+was once "disproved" by a Chromium test that ran on `localhost` and `127.0.0.1` — **and
+Chrome exempts loopback from partitioning**, so the test could never have shown the
+effect. What settled it was play, not the test bench.
 
 **A test run on the wrong shape is worse than no test**, because it gets written down as
 a fact. To test partitioning you need two real cross-site hostnames.
 
-The route out is not a detached OS window. It is a movable or docked panel INSIDE
-Owlbear — `OBR.popover.open` takes `anchorReference: "POSITION"`, an `anchorPosition`,
-and `disableClickAway`, and `OBR.modal` takes `hideBackdrop` and `disablePointerEvents`.
+`dock.test.mjs` asserts that neither half opens a `BroadcastChannel`, so reviving the
+relay has to be a decision rather than an accident.
 
-**Reply envelopes are reserved.** Nest an answer under `data`; never spread it into the
-message. Spreading it once meant the reply to `self` overwrote the correlation `id` with
-the player's `id`, and every read hung until it timed out while the window rendered a
-complete, editable sheet that reached nobody.
+Everything Owlbear-shaped still goes through `bridge`, which now has one implementation.
+Keep its surface NARROW: a general SDK proxy cannot work, because the token write is
+`scene.items.updateItems(ids, mutator)` and a mutator function cannot be
+structured-cloned.
+
+**Owlbear caches the background page for the whole room session.** A new extension
+version is not running until the ROOM is reloaded; a tab refresh is not enough. This is
+the first thing to suspect when a new feature does nothing.
+
+## The docked sheet (v2.0 / 1.0)
+
+The sheet opens as `OBR.popover.open` with `anchorReference: "POSITION"`, pinned to the
+left edge, the right edge or the bottom. `disableClickAway: true` is the release: without
+it the first click on the map dismisses the sheet, which is what v2.0 exists to remove.
+
+**`PopoverApi` has no `setPosition`.** It is `open` / `close` / `getWidth` / `setWidth` /
+`getHeight` / `setHeight`, and `anchorPosition` is read once at open. So size is live and
+free, and moving the sheet costs a close and a reopen, which reloads it. That is why the
+sheet offers three snap sides rather than a drag, and why `redock()` flushes the save
+first — the reopened sheet reads the character back off the token.
+
+Two details that each look like a bug when got wrong:
+
+- **`transformOrigin` pins the dock to its edge.** A right dock pinned by its RIGHT corner
+  grows leftwards under `setWidth`; pinned by its left corner it walks off the screen.
+- **`marginThreshold` defaults to 16**, so a dock left at the default stops just short of
+  the edge.
+
+The popover id is `${ID}/sheet-panel`, deliberately **not** `${ID}/sheet` — that string is
+already the token context menu item.
+
+`sheetPopover()`, `clampDock()`, `readDock()` and `writeDock()` are duplicated between
+`dnm.js` and the creator's module block, the same rule as `createPoolBatcher()` and the
+four shared constants. **Change one, change both**; `dock.test.mjs` compares the two
+copies over a grid and fails if they disagree. The dock preference lives in
+`localStorage`, which is shared origin but **untrusted** — clamp it on the way OUT.
+
+**Reply envelopes are reserved.** From the relay, kept because the lesson outlives it:
+nest an answer under `data`, never spread it into the message. Spreading it once meant a
+reply to `self` overwrote the correlation `id` with the player's `id`, and every read hung
+until it timed out while the window rendered a complete, editable sheet that reached
+nobody.
 
 ## The two halves
 
@@ -283,7 +302,7 @@ touching the trust boundary — ask before building.
 
 ## Testing
 
-`dnm-cc/tests/` holds three suites. They read the two repos from `dnm-cc/out/`, which is
+`dnm-cc/tests/` holds five suites. They read the two repos from `dnm-cc/out/`, which is
 gitignored scaffolding, not source — stage it before every run or you will test the last
 release:
 
@@ -292,7 +311,7 @@ cd dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in creator embedded party popout security; do node tests/$t.test.mjs; done
+for t in creator embedded party dock security; do node tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -300,7 +319,7 @@ and playwright in ONE command or the next run dies on a missing module.
 
 - `creator.test.mjs` — the creator in jsdom, module block stripped
 - `embedded.test.mjs` — the module block itself, run against a stub SDK
-- `popout.test.mjs` — the module block as a popped-out window, against a fake channel
+- `dock.test.mjs` — the dock geometry, and the creator's copy of it against `dnm.js`'s
 - `party.test.mjs` — party status, the GM-only rule, the bond queue, the pool batcher
 - `security.test.mjs` — written from the attacker's side: forged events into the reducer,
   hostile codes into the parser
@@ -338,7 +357,9 @@ including `setTimeout(…, 0)` — so it passed with the debounce removed. Only 
 real gaps between the presses caught it.
 
 What no suite can reach: actual broadcast delivery, the GM's relay, room metadata round
-trips, role gates, the modal, and the party panel. Use Playwright against either
+trips, role gates, the party panel, and everything about how Owlbear actually renders the
+docked popover — whether the map stays interactive behind it, whether the geometry lands
+flush, whether `setWidth` resizes without reloading. Use Playwright against either
 standalone page for layout and cascade — **jsdom does no cascade and will report borders
 and computed styles that do not exist** — and list the rest as live checks in the release
 notes rather than implying coverage that does not exist.

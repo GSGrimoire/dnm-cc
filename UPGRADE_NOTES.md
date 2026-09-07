@@ -2,6 +2,165 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.0 / 1.0 — The sheet beside the map
+
+Creator **v2.0**, extension **1.0**. Both change; deploy the extension first. No room
+metadata schema change. Rollback point is still `dnm-cc c21e8ac` / `dnm-obr bd3586c`.
+
+A whole number on both halves, and the extension leaves 0.9.x, because this is the thing
+the table could not do before: roll without hiding the map. The two versions move
+together because they are one product and a headline release should read that way.
+
+## The problem
+
+The sheet opened as `OBR.modal.open` — centred, fixed, backdropped. To see the map or the
+log you closed it; to roll again you reopened it. Every evening was that loop.
+
+## What was tried in 1.29 and does not work
+
+A **Pop out** button opening the sheet in a separate browser window, talking back to
+`background.js` over a `BroadcastChannel`. **It never once connected**, including in a
+brand new room where the extension was certainly current.
+
+The likeliest cause is **Chrome's third-party storage partitioning**: the extension is a
+third-party frame under `owlbear.rodeo` and a `window.open`ed sheet is first-party on
+`gsgrimoire.github.io`, so their channels sit in different partitions. An earlier session
+"ruled this out" with a Chromium test **that was invalid** — it ran on `localhost` and
+`127.0.0.1`, and Chrome exempts loopback from partitioning, so it could never have shown
+the effect. Re-testing it properly needs two real cross-site hostnames.
+
+**All of it is deleted in this release**: the button, `makeRelayBridge()`, `bootPopout()`,
+`showPopoutLost()`, the relay host in `background.js`, `POPOUT_CHANNEL`,
+`POPOUT_PROTOCOL`, and `popout.test.mjs`. Do not rebuild it. `dock.test.mjs` asserts that
+neither half opens a `BroadcastChannel`, so bringing it back has to be a decision rather
+than an accident.
+
+## What replaced it
+
+`OBR.popover.open` with `anchorReference: "POSITION"`. The important part is not the
+positioning: **a popover is still framed by Owlbear**, so the sheet keeps a working SDK
+and needs no courier at all. That is why this route works where a detached window could
+not, and it is why the bridge now has only its `direct` implementation.
+
+Gus chose an edge dock with snap sides over a free drag, and the SDK settles why that was
+right. `PopoverApi` is `open` / `close` / `getWidth` / `setWidth` / `getHeight` /
+`setHeight`. **There is no `setPosition`**, and `anchorPosition` is read once at open. So:
+
+- **Size is live and free.** `− / +` call `setWidth` (or `setHeight` on the bottom dock)
+  and nothing reloads.
+- **Position costs a close and a reopen**, which reloads the sheet. Three snap sides make
+  that a deliberate press. A drag would have paid it on every frame.
+
+`redock()` flushes the save before moving for the reason `popOutSheet()` did: the
+reopened sheet reads the character back off the token, so an edit still in the 400ms
+debounce would be undone by a move meant to be cosmetic.
+
+`transformOrigin` is what pins a dock to its edge. A right dock pinned by its **right**
+corner grows leftwards under `setWidth`; pinned by its left corner it would walk off the
+screen. `marginThreshold` is MUI's minimum gap to the window edge and defaults to 16, so
+it is set to 0 or the dock stops just short of the edge and looks like a bug.
+`disableClickAway` is the release: without it the first click on the map dismisses the
+sheet.
+
+A dock never takes more than three quarters of the viewport, and a viewport that reads
+zero or throws before the scene is up falls back to 1600x900 rather than positioning the
+sheet at 0,0.
+
+## The dock helpers exist twice
+
+`sheetPopover()`, `clampDock()`, `readDock()` and `writeDock()` are in `dnm.js` for the
+extension and copied into the creator's module block, for the same reason
+`createPoolBatcher()` is: the creator cannot import from the extension without becoming a
+page that needs the network. **Change one, change both.** `dock.test.mjs` runs both copies
+over 2310 inputs and fails if they disagree.
+
+The dock preference lives in `localStorage` under `${ID}/dock`, which both halves can
+read because `/dnm-cc/` and `/dnm-obr/` are the same origin. It is **untrusted** — any
+page on the origin can write it and a user can edit it by hand — so it is clamped on the
+way OUT of storage, the same rule the character code follows.
+
+## Both openers go through one function
+
+`roller.js` and `background.js` each held their own modal id and URL. They now both call
+`openSheetPopover()` in `dnm.js`. The old comment warning that a second id would let one
+token's sheet be open twice, both saving over each other, is now enforced by there being
+one call site rather than by two comments agreeing.
+
+The popover id is `${ID}/sheet-panel`, **not** `${ID}/sheet` — that string is already the
+token context menu item.
+
+`closeSheet()` closes the popover and both legacy modal ids. A room that was already open
+when the extension updated still has the old modal on screen, because Owlbear caches the
+background page for the whole room session. Closing an id that is not open is a no-op.
+
+## Deliberately left out
+
+- **Free dragging.** Possible only as drag-a-ghost-then-reopen, one reload per move. Put
+  to Gus with the reload cost stated; he chose snap sides.
+- **The sheet as a tab in the roller drawer.** Zero API risk, but the drawer is 420px and
+  the sheet is a 1280px document. It would have been a rewrite of the sheet's layout
+  rather than a change to where it sits.
+- **`roomHasGM()` in `background.js`.** It had no caller left once the relay host went.
+  The roller and the creator's direct bridge keep their own copies, which is where the
+  warning is actually rendered.
+
+## Fixed on the way
+
+`copyCodeToClipboard()` was deleted along with `popOutSheet()`, which sat immediately
+above it. Nothing caught it for several minutes because no suite had ever built the
+embedded header bar. `dock.test.mjs` now boots a sheet onto a real token, which runs
+`insertBar()`, which is what surfaced it. That guard is the point of that test, not a
+side effect.
+
+## Live checks — none of this is covered by a suite
+
+The suites run against a stub SDK, so everything about how Owlbear actually renders a
+popover has to be checked in a room:
+
+1. Open a sheet from a token. It docks to the right edge, full height.
+2. **Click the map behind it.** The map responds and the sheet stays open.
+3. Drag a token behind it. The sheet stays open and the map stays interactive.
+4. Open the Rolls and Actions drawer with the sheet open. Both are usable at once.
+5. Press Left, then Bottom, then Right. It lands on each edge, flush, with no gap.
+6. Type a name change and press a dock button before it saves. The change survives.
+7. Press + four times, then − four times. It resizes without reloading.
+8. Close and reopen the sheet. It comes back on the side and at the size you left it.
+9. On a small window, check the dock leaves at least a quarter of the map visible.
+10. Roll, and confirm the roll reaches the log with the sheet still open.
+
+## Testing
+
+`popout.test.mjs` is retired; `dock.test.mjs` replaces it and inherits its job of keeping
+two copies of a helper honest.
+
+```sh
+cd dnm-cc
+npm install jsdom playwright --no-save
+mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
+rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
+for t in creator embedded party dock security; do node tests/$t.test.mjs; done
+```
+
+Current: creator 167, embedded 69, party 102, dock 62, security 68. All passing.
+
+Five mutations were run against the staged copies to prove the new suite fails without
+the fix: drifting the creator's copy of `DOCK_DEFAULT`, pinning the right dock by the
+wrong corner, re-enabling click-away, removing the clamp from `readDock()`, and
+reintroducing a `BroadcastChannel` in `background.js`. All five were caught.
+
+One note for whoever writes the next suite: the first run of `dock.test.mjs` reported the
+two copies disagreeing, and **they did not**. The grid was handed to the creator's copy
+through `JSON.stringify`, which turns `NaN` into `null` — and `Number(null)` is 0, which
+is finite, so it took the clamp path while a real `NaN` took the fallback path. The
+harness was lying about the input. Inputs now cross the boundary as JS literals.
+
+Related, and **not fixed here**: `embedded.test.mjs` sets module-block `let` bindings with
+`g("obrRole = 'PLAYER'")` in the drive tests. jsdom gives each `eval` its own scope for
+lexical declarations, so those assignments create globals the block never reads, and
+those assertions pass without exercising what they name. Found while trying the same
+trick for the save-before-move test, which is why that test boots a real sheet onto a real
+token instead. Worth a pass of its own.
+
 # v1.30 / 0.9.10 — A room with no GM says so, and the popout says why it failed
 
 Creator **v1.30**, extension **0.9.10**. Both change; deploy the extension first. No room

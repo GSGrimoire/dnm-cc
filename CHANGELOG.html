@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.1.30</h1>
+    <h1>Version v.2.0</h1>
     <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 1.30 needs extension 0.9.10; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.0 needs extension 1.0; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,23 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.0</span>
+          <span class="version-title">The sheet beside the map</span>
+        </summary>
+        <ul>
+        <li><strong>The sheet no longer covers the table.</strong> It opens docked to the edge of the Owlbear window instead of as a box in the middle of it, so the map, the tokens and the Rolls and Actions log all stay visible and clickable while the sheet is open. Open it once at the start of the evening and leave it there.</li>
+        <li><strong>Clicking the map no longer closes the sheet.</strong> You can move a token, read the log, and come back to the sheet without reopening it.</li>
+        <li><strong>Three places to put it.</strong> Buttons in the sheet&apos;s header dock it to the left edge, the right edge, or along the bottom. Left and right run full height, which suits the sheet&apos;s long layout; the bottom dock suits a wide map. The sheet reloads when it moves, which takes a moment &mdash; anything you have typed is saved first.</li>
+        <li><strong>And two to size it.</strong> The &minus; and + buttons make it narrower and wider, or shorter and taller on the bottom dock. Resizing is instant and does not reload. Wherever you leave it, that is where it opens next time.</li>
+        <li><strong>The Pop out button is gone.</strong> It never worked. It was added in 1.29 to open the sheet in a separate browser window, and that window could never reach the room &mdash; almost certainly because browsers keep the extension&apos;s storage separate from a window you open yourself, which is not something the sheet can work around. Docking does the job it was meant to do, and it does it properly, because a docked sheet is still inside Owlbear.</li>
+        <li>Requires extension 1.0. Install link unchanged, so no reinstall &mdash; but reload the room once, and this release in particular: the docked sheet will not appear until you do.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.1.30</span>
           <span class="version-title">A room with no GM says so</span>
