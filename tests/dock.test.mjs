@@ -458,6 +458,103 @@ ok("at the stored size", opened[3].width === 640 && opened[3].height === 480);
 }
 
 // -------------------------------------------------------------
+// There is always a way out of the panel (v2.1B)
+// -------------------------------------------------------------
+// The popover sets disableClickAway, so the ONLY way to dismiss it is the Close button in
+// the header bar. That bar was built by loadIntoCreator(), which startEmbedded() reaches
+// only when a character actually loads — and it has three legitimate ways of not getting
+// there. Every one of them left a panel covering part of the table with no way to close
+// it, no position pad, no zoom and no resize handles. That is what shipped in 2.1.
+//
+// The reason it shipped is worth keeping too: the test above DOES boot a real sheet, and
+// asserted on state.character.name, which loadIntoCreator() sets BEFORE it builds the
+// bar. So it passed while the bar was missing. Assert on the thing you care about, not on
+// something that happens to be near it.
+{
+  const codeFor = (over) => g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    var arch = Object.keys(DM_DATA.archetypes)[0];
+    c.name = 'Way Out'; c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = arch; c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    var a = DM_DATA.archetypes[arch];
+    if (!a.forcedTalent) { var t = Object.keys(a.talents || {}); if (t.length) c.talent = t[0]; }
+    c.finalized = true; normalizeEditableLists();
+    if (!computeStats()) throw new Error('fixture does not compute');
+    var code = buildCharacterCode();
+    var over = ${JSON.stringify("PLACEHOLDER")};
+    if (!over) return code;
+    var seg = code.split('-').find(function(p){ return p.slice(0,2) === 'CP'; });
+    var pad = seg.slice(2); while (pad.length % 4) pad += '=';
+    var obj = JSON.parse(decodeURIComponent(atob(pad)));
+    obj.archetype = over;
+    var b64 = btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=/g,'');
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+  })()`.replace('"PLACEHOLDER"', JSON.stringify(over)));
+
+  const goodCode = codeFor(null);
+  const unreadableCode = codeFor("from-the-future");
+
+  const bootPanel = async (url, tokenCode) => {
+    const d = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true, url });
+    const win = d.window;
+    await new Promise((r) => { if (win.document.readyState === "complete") r(); else win.addEventListener("load", r); });
+    win.__code = tokenCode;
+    win.eval(`const OBR = {
+      isAvailable: true,
+      onReady: (f) => { Promise.resolve().then(f).catch(() => {}); },
+      broadcast: { sendMessage: async () => {}, onMessage: () => () => {} },
+      room: { id: "r1", getMetadata: async () => ({}), setMetadata: async () => {}, onMetadataChange: () => {} },
+      scene: { items: {
+          getItems: async () => (window.__code
+            ? [{ id: "tok-1", metadata: { "com.thuknights.dnm-obr/char": { code: window.__code } } }]
+            : [{ id: "tok-1", metadata: {} }]),
+          onChange: () => {}, updateItems: async () => {} },
+        onReadyChange: () => {} },
+      player: { getRole: async () => "PLAYER", getName: async () => "P", getId: async () => "p1", onChange: () => {} },
+      party: { getPlayers: async () => [], onChange: () => {} },
+      modal: { close: () => {} }, action: { setHeight: async () => {} },
+      viewport: { getWidth: async () => 1600, getHeight: async () => 900 },
+      popover: { open: async () => {}, close: async () => {}, setWidth: async () => {}, setHeight: async () => {} },
+    };
+    ` + body);
+    await new Promise((r) => setTimeout(r, 200));
+    const labels = [...win.document.querySelectorAll("#obrBar button")].map((b) => b.textContent.trim());
+    return {
+      bar: !!win.document.getElementById("obrBar"),
+      close: labels.includes("Close"),
+      pad: win.document.querySelectorAll(".obr-pad-cell").length,
+      zoom: win.document.querySelectorAll(".obr-zoomgroup .obr-dock-btn").length,
+      handles: win.document.querySelectorAll(".obr-resize").length,
+      labels,
+    };
+  };
+
+  const U = "https://gsgrimoire.github.io/dnm-cc/";
+  const cases = [
+    ["a token with a character", U + "?item=tok-1", goodCode],
+    ["a token with no character yet", U + "?item=tok-1", null],
+    ["opened with no token at all", U, null],
+    ["a character this build cannot read", U + "?item=tok-1", unreadableCode],
+  ];
+  for (const [label, url, tokenCode] of cases) {
+    const r = await bootPanel(url, tokenCode);
+    ok(`${label}: the panel has a Close button`, r.bar && r.close);
+    ok(`${label}: and the position pad`, r.pad === 9);
+    ok(`${label}: and the zoom controls`, r.zoom === 2);
+    ok(`${label}: and its resize handles`, r.handles > 0);
+  }
+
+  // Copy code and Detach act ON a character, so they wait for one. A Detach offered on an
+  // empty token would be alarming, and a Copy code with nothing to copy is a dead button.
+  const withChar = await bootPanel(U + "?item=tok-1", goodCode);
+  const without = await bootPanel(U + "?item=tok-1", null);
+  ok("a loaded character offers Copy code and Detach",
+    withChar.labels.includes("Copy code") && withChar.labels.includes("Detach"));
+  ok("an empty token offers neither",
+    !without.labels.includes("Copy code") && !without.labels.includes("Detach"));
+}
+
+// -------------------------------------------------------------
 // The relay really is gone
 // -------------------------------------------------------------
 // Named explicitly so that reintroducing it is a decision rather than an accident. It

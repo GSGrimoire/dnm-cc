@@ -2,6 +2,62 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.1B / 1.1 — The panel can always be closed
+
+Creator **v2.1B**. The extension is unchanged at **1.1**, so there is nothing to deploy on
+that side. Found in Gus's QA of 2.1, within minutes of it going out.
+
+## What was wrong
+
+The popover sets `disableClickAway`, which is the whole point of the docked sheet: clicking
+the map must not dismiss it. That makes the Close button in the header bar **the only way
+out of the panel**.
+
+That bar was built by `loadIntoCreator()`, which `startEmbedded()` only reaches when a
+character actually loads. It has three legitimate ways of not getting there:
+
+- no `?item=` in the URL at all,
+- a token with nothing attached yet, which is exactly what "Attach D&M character" opens,
+- a character whose code this build cannot read, which **2.0B's own new key check
+  produces**.
+
+Every one of them left a panel covering part of the table with no Close, no position pad,
+no zoom and no resize handles. Gus opened a fresh token and hit all of it at once: "it
+doesn't open a character, just the CC. And there is no close button. So once opened it
+cannot be closed."
+
+The chrome is the PANEL's, not the character's. `insertBar()` is now called at the top of
+`startEmbedded()`, before any of the early returns, and is safe to call again when a
+character arrives. Copy code and Detach still wait for a character, because neither means
+anything without one and a Detach offered on an empty token would be alarming.
+
+Two of the reported symptoms were this same cause wearing different hats: "no dragging"
+(the handles are appended by `insertBar`) and "no zoom buttons" (same). The panel opening
+at the bottom was not a bug at all — it was the 1.0 bottom dock migrating correctly.
+
+## Why the tests did not catch it
+
+This is the part worth keeping, because the suite genuinely does boot a real sheet onto a
+real token and has done since 2.0B.
+
+It asserted `state.character.name === 'Dock Fixture'`. `loadIntoCreator()` sets
+`state.character` BEFORE it calls `insertBar()`, so that assertion passes whether or not
+the bar was ever built. It is the same shape of mistake as 2.0B's regex over rendered HTML:
+**an assertion that sits near the thing you care about instead of on it.**
+
+It is also the second time this exact gap has bitten. In 2.0 it hid the deletion of
+`copyCodeToClipboard()`; the fix then was to boot a real sheet, which was necessary and not
+sufficient, because the assertion chosen still did not look at the bar.
+
+`dock.test.mjs` now boots the panel down all four paths and asserts, for each, that there
+is a Close button, a nine-cell pad, two zoom controls and at least one resize handle. Two
+mutations prove it: removing the early `insertBar()` reproduces exactly what Gus saw, and
+putting Close back behind a character fails the three paths that have none.
+
+## Testing
+
+Current: creator 167, embedded 80, party 102, dock 108, security 92. All passing.
+
 # v2.1 / 1.1 — Put the sheet where you want it
 
 Creator **v2.1**, extension **1.1**. Both change; deploy the extension first. No room

@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.1</h1>
+    <h1>Version v.2.1B</h1>
     <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.1 needs extension 1.1; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.1B needs extension 1.1; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,21 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.1B</span>
+          <span class="version-title">The panel can always be closed</span>
+        </summary>
+        <ul>
+        <li><strong>Fixes a bad one in 2.1: a sheet opened on a token with no character had no Close button, and no way to get rid of it.</strong> The header strip with Close, the position pad and the zoom controls was only built once a character had loaded. Open the sheet on an empty token and you got a panel sitting on the table that nothing would dismiss. It is part of the panel now, not part of the character, so it is there the moment the sheet opens.</li>
+        <li>The same fix covers a character this version of the creator cannot read, which also used to leave you stuck, and the header now says so rather than looking like an empty token.</li>
+        <li>Copy code and Detach still wait for a character, since neither means anything without one.</li>
+        <li>No change to the extension. Still requires extension 1.1, and no reinstall.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.1</span>
           <span class="version-title">Put the sheet where you want it</span>

@@ -2800,7 +2800,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.1B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -10611,20 +10611,34 @@ function reconcileOnOpen() {
 // the creator has no reason to: get the code out, break the link to the token, and
 // close the modal. Built rather than declared, so it cannot reference an element
 // that is not there.
+// v2.1B. Called on EVERY path that puts the sheet on screen, not only the one where a
+// character loaded, and safe to call again to update it.
+//
+// The bug it fixes was as bad as bugs get: the popover sets disableClickAway, so the ONLY
+// way out of it is the Close button in this bar — and this bar was only built by
+// loadIntoCreator(). Open the sheet on a token with no character yet, or on a character
+// whose code this build cannot read, and startEmbedded() returned before ever reaching
+// it. That left a panel with no Close, no position pad, no zoom and no resize handles,
+// covering part of the table with no way to dismiss it.
+//
+// So the chrome is not the character's, it is the PANEL's. It exists whenever the sheet
+// is embedded. Only the two controls that act on a character wait for one.
 function insertBar(name) {
-  if (document.getElementById("obrBar")) return;
-
-  const el = document.createElement("div");
+  const existing = document.getElementById("obrBar");
+  const el = existing || document.createElement("div");
   el.id = "obrBar";
   el.className = "obr-bar obr-only";
+  // Rebuilt rather than patched: this is called again when a character arrives, and the
+  // row changes shape when it does.
+  el.textContent = "";
 
   const who = document.createElement("span");
   who.className = "obr-name";
-  who.textContent = name || "Character";
+  who.textContent = name || "No character yet";
 
   const on = document.createElement("span");
   on.className = "obr-on";
-  on.textContent = "on this token";
+  on.textContent = name ? "on this token" : "import or build one below";
 
   const save = document.createElement("span");
   save.className = "obr-save";
@@ -10651,18 +10665,28 @@ function insertBar(name) {
   idLine.className = "obr-idline";
   idLine.append(who, on, save);
 
-  actions.append(buildDockControls(), button("Copy code", "", copyCodeToClipboard));
-  actions.append(
-    button("Detach", "danger", detachFromToken),
-    button("Close", "primary", closeModal),
-  );
+  // The panel's own controls, which never depend on a character.
+  actions.append(buildDockControls());
+  // These two act ON a character, so they only appear once there is one. Copying a code
+  // that does not exist and detaching a character that was never attached are both
+  // nonsense, and a Detach on an empty token would be actively alarming.
+  if (name) {
+    actions.append(
+      button("Copy code", "", copyCodeToClipboard),
+      button("Detach", "danger", detachFromToken),
+    );
+  }
+  // Always last, and always present. It is the only way out of the panel.
+  actions.append(button("Close", "primary", closeModal));
 
   el.append(idLine, actions);
   const app = document.getElementById("app");
-  app.prepend(el);
+  if (!existing) app.prepend(el);
 
   // The handles live on the app, not in the bar: they sit on the panel's edges, and the
-  // bar is only the strip at the top of it.
+  // bar is only the strip at the top of it. Rebuilt on each call because which edges
+  // exist depends on the anchor, and the anchor can have changed.
+  for (const old of app.querySelectorAll(".obr-resize")) old.remove();
   app.append(buildResizeHandles());
   applyZoom(readDockSafe().zoom);
 }
@@ -11119,6 +11143,12 @@ async function startEmbedded() {
   // A scene change swaps the whole item set out, and this sheet can outlive one.
   bridge.onItemsChange(schedulePartyNameRefresh);
 
+  // v2.1B. BEFORE the early returns below, not after. Each of them is a legitimate way
+  // to end up looking at the import screen — no token, a token with nothing on it yet, a
+  // character this build cannot read — and every one of them used to leave a panel with
+  // no Close button in a popover that ignores click-away.
+  insertBar(null);
+
   const params = new URLSearchParams(location.search);
   tokenId = params.get("item");
   if (!tokenId) return; // opened without a token: leave the import screen up
@@ -11135,6 +11165,10 @@ async function startEmbedded() {
   if (error) {
     const box = document.getElementById("importError");
     if (box) box.textContent = "⚠ " + error;
+    // The bar is already up from above, so there is a way out of the panel. Say in the
+    // header as well as in the page that this token has a character the sheet could not
+    // read, because the import screen on its own looks like an empty token.
+    setSaveState("could not read this character", "failed");
   }
 }
 
