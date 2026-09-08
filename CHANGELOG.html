@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.1B</h1>
+    <h1>Version v.2.1C</h1>
     <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.1B needs extension 1.1; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.1C needs extension 1.1B; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,21 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.1C</span>
+          <span class="version-title">2.1 never actually ran</span>
+        </summary>
+        <ul>
+        <li><strong>This is the real fix for what 2.1 broke, and 2.1B was not it.</strong> Everything the sheet does inside Owlbear lives in one block of code, and in 2.1 that block would not start at all. Two names it used clashed with names inside the bundled Owlbear library, which stops the whole block dead. So the panel showed the plain character creator: no header, no Close, no position pad, no zoom, no dragging, and no character off the token.</li>
+        <li>Everything built in 2.1 was in there the whole time and simply never got to run. The pad, the drag handles, the zoom, the rolls arriving from the roller, the new dice roller readout &mdash; all of it should appear now.</li>
+        <li>2.1B fixed a different, real problem that had not surfaced yet: opening the sheet on a token with no character left you with no Close button. That fix stays.</li>
+        <li>Requires extension 1.1B. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.1B</span>
           <span class="version-title">The panel can always be closed</span>

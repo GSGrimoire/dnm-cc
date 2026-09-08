@@ -578,7 +578,7 @@ ok("roller.js opens the sheet as a popover", rollerSrc.includes("openSheetPopove
 // Versions moved together
 // -------------------------------------------------------------
 const manifest = JSON.parse(fs.readFileSync(new URL("../out/dnm-obr/manifest.json", import.meta.url), "utf8"));
-ok("the manifest is at 1.1", manifest.version === "1.1");
+ok("the manifest is at 1.1B", manifest.version === "1.1B");
 ok("EXT_VERSION matches the manifest", ext.EXT_VERSION === manifest.version);
 
 console.log(`\ndock: ${pass} passed, ${fail} failed`);

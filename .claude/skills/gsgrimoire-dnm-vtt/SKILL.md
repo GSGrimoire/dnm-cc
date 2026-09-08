@@ -364,6 +364,18 @@ is ordinary script code that can be evaluated in the same jsdom window. **Find t
 LINE LENGTH, not by text**: two comments above the bundle quote `const OBR = Zo;`, so a
 substring search deletes a comment and leaves the SDK in place.
 
+**Stripping the SDK hides every collision with it, so PARSE THE BLOCK WITH THE SDK IN
+PLACE FIRST.** The vendored bundle is minified and owns the short top-level names. v2.1
+declared `const H` and `const V` beside it; `V` was already taken, a duplicate top-level
+const is a SyntaxError, and a SyntaxError in a module means the module never runs AT ALL.
+The sheet loaded as the plain standalone creator — no header bar, no way to close the
+panel, no character — and all five suites passed, because they had removed the half of the
+file that made it illegal.
+
+`embedded.test.mjs` now runs `new vm.Script(block)` before stripping anything, and asserts
+that no top-level name in the generated dock helpers is one or two characters. **Never give
+anything in the module block a one or two character top-level name.**
+
 jsdom gives each `w.eval` its own scope for lexical declarations, so the block's `const`
 and `let` bindings are unreachable from a test. Function declarations and `window.*`
 assignments are. Assert through the bridges and through what was BROADCAST — which is
@@ -408,6 +420,12 @@ have parsed cleanly and threw on render — a blank sheet with no message. The l
 is a character from a newer creator meeting a room serving the cached older one, or a
 renamed key. Refuse only a key that is SET and does not RESOLVE: an EMPTY origin is an
 unfinished character and has always imported.
+
+**Ask what a green suite cannot see.** Three releases running, the bug was in the gap
+between the test environment and the real one: a fixture the earlier assertions had already
+normalised, an assertion sitting next to the thing it cared about rather than on it, and a
+test environment with the SDK removed. Green means the assertions passed, not that the
+thing works.
 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.

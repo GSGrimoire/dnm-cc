@@ -26,6 +26,7 @@
 // =============================================================
 import fs from "fs";
 import { JSDOM } from "jsdom";
+import vm from "node:vm";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log("  FAIL:", name); } };
@@ -36,6 +37,41 @@ if (modStart < 0) { console.log("FATAL: module block marker not found"); process
 const modEnd = raw.indexOf("</script>", modStart);
 const modSrc = raw.slice(modStart + '<script type="module">'.length, modEnd);
 const html = raw.slice(0, modStart) + raw.slice(modEnd + "</script>".length);
+
+// -------------------------------------------------------------
+// The block PARSES, with the SDK still in it (v2.1C)
+// -------------------------------------------------------------
+// This has to come before the SDK is stripped, and it is the assertion this suite was
+// missing for its whole life.
+//
+// Every suite here evaluates the module block with the bundled SDK REMOVED, because the
+// SDK cannot run under jsdom. That makes any collision between our code and the SDK's own
+// top-level names completely invisible: the tests see a block that parses, and the browser
+// sees a SyntaxError.
+//
+// It happened in 2.1. The dock geometry declared `const H` and `const V`, and the minified
+// bundle already declares `V` at top level. A duplicate top-level const is a SyntaxError,
+// and a SyntaxError in a module means the module never runs AT ALL — so the sheet loaded
+// as the plain standalone creator, with no header bar, no way to close the panel, and no
+// character on it. Every suite passed.
+//
+// vm.Script rather than SourceTextModule: the block has no import or export statements, so
+// it parses as a script, and that needs no experimental flag. A duplicate top-level const
+// is a SyntaxError either way.
+{
+  const full = raw.slice(modStart + '<script type="module">'.length, modEnd);
+  let parsed = null;
+  try { new vm.Script(full); } catch (e) { parsed = e.message; }
+  ok("the module block parses with the bundled SDK still in it", parsed === null);
+  if (parsed) console.log("      " + parsed);
+
+  // The rule that follows from it, asserted directly so the next person does not have to
+  // rediscover why. Minified bundles own the short names; ours must not be short.
+  const ours = full.slice(full.indexOf("const SHEET_POPOVER_ID"));
+  const shortNames = [...ours.matchAll(/^(?:const|let|var|function)\s+([A-Za-z_$][\w$]?)\s*[=({]/gm)].map((m) => m[1]);
+  ok(`no top-level name in the dock helpers is one or two characters (found: ${shortNames.join(",") || "none"})`,
+    shortNames.length === 0);
+}
 
 // By length, not by text. The two comments above the bundle both quote `const OBR =
 // Zo;`, so a substring search removes a comment and leaves the SDK in place.

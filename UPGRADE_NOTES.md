@@ -2,6 +2,71 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.1C / 1.1B — 2.1 never actually ran
+
+Creator **v2.1C**, extension **1.1B**. Both change; deploy the extension first.
+
+## What was actually wrong
+
+The dock geometry declared `const H` and `const V` at module top level. The creator's
+module block has the whole minified Owlbear SDK inlined above it, and that bundle already
+declares `V` at top level.
+
+A duplicate top-level `const` is a **SyntaxError**, and a SyntaxError in a module means the
+module never executes at all. Not "the dock failed" — the entire Owlbear half of the
+creator never started. `startEmbedded()` never ran, `obr-embedded` was never set, no bridge
+was ever built. The panel rendered as the plain standalone creator: its own title banner,
+its version line, no header bar, no Close, no pad, no zoom, no handles, and no character
+read off the token.
+
+Every symptom in both of Gus's reports was this one line. The names are now `DOCK_H` and
+`DOCK_V`, and the rule is written into `dnm.js` where the block is generated from:
+**nothing in that block may be named in one or two characters, ever.** Minified bundles own
+the short names.
+
+## 2.1B was a misdiagnosis, and the fix is still worth keeping
+
+2.1B concluded the header bar was missing because `insertBar()` only ran once a character
+loaded. That IS true and IS a real bug: opening the sheet on a token with no character
+left a panel with no Close button, in a popover that ignores click-away. It just was not
+what Gus was looking at, and shipping it as the fix was wrong.
+
+The lesson is not about the code. Three of the reported symptoms shared a plausible cause,
+that cause was genuinely present, and it explained the report well enough that I stopped
+looking. The fourth symptom — "it opens to the character creator" — did not fit and was
+explained away as the import screen. **It was the diagnostic one**, and the screenshot Gus
+sent second made it obvious: the standalone title banner and version line were on screen,
+which only happens when the embedded path never runs.
+
+Symptoms that do not fit the theory are the ones worth chasing.
+
+## Why no suite caught it, which is the important part
+
+Every suite here evaluates the module block with the bundled SDK **stripped out**, found by
+line length, because the SDK cannot run under jsdom. That has been the arrangement since
+`embedded.test.mjs` was written, and it is still necessary.
+
+It also means any collision between our top-level names and the SDK's is completely
+invisible to the tests. They see a block that parses. The browser sees a SyntaxError. The
+suites were all green on code that could not start.
+
+`embedded.test.mjs` now parses the block **with the SDK still in it**, before stripping
+anything, using `vm.Script` — the block has no import or export statements, so it parses as
+a script and needs no experimental flag, and a duplicate top-level const is a SyntaxError
+either way. It also asserts directly that no top-level name in the dock helpers is one or
+two characters, so the rule is enforced rather than remembered.
+
+Putting `H` and `V` back fails both assertions, the first with the exact browser error.
+
+This is the third harness gap in three releases, and they rhyme: the fixture that was
+already normalised, the assertion sitting next to the thing it cared about, and now the
+test environment differing from the real one in a way that hid a fatal error. **The
+question to ask of any green suite is what it cannot see.**
+
+## Testing
+
+Current: creator 167, embedded 82, party 102, dock 108, security 92. All passing.
+
 # v2.1B / 1.1 — The panel can always be closed
 
 Creator **v2.1B**. The extension is unchanged at **1.1**, so there is nothing to deploy on
