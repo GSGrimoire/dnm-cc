@@ -2,6 +2,90 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.1D / 1.1B — Tidy at any width, and a suite that can see layout
+
+Creator **v2.1D**. The extension is unchanged at **1.1B**. From Gus's QA of 2.1C, where
+everything else passed.
+
+## The scroll, for the second time
+
+`pickRollStat()` pulled the dice roller into view on every pick. That was a kindness in the
+1280px modal, where the roller sat far below the Attributes.
+
+2.1 tried to keep the kindness by only scrolling when the roller was off screen. In a tall
+narrow panel the roller is USUALLY off screen, so it kept jumping — the condition was true
+in exactly the common case. It scrolls **not at all** now. Nothing is lost: the tapped box
+highlights, and since 2.1 the roller carries a readout of what a roll would use.
+
+The lesson is small and generalises: a fix that narrows a condition is only a fix if the
+narrowed condition is actually rare in the situation being complained about.
+
+## Two collapses and a floor
+
+Measured in Chromium at 320px rather than reasoned about:
+
+| element | before | after |
+|---|---|---|
+| roller's "Rolling" readout | 0px wide | full row |
+| Roll button's right edge | 339px, in a 320px panel | inside |
+| owned item's name column | 0px wide, 134px tall | full row |
+| catalogue grid | 354px wide, in a 320px panel | inside |
+
+The first three are one fault: **a flex or grid child with `min-width: 0` shrinks to
+nothing rather than wrapping.** A zero-width child does not clip its contents either — it
+spills them over whatever is beside it, which is why an item's tags landed on its own
+buttons.
+
+The fourth is a different one: **`minmax(280px, 1fr)` is a floor the grid will not go
+below**, so in a narrower panel the whole grid hangs past the edge. Fixed with
+`minmax(min(280px, 100%), 1fr)`, which keeps the intended width where there is room and
+gives way where there is not. Applied to the catalogue, option and talent grids, all three
+of which had it.
+
+Two details worth keeping:
+
+- **The stacking is at 520px, not 700px.** The type-size rules from 2.1 apply wherever the
+  panel is smaller than the page was designed for; layout collapse only happens at the
+  bottom of the range, and stacking at 560px would turn one tidy row into three for
+  nothing. 560px is measurably unchanged by this release.
+- **`flex: 1 0 100%`, not `1 1 100%`.** A basis of 100% still shrinks when a sibling needs
+  room, so the name column kept giving way and the row never wrapped. Refusing to shrink
+  is what forces the wrap.
+- The item row carried its flex rules as INLINE styles, which no stylesheet rule can
+  override without `!important`. They are classes now: `.owned-item-head` and
+  `.owned-item-ident`.
+
+## A sixth suite, and why there had to be one
+
+`tests/layout.test.mjs` drives Chromium through Playwright and asserts, at 320, 400, 520,
+560 and 1280px, that nothing overflows the panel, that the two elements which collapsed
+have width, and that the Roll button and the catalogue are inside the edge.
+
+The other five suites run in jsdom, **which does no cascade and cannot lay anything out**.
+That has always been written down here as a limitation. What 2.1 showed is that it is a
+limitation with a whole class of bug behind it: the Roll button was 19px outside the panel
+and an item's tags were sitting on its buttons, and all five suites were green.
+
+It skips cleanly when Playwright is not installed, and finds the bundled browser by
+scanning rather than hardcoding a versioned path.
+
+Removing the narrow-width block reproduces Gus's report exactly: five failures at 320 and
+400px, including the Roll button being outside the panel and both zero-width collapses.
+Restoring the catalogue's bare `minmax` fails on its own.
+
+## Testing
+
+```sh
+cd dnm-cc
+npm install jsdom playwright --no-save
+mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
+rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
+for t in creator embedded party dock security layout; do node tests/$t.test.mjs; done
+```
+
+Current: creator 167, embedded 82, party 102, dock 108, security 92, layout 30. All
+passing.
+
 # v2.1C / 1.1B — 2.1 never actually ran
 
 Creator **v2.1C**, extension **1.1B**. Both change; deploy the extension first.

@@ -335,7 +335,7 @@ touching the trust boundary — ask before building.
 
 ## Testing
 
-`dnm-cc/tests/` holds five suites. They read the two repos from `dnm-cc/out/`, which is
+`dnm-cc/tests/` holds six suites. They read the two repos from `dnm-cc/out/`, which is
 gitignored scaffolding, not source — stage it before every run or you will test the last
 release:
 
@@ -344,7 +344,7 @@ cd dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in creator embedded party dock security; do node tests/$t.test.mjs; done
+for t in creator embedded party dock security layout; do node tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -357,6 +357,9 @@ and playwright in ONE command or the next run dies on a missing module.
 - `party.test.mjs` — party status, the GM-only rule, the bond queue, the pool batcher
 - `security.test.mjs` — written from the attacker's side: forged events into the reducer,
   hostile codes into the parser
+- `layout.test.mjs` — Chromium through Playwright, at the panel widths the sheet is
+  actually read at. The only suite that can see layout at all; skips if Playwright is
+  missing
 
 `embedded.test.mjs` (v1.27) closed a gap the other three had disclaimed for fifteen
 releases. The block has no imports — the SDK is inlined — so once the SDK is removed it
@@ -446,7 +449,17 @@ real gaps between the presses caught it.
 What no suite can reach: actual broadcast delivery, the GM's relay, room metadata round
 trips, role gates, the party panel, and everything about how Owlbear actually renders the
 docked popover — whether the map stays interactive behind it, whether the geometry lands
-flush, whether `setWidth` resizes without reloading. Use Playwright against either
-standalone page for layout and cascade — **jsdom does no cascade and will report borders
-and computed styles that do not exist** — and list the rest as live checks in the release
-notes rather than implying coverage that does not exist.
+flush, whether `setWidth` resizes without reloading. **jsdom does no cascade and cannot lay anything out**, which is a limitation with a whole
+class of bug behind it: v2.1 put the Roll button 19px outside the panel and dropped an
+item's tags across its own buttons, and all five jsdom suites were green. `layout.test.mjs`
+exists for that and should be extended rather than worked around. Two faults it was written
+for, both worth knowing before writing narrow-width CSS:
+
+- **A flex or grid child with `min-width: 0` shrinks to NOTHING rather than wrapping**, and
+  a zero-width child spills its contents over its neighbours rather than clipping them.
+  `flex: 1 0 100%` forces a wrap where `1 1 100%` still gives way.
+- **`minmax(Npx, 1fr)` is a floor the grid will not go below**, so it hangs past the edge
+  of any narrower container. `minmax(min(Npx, 100%), 1fr)` gives way.
+
+List whatever is left as live checks in the release notes rather than implying coverage
+that does not exist.

@@ -301,7 +301,7 @@ body::after {
 /* OPTION GRID */
 .option-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -397,7 +397,7 @@ body::after {
 /* TALENT CARDS */
 .talent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: 10px;
   margin-bottom: 20px;
 }
@@ -1333,9 +1333,14 @@ body::after {
 .cat-filter-btn:hover { border-color: var(--teal-dim); color: var(--text); }
 .cat-filter-btn.active { border-color: var(--teal); color: var(--teal); background: var(--teal-faint); }
 
+/* v2.1D. minmax(min(Npx, 100%), 1fr), not minmax(Npx, 1fr). A bare minimum column is a
+   floor the grid will not go below, so in a panel narrower than it the whole grid — and
+   every card in it — hangs past the edge. Measured at 320px: the catalogue was 354px wide
+   in a 320px panel. min(Npx, 100%) keeps the intended width wherever there is room and
+   gives way to the container where there is not. */
 .catalogue-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 10px;
   max-height: 460px;
   overflow-y: auto;
@@ -1415,6 +1420,10 @@ body::after {
   margin-bottom: 6px;
 }
 .owned-item-name { font-size: 0.85rem; color: var(--text); flex: 1; }
+/* v2.1D. These two carried inline styles, which meant no stylesheet rule could adjust
+   them for a narrow panel without !important. Same declarations, somewhere overridable. */
+.owned-item-head { display: flex; align-items: center; gap: 10px; }
+.owned-item-ident { flex: 1; min-width: 0; }
 .owned-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .owned-toggle { width: 1em; display: inline-flex; justify-content: center; color: var(--teal); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1; }
 .owned-toggle::before { content: '▾'; }
@@ -2421,6 +2430,40 @@ body.obr-resizing .obr-resize { background: var(--teal-dim); }
     display: flex; flex-wrap: wrap; gap: 6px;
   }
   .obr-embedded .finalized-toolbar .btn { flex: 1 1 auto; }
+
+}
+
+/* v2.1D. A second, narrower breakpoint. The rules above are about type size and apply
+   wherever the panel is smaller than the page was designed for. These are about LAYOUT
+   COLLAPSE, which only happens at the bottom of the range, and applying them at 560px
+   would turn one tidy row into three for no reason.
+
+   520px is where measurement says it starts to hurt: at 380px the item name column was
+   down to 43px and at 320px both it and the roller's readout collapsed to ZERO width,
+   which is what put the Roll button 19px past the edge of the panel and dropped an item's
+   tags on top of its own buttons. Both are the same fault — a flex or grid child with
+   min-width:0 shrinks to nothing rather than wrapping. */
+@media (max-width: 520px) {
+  /* What you are rolling gets its own row, because it is the part that has to stay
+     readable. Dice and difficulty share the next. Roll takes the last at full width,
+     which also makes it a better target. */
+  .obr-embedded .dice-controls { grid-template-columns: 1fr 1fr; }
+  .obr-embedded .dice-field { min-width: 0; }
+  .obr-embedded .dice-field.dice-picked { grid-column: 1 / -1; order: -1; }
+  .obr-embedded .dice-field:last-child { grid-column: 1 / -1; }
+  .obr-embedded .dice-num,
+  .obr-embedded .dice-select { width: 100%; min-width: 0; }
+  .obr-embedded .dice-roll-btn { width: 100%; padding: 10px 8px; }
+
+  /* An owned item is name-and-tags, then Equip, then the quantity stepper. Give the name
+     the whole line and let the controls fall below it.
+
+     1 0 100%, not 1 1 100%: a basis of 100% still shrinks when a sibling needs room, so
+     the name column kept giving way and the row never wrapped. Refusing to shrink is what
+     forces the wrap. */
+  .obr-embedded .owned-item-head { flex-wrap: wrap; }
+  .obr-embedded .owned-item-ident { flex: 1 0 100%; }
+  .obr-embedded .owned-item-meta { line-height: 1.7; }
 }
 
 /* v1.30. Warning colour rather than Threat's orange: nothing is wrong with the game,
@@ -2800,7 +2843,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.1C';
+const APP_VERSION = '2.1D';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -7124,22 +7167,17 @@ function pickRollStat(kind, key) {
     diceUI.skill = key;
   }
   renderAll();
-  // v2.1. This used to scroll the roller into view on every pick. In the 1280px modal
-  // the roller was far below the Attributes and that was a kindness; in a docked panel
-  // it yanks you to the middle of the sheet on every tap, which is what QA reported.
+  // v2.1D. No scrolling at all. This used to pull the roller into view on every pick,
+  // which was a kindness in the 1280px modal where the roller sat far below the
+  // Attributes. In a tall narrow panel it throws you down the sheet every time you tap.
   //
-  // The pick is already legible where you made it — the box highlights, and the roller
-  // now carries a readout of what is selected — so the scroll is only worth doing when
-  // the roller is genuinely off screen. Measured AFTER renderAll(), because that rebuilds
-  // the element and the old one's position means nothing.
-  const panel = document.getElementById('dicePanelAnchor');
-  if (!panel || typeof panel.getBoundingClientRect !== 'function') return;
-  const box = panel.getBoundingClientRect();
-  const viewH = window.innerHeight || document.documentElement.clientHeight || 0;
-  const offScreen = box.bottom < 0 || box.top > viewH;
-  if (offScreen && typeof panel.scrollIntoView === 'function') {
-    panel.scrollIntoView({ block: 'nearest' });
-  }
+  // v2.1 tried to keep the kindness by only scrolling when the roller was off screen.
+  // That is exactly the common case in a docked panel — the roller usually IS below the
+  // fold — so it kept jumping, which is what QA reported for the second time.
+  //
+  // Nothing is lost by leaving the page alone. The tapped box highlights where you
+  // tapped, and since v2.1 the roller carries a readout of what a roll would use, so the
+  // pick is legible without going to look at it.
 }
 
 function renderSheetAttributesSection(stats) {
@@ -9022,8 +9060,8 @@ function renderInventorySection() {
       return `<div class="owned-item ${entry.equipped ? 'is-equipped' : ''} ${entry.discharged ? 'is-discharged' : ''}">
         <details>
           <summary>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <div style="flex:1;min-width:0;">
+            <div class="owned-item-head">
+              <div class="owned-item-ident">
                 <div class="owned-name-row"><span class="owned-toggle" aria-hidden="true"></span><span class="owned-item-name">${escHtml(it.name)}</span></div>
                 <div class="owned-item-meta">${metaHtml}</div>
               </div>
