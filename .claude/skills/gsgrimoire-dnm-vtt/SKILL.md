@@ -151,39 +151,72 @@ structured-cloned.
 version is not running until the ROOM is reloaded; a tab refresh is not enough. This is
 the first thing to suspect when a new feature does nothing.
 
-## The docked sheet (v2.0 / 1.0)
+## The docked sheet (v2.0 / 1.0, regridded v2.1 / 1.1)
 
-The sheet opens as `OBR.popover.open` with `anchorReference: "POSITION"`, pinned to the
-left edge, the right edge or the bottom. `disableClickAway: true` is the release: without
-it the first click on the map dismisses the sheet, which is what v2.0 exists to remove.
+The sheet opens as `OBR.popover.open` with `anchorReference: "POSITION"`, pinned to one of
+NINE anchor points. `disableClickAway: true` is the release: without it the first click on
+the map dismisses the sheet, which is what the docked sheet exists to remove.
 
-**`PopoverApi` has no `setPosition`.** It is `open` / `close` / `getWidth` / `setWidth` /
-`getHeight` / `setHeight`, and `anchorPosition` is read once at open. So size is live and
-free, and moving the sheet costs a close and a reopen, which reloads it. That is why the
-sheet offers three snap sides rather than a drag, and why `redock()` flushes the save
-first — the reopened sheet reads the character back off the token.
+**What the API allows, checked across all twelve APIs in SDK 3.1.0 (the current release).
+Do not re-derive this.**
 
-Two details that each look like a bug when got wrong:
+| API | geometry it exposes |
+|---|---|
+| Popover | open, close, getWidth, setWidth, getHeight, setHeight |
+| Modal | open, close. Nothing else, not even size |
+| Action | the right-hand drawer: size only, Owlbear owns the position |
 
-- **`transformOrigin` pins the dock to its edge.** A right dock pinned by its RIGHT corner
-  grows leftwards under `setWidth`; pinned by its left corner it walks off the screen.
-- **`marginThreshold` defaults to 16**, so a dock left at the default stops just short of
+**There is no `setPosition` anywhere**, and `anchorPosition` is read once at open. So SIZE
+is live and free, and MOVING costs a close and a reopen, which reloads the sheet. That is
+why moving is a press on the position pad and resizing is a drag, and why `redock()`
+flushes the save first — the reopened sheet reads the character back off the token.
+
+**Roll20's free-floating sheet is not buildable here, and the reason is structural.**
+Roll20 IS the page; its sheet is a div it owns. Ours is a separate site in an iframe
+Owlbear places. A full-screen transparent modal with our own floating sheet inside looks
+like the way round it and is not: `disablePointerEvents` makes the frame transparent to
+hit-testing entirely, and content in a different document cannot re-enable itself from the
+inside, so you get a draggable sheet over a dead map or a live map under a dead sheet.
+
+The drag-ghost that IS possible: inflate the panel to the full viewport with `setWidth`
+and `setHeight`, which is reload-free, draw the ghost inside it, and reopen at the target
+on release. Unproven in a room as of 2.1 — see UPGRADE_NOTES for the three checks.
+
+Four details that each look like a bug when got wrong:
+
+- **`transformOrigin` pins the panel to its anchor.** One held by its RIGHT corner grows
+  leftwards under `setWidth`; one held by its left corner walks off the screen.
+- **`marginThreshold` defaults to 16**, so a panel left at the default stops just short of
   the edge.
+- **The panel may fill EITHER axis but never both.** That is what lets a full-height panel
+  sit beside the map and a full-width one sit below it. Width is decided first and height
+  gives way, so the geometry cannot answer differently for the same stored dock.
+- **A 1.0 dock carries a fill the stored object never held.** A side dock was full height
+  and the bottom dock was full width whatever their stored numbers, so `LEGACY_SIDES`
+  restores that axis or a bottom dock silently shrinks to 560px on the update.
 
 The popover id is `${ID}/sheet-panel`, deliberately **not** `${ID}/sheet` — that string is
 already the token context menu item.
 
-`sheetPopover()`, `clampDock()`, `readDock()` and `writeDock()` are duplicated between
-`dnm.js` and the creator's module block, the same rule as `createPoolBatcher()` and the
-four shared constants. **Change one, change both**; `dock.test.mjs` compares the two
-copies over a grid and fails if they disagree. The dock preference lives in
-`localStorage`, which is shared origin but **untrusted** — clamp it on the way OUT.
+**The creator's copy of the dock helpers is GENERATED from `dnm.js`**, not hand-copied.
+Regenerate it rather than editing it; that is what made a 3x3 rewrite of duplicated code
+safe to attempt. `dock.test.mjs` compares the two copies over thousands of inputs. The
+dock preference lives in `localStorage`, which is shared origin but **untrusted** — clamp
+it on the way OUT.
 
-**Reply envelopes are reserved.** From the relay, kept because the lesson outlives it:
-nest an answer under `data`, never spread it into the message. Spreading it once meant a
-reply to `self` overwrote the correlation `id` with the player's `id`, and every read hung
-until it timed out while the window rendered a complete, editable sheet that reached
-nobody.
+## Recent Rolls comes from two places (v2.1)
+
+Rolls made on the sheet are recorded locally; rolls made in the roller are picked up from
+the ROOM LOG by `reconcileRolls()`, not from broadcasts — the log is already sanitised,
+and reading it catches up rolls made while the sheet was closed.
+
+- **Every roll carries an id**, stamped once in `doRoll()` and used by both the local
+  record and the broadcast entry, or a sheet's own roll comes back as a stranger and is
+  listed twice.
+- **Matching is by character NAME** through `bondNameKey()`, because that is all the
+  roller knows. An unnamed character matches nothing, or it would match every unnamed roll
+  at the table.
+- **A concealed roll is never copied to a sheet.** The roller decides who may draw one.
 
 ## The two halves
 
@@ -319,7 +352,8 @@ and playwright in ONE command or the next run dies on a missing module.
 
 - `creator.test.mjs` — the creator in jsdom, module block stripped
 - `embedded.test.mjs` — the module block itself, run against a stub SDK
-- `dock.test.mjs` — the dock geometry, and the creator's copy of it against `dnm.js`'s
+- `dock.test.mjs` — the dock geometry, the creator's generated copy against `dnm.js`'s,
+  and the roll merge on a sheet booted onto a real token
 - `party.test.mjs` — party status, the GM-only rule, the bond queue, the pool batcher
 - `security.test.mjs` — written from the attacker's side: forged events into the reducer,
   hostile codes into the parser

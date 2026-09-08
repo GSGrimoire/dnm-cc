@@ -314,93 +314,141 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
 }
 
 // -------------------------------------------------------------
-// The docked sheet (v2.0)
+// The docked sheet (v2.0, regridded v2.1)
 // -------------------------------------------------------------
 // dock.test.mjs proves the geometry and that the creator's copy of it matches the
-// extension's. This is the other half: that the BUTTONS do what they say, which is
+// extension's. This is the other half: that the CONTROLS do what they say, which is
 // where the v1.29 Pop out button failed — it was wired correctly to a route that could
 // never work, and nothing in any suite noticed for two releases.
 {
   const calls = (name) => obrCalls.filter((c) => c[0] === name);
 
   ok("the dock controls are built", g("typeof buildDockControls") === "function");
+  ok("the resize handles are built", g("typeof buildResizeHandles") === "function");
   ok("redock exists", g("typeof redock") === "function");
-  ok("resizeDock exists", g("typeof resizeDock") === "function");
+  ok("zoomSheet exists", g("typeof zoomSheet") === "function");
   ok("the Pop out button is gone", !g("typeof popOutSheet === 'function'"));
+  // v2.1 replaced the panel-size buttons with a drag handle. A leftover would be a
+  // second control for the same thing, disagreeing with the first.
+  ok("the old panel-size stepper is gone", !g("typeof resizeDock === 'function'"));
 
   // Built directly rather than through insertBar(), which needs a character on a token.
-  const bar = g("buildDockControls()");
-  const labels = [...bar.querySelectorAll("button")].map((b) => b.textContent);
-  ok("it offers all three sides", ["Left", "Right", "Bottom"].every((l) => labels.includes(l)));
-  ok("it offers narrower and wider", labels.includes("−") && labels.includes("+"));
+  g("writeDockSafe({ anchor: 'right', width: 560, height: 4000, zoom: 1 })");
+  // Attached to the document: applyZoom() finds its readout by id, and a detached
+  // fragment is not in the document, so the readout assertion below would test nothing.
+  const controls = g("(function(){ var c = buildDockControls(); document.body.append(c); return c; })()");
+  const cells = [...controls.querySelectorAll(".obr-pad-cell")];
+  ok("the position pad offers nine anchors", cells.length === 9);
+  ok("every cell names its anchor", cells.every((c) => !!c.dataset.anchor));
+  // Where it already is: a readout, not a button. Pressing it would close and reopen the
+  // popover to arrive exactly where it already was.
+  const here = cells.find((c) => c.dataset.anchor === "right");
+  const elsewhere = cells.find((c) => c.dataset.anchor === "top-left");
+  ok("the current anchor is marked", here.getAttribute("aria-pressed") === "true");
+  ok("and cannot be pressed", here.disabled === true);
+  ok("another anchor is not marked", elsewhere.getAttribute("aria-pressed") === "false");
+  ok("and can be pressed", elsewhere.disabled === false);
 
-  // The side it is already on is a readout, not a button: pressing it would close and
-  // reopen the popover to arrive exactly where it already is.
-  const right = [...bar.querySelectorAll("button")].find((b) => b.textContent === "Right");
-  const left = [...bar.querySelectorAll("button")].find((b) => b.textContent === "Left");
-  ok("the current side is marked", right.getAttribute("aria-pressed") === "true");
-  ok("and cannot be pressed", right.disabled === true);
-  ok("another side is not marked", left.getAttribute("aria-pressed") === "false");
-  ok("and can be pressed", left.disabled === false);
-
-  // Resizing does not move the popover, so it must not close and reopen it — that is
-  // the whole reason size is a live control and position is not.
+  // -------------------------------------------------------------
+  // Zoom scales the sheet and leaves the panel alone
+  // -------------------------------------------------------------
+  // The two are deliberately different controls: the panel size covers more of the map,
+  // the zoom does not. Confusing them would make the zoom useless.
   obrCalls.length = 0;
-  await g("resizeDock(80)");
-  await wait(20);
-  ok("wider calls setWidth", calls("popover.setWidth").length === 1);
-  ok("wider does not reopen the sheet", calls("popover.open").length === 0 && calls("popover.close").length === 0);
-  ok("wider adds one step", calls("popover.setWidth")[0][1] === 640);
+  g("zoomSheet(0.1)");
+  ok("zooming stores the new level", g("readDockSafe().zoom") === 1.1);
+  ok("zooming touches the popover not at all", obrCalls.length === 0);
+  ok("zooming scales the sheet", g("document.getElementById('app').style.zoom") === "1.1");
+  const readout = g("document.getElementById('obrZoomReadout')");
+  ok("and says so", readout && readout.textContent === "110%");
 
-  obrCalls.length = 0;
-  await g("resizeDock(-80)");
-  await wait(20);
-  ok("narrower takes one step back", calls("popover.setWidth")[0][1] === 560);
+  for (let i = 0; i < 20; i++) g("zoomSheet(0.1)");
+  ok("zoom stops at its ceiling", g("readDockSafe().zoom") === 1.6);
+  for (let i = 0; i < 30; i++) g("zoomSheet(-0.1)");
+  ok("and at its floor", g("readDockSafe().zoom") === 0.6);
+  g("zoomSheet(0.4)");
+  ok("a stepped zoom stays on one decimal", g("readDockSafe().zoom") === 1);
 
-  // The clamp holds against a hand that keeps pressing.
-  obrCalls.length = 0;
-  for (let i = 0; i < 20; i++) await g("resizeDock(80)");
-  await wait(20);
-  const widths = calls("popover.setWidth").map((c) => c[1]);
-  ok("width stops at the limit rather than running off", Math.max(...widths) === 1280);
+  // -------------------------------------------------------------
+  // Resize handles
+  // -------------------------------------------------------------
+  // Which edges exist depends on the anchor: a right-anchored panel has its right edge
+  // against the window, so pulling it would do nothing.
+  g("writeDockSafe({ anchor: 'right', width: 560, height: 4000, zoom: 1 })");
+  const rightHandles = [...g("(function(){ var d=document.createElement('div'); d.append(buildResizeHandles()); return d; })()").querySelectorAll(".obr-resize")];
+  ok("a right-anchored panel gets three edges and no corner off-screen",
+    rightHandles.map((h) => h.dataset.dir).sort().join(",") === "n,nw,s,sw,w");
 
-  obrCalls.length = 0;
-  for (let i = 0; i < 20; i++) await g("resizeDock(-80)");
-  await wait(20);
-  ok("and does not go below the minimum", Math.min(...calls("popover.setWidth").map((c) => c[1])) === 380);
+  g("writeDockSafe({ anchor: 'top-left', width: 560, height: 420, zoom: 1 })");
+  const cornerHandles = [...g("(function(){ var d=document.createElement('div'); d.append(buildResizeHandles()); return d; })()").querySelectorAll(".obr-resize")];
+  ok("a corner-anchored panel gets two edges and the one corner between them",
+    cornerHandles.map((h) => h.dataset.dir).sort().join(",") === "e,s,se");
 
-  // A bottom dock is full width, so its live axis is height. Resizing the wrong axis
-  // would silently do nothing at all, which is the failure that is hardest to see.
-  g("writeDock(dockStorage(), { side: 'bottom', width: 560, height: 420 })");
-  obrCalls.length = 0;
-  await g("resizeDock(80)");
-  await wait(20);
-  ok("a bottom dock resizes its height, not its width", calls("popover.setHeight").length === 1 && calls("popover.setWidth").length === 0);
-  ok("by one step", calls("popover.setHeight")[0][1] === 500);
+  // A drag resizes live. Size is the one dimension PopoverApi lets us change without a
+  // reload, which is why moving is a press and resizing is a drag.
+  // The drag measures from the panel's REAL width, not the stored one — a stored height
+  // of 4000 means "fill", and dragging from 4000 would throw the edge off the screen on
+  // the first pixel. So the assertions below compare against that real width. An earlier
+  // version compared against the stored 560 and passed with the sign inverted, because
+  // any drag at all cleared 560.
+  const panelWidth = g("window.innerWidth");
+  const dragWest = (fromX, toX) => g(`(function(){
+    var d = document.createElement('div');
+    d.append(buildResizeHandles());
+    document.body.append(d);
+    var handle = d.querySelector('.obr-resize-w');
+    handle.dispatchEvent(new window.PointerEvent('pointerdown', { button: 0, clientX: ${fromX}, clientY: 400, bubbles: true }));
+    window.dispatchEvent(new window.PointerEvent('pointermove', { clientX: ${toX}, clientY: 400, bubbles: true }));
+    window.dispatchEvent(new window.PointerEvent('pointerup', { clientX: ${toX}, clientY: 400, bubbles: true }));
+    d.remove();
+    return true;
+  })()`);
 
-  // Moving IS a close and a reopen, and the save has to be flushed first: the reopened
-  // sheet reads the character back off the token, so an unsaved edit would be undone by
-  // the move that was meant to be cosmetic.
-  g("writeDock(dockStorage(), { side: 'right', width: 560, height: 420 })");
+  g("writeDockSafe({ anchor: 'right', width: 560, height: 4000, zoom: 1 })");
   obrCalls.length = 0;
-  await g("redock('left')");
+  ok("a drag on the west handle runs", dragWest(900, 800) === true);
+  await wait(40);
+  ok("dragging resizes the panel", calls("popover.setWidth").length > 0);
+  // The panel is anchored on its right edge, so pulling the LEFT edge LEFTWARDS makes it
+  // wider. Getting this sign wrong makes the panel shrink when you pull it open, which
+  // is the single most obvious way this feature can be broken.
+  const widened = calls("popover.setWidth").map((c) => c[1]);
+  ok("pulling the west edge left makes it wider", widened.every((n) => n > panelWidth));
+  ok("by roughly the distance dragged", widened.some((n) => Math.abs(n - (panelWidth + 100)) <= 1));
+  ok("dragging never reopens the popover", calls("popover.open").length === 0 && calls("popover.close").length === 0);
+
+  // And the other way, which the sign error would also get wrong.
+  g("writeDockSafe({ anchor: 'right', width: 560, height: 4000, zoom: 1 })");
+  obrCalls.length = 0;
+  dragWest(800, 900);
+  await wait(40);
+  const narrowed = calls("popover.setWidth").map((c) => c[1]);
+  ok("pulling the west edge right makes it narrower", narrowed.every((n) => n < panelWidth));
+  ok("the dragged size is remembered", g("readDockSafe().width") === narrowed[narrowed.length - 1]);
+
+  // -------------------------------------------------------------
+  // Moving
+  // -------------------------------------------------------------
+  g("writeDockSafe({ anchor: 'right', width: 560, height: 4000, zoom: 1 })");
+  obrCalls.length = 0;
+  await g("redock('bottom-left')");
   await wait(50);
   // This window has no token, so there is nothing to flush. That the save IS flushed
-  // before the move — the reopened sheet reads the character back off the token, so an
-  // unsaved edit would be undone by a move meant to be cosmetic — needs a sheet booted
-  // onto a real token, and is tested in dock.test.mjs.
+  // before the move is tested in dock.test.mjs, on a sheet booted onto a real token.
   ok("moving closes the popover", calls("popover.close").length === 1);
   ok("and opens it again", calls("popover.open").length === 1);
   const reopened = calls("popover.open")[0][1];
-  ok("on the side that was asked for", reopened.anchorPosition.left === 0 && reopened.transformOrigin.horizontal === "LEFT");
-  ok("using the live viewport", reopened.height === 900);
-  ok("and the side is remembered", g("readDock(dockStorage()).side") === "left");
+  ok("at the anchor that was asked for",
+    reopened.anchorPosition.left === 0 && reopened.anchorPosition.top === 900);
+  ok("pinned by the matching corner",
+    reopened.transformOrigin.horizontal === "LEFT" && reopened.transformOrigin.vertical === "BOTTOM");
+  ok("using the live viewport", reopened.width <= 1600);
+  ok("and the anchor is remembered", g("readDockSafe().anchor") === "bottom-left");
 
-  // Which is what makes the sheet reopen where it was left: the bar redraws with the
-  // new side marked.
-  const bar2 = g("buildDockControls()");
-  const left2 = [...bar2.querySelectorAll("button")].find((b) => b.textContent === "Left");
-  ok("the rebuilt bar marks the new side", left2.getAttribute("aria-pressed") === "true" && left2.disabled === true);
+  const rebuilt = g("buildDockControls()");
+  const nowHere = [...rebuilt.querySelectorAll(".obr-pad-cell")].find((c) => c.dataset.anchor === "bottom-left");
+  ok("the rebuilt pad marks the new anchor",
+    nowHere.getAttribute("aria-pressed") === "true" && nowHere.disabled === true);
 
   // Closing the sheet closes the popover AND both legacy modal ids: a room that was
   // already open when the extension updated still has the old modal on screen, because

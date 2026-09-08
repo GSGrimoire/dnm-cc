@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.0B</h1>
+    <h1>Version v.2.1</h1>
     <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
 
     <div class="dev-note-panel">
@@ -367,7 +367,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.0B needs extension 1.0; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.1 needs extension 1.1; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +378,25 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.1</span>
+          <span class="version-title">Put the sheet where you want it</span>
+        </summary>
+        <ul>
+        <li><strong>Nine places to put the sheet instead of three.</strong> The header now shows a small grid of the screen. Press a square and the sheet moves there: any corner, any edge, or the middle. The square it is already on is lit.</li>
+        <li><strong>Drag the edges to resize it.</strong> The &minus; and + buttons that changed the panel size are gone, replaced by dragging the panel&apos;s edges and corners, which is what you would reach for anyway. Only the edges facing into the screen can be dragged, since the others are against the window. Resizing is instant and never reloads the sheet.</li>
+        <li><strong>&minus; and + now zoom instead.</strong> They scale the sheet inside the panel and leave the panel where it is, so you can see more of a long sheet without covering more of the map. The zoom is remembered along with the position and the size.</li>
+        <li><strong>The header no longer collapses on itself in a narrow panel.</strong> It is two rows now, and the name gives way before the controls do. Buttons in the docked sheet are smaller to match the width they are actually read at.</li>
+        <li><strong>Rolls made in the Rolls and Actions roller now appear in the sheet&apos;s Recent Rolls.</strong> Before, only rolls made on the sheet itself were kept there. Rolls made while your sheet was closed are picked up when you open it. Hidden rolls stay hidden.</li>
+        <li><strong>The sheet&apos;s dice roller has lost its Attribute and Skill dropdowns.</strong> You already choose those by tapping an Attribute or a Skill on the sheet, and having two controls for one choice meant they could disagree. The roller now shows what you are about to roll, and still has dice and difficulty.</li>
+        <li><strong>Tapping a Skill or an Attribute no longer jumps the sheet.</strong> It scrolled the roller into view every time, which was helpful in a wide window and maddening in a tall thin one. It only scrolls now if the roller is actually off screen.</li>
+        <li>Requires extension 1.1. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.0B</span>
           <span class="version-title">Character codes are treated as untrusted</span>

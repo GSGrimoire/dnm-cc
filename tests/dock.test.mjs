@@ -1,18 +1,17 @@
 // =============================================================
-// The docked sheet — creator v2.0 / extension 1.0
+// The docked sheet — creator v2.1 / extension 1.1
 // -------------------------------------------------------------
-// Replaces popout.test.mjs, which tested the BroadcastChannel relay that v2.0 deleted.
-// It inherits that suite's real job: the dock helpers exist TWICE — once exported from
-// dnm.js for the extension, once copied into the creator's module block — for the same
-// reason createPoolBatcher does, and two copies drift. popout.test.mjs compared the op
-// names on each side of the relay; this compares the two copies over a grid of inputs
-// and fails if they disagree by so much as a pixel.
+// Replaces popout.test.mjs, which tested the BroadcastChannel relay that v2.0 deleted,
+// and inherits its real job: the dock helpers exist TWICE — once exported from dnm.js
+// for the extension, once copied into the creator's module block — for the same reason
+// createPoolBatcher() does, and two copies drift. This compares them over a grid of
+// inputs and fails if they disagree by so much as a pixel.
 //
-// The geometry is worth testing on its own, because it encodes a constraint that is
-// easy to forget and expensive to rediscover: PopoverApi has setWidth and setHeight but
-// NO setPosition, and anchorPosition is read once at open. transformOrigin is what pins
-// a dock to its edge — a right dock pinned by its RIGHT corner grows leftwards when
-// setWidth is called, and one pinned by its left corner would walk off the screen.
+// The geometry is worth testing on its own because it encodes a constraint that is easy
+// to forget and expensive to rediscover: PopoverApi has setWidth and setHeight but NO
+// setPosition, and anchorPosition is read once at open. transformOrigin is what pins a
+// panel to its anchor — one held by its RIGHT corner grows leftwards under setWidth, and
+// one held by its left corner walks off the screen.
 // =============================================================
 import fs from "fs";
 import { JSDOM } from "jsdom";
@@ -44,38 +43,23 @@ const w = dom.window;
 await new Promise((r) => { if (w.document.readyState === "complete") r(); else w.addEventListener("load", r); });
 
 // isAvailable false: this suite is about the pure helpers, and booting the embedded
-// sheet here would only add noise. The functions are declarations, so they are
-// reachable from w.eval even though the block's consts are not.
+// sheet here would only add noise. The functions are declarations, so they are reachable
+// from w.eval even though the block's consts are not.
 w.eval(`const OBR = { isAvailable: false };\n` + body);
 const g = (code) => w.eval(code);
 
-ok("the creator carries its own sheetPopover", g("typeof sheetPopover") === "function");
-ok("and its own clampDock", g("typeof clampDock") === "function");
-ok("and its own readDock/writeDock", g("typeof readDock") === "function" && g("typeof writeDock") === "function");
+for (const fn of ["sheetPopover", "clampDock", "dockSize", "anchorParts", "resizeEdges", "readDock", "writeDock"]) {
+  ok(`the creator carries its own ${fn}`, g(`typeof ${fn}`) === "function");
+}
 
 // -------------------------------------------------------------
 // The two copies agree
 // -------------------------------------------------------------
-// A grid rather than a couple of spot checks: the interesting disagreements are at the
-// clamps and on the small viewport, which is exactly where a hand-copied edit goes
-// wrong. Every side, every limit, and a viewport too small for the dock asked for.
-const sides = ["right", "left", "bottom", "nonsense", undefined];
-const widths = [0, 379, 380, 560, 1280, 1281, 99999, -50, NaN, "560", null];
-const heights = [0, 259, 260, 420, 1000, 1001, -5];
-const viewports = [
-  { width: 1600, height: 900 },
-  { width: 1280, height: 800 },
-  { width: 600, height: 400 },
-  { width: 0, height: 0 },
-  null,
-  { width: "1600", height: "900" },
-];
-
 // Handed over as a JS LITERAL, not as JSON. JSON.stringify turns NaN into null, and
-// Number(null) is 0 — which is finite, so it takes the clamp path while a real NaN
-// takes the fallback path. The first run of this suite reported the two copies
-// disagreeing because of exactly that, and they did not: the harness was lying about
-// the input. A test run on the wrong shape is worse than no test.
+// Number(null) is 0 — which is finite, so it takes the clamp path while a real NaN takes
+// the fallback path. An earlier version of this suite reported the two copies disagreeing
+// because of exactly that, and they did not: the harness was lying about the input. A
+// test run on the wrong shape is worse than no test.
 const js = (v) => {
   if (v === undefined) return "undefined";
   if (v === null) return "null";
@@ -88,12 +72,26 @@ const js = (v) => {
   return JSON.stringify(v);
 };
 
+const anchors = ext.DOCK_ANCHORS.concat(["nonsense", undefined, null]);
+const widths = [0, 319, 320, 560, 4000, 4001, 99999, -50, NaN, "560", null];
+const heights = [0, 219, 220, 420, 4000, 4001, -5, NaN];
+const zooms = [undefined, 0.5, 0.6, 1, 1.6, 1.7, NaN, "1.2", null];
+const viewports = [
+  { width: 1600, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 600, height: 400 },
+  { width: 0, height: 0 },
+  null,
+  { width: "1600", height: "900" },
+];
+
 let mismatches = 0, compared = 0;
-for (const side of sides) {
+for (const anchor of anchors) {
   for (const width of widths) {
     for (const height of heights) {
       for (const viewport of viewports) {
-        const dock = { side, width, height };
+        const zoom = zooms[compared % zooms.length];
+        const dock = { anchor, width, height, zoom };
         const mine = ext.sheetPopover({ url: "u", dock, viewport });
         const theirs = g(`sheetPopover(${js({ url: "u", dock, viewport })})`);
         compared++;
@@ -111,56 +109,122 @@ for (const side of sides) {
 }
 ok(`the two copies of sheetPopover agree on all ${compared} inputs`, mismatches === 0);
 
+// clampDock carries the zoom, which sheetPopover never looks at — so the grid above
+// cannot see a disagreement about it.
+let zoomDrift = 0;
+for (const zoom of zooms.concat([0, -1, 3, 1.05, 0.64])) {
+  const mine = JSON.stringify(ext.clampDock({ anchor: "right", zoom }));
+  const theirs = g(`JSON.stringify(clampDock(${js({ anchor: "right", zoom })}))`);
+  if (mine !== theirs) zoomDrift++;
+}
+ok("the two copies clamp zoom the same way", zoomDrift === 0);
+
+let edgeDrift = 0;
+for (const anchor of anchors) {
+  const mine = JSON.stringify(ext.resizeEdges(anchor));
+  const theirs = g(`JSON.stringify(resizeEdges(${js(anchor)}))`);
+  if (mine !== theirs) edgeDrift++;
+}
+ok("the two copies agree on which edges resize", edgeDrift === 0);
+
 ok("the popover id is not the context menu id", ext.SHEET_POPOVER_ID === "com.thuknights.dnm-obr/sheet-panel");
 ok("and the creator agrees on it", g(`sheetPopover({url:"u",dock:{},viewport:null}).id`) === ext.SHEET_POPOVER_ID);
 
 // -------------------------------------------------------------
-// The geometry pins each dock to its edge
+// Nine anchors, each pinned by the corner that faces its edge
 // -------------------------------------------------------------
 const V = { width: 1600, height: 900 };
-const at = (side, dock = {}) => ext.sheetPopover({ url: "u", dock: { side, ...dock }, viewport: V });
+const at = (anchor, dock = {}) => ext.sheetPopover({ url: "u", dock: { anchor, width: 560, height: 420, ...dock }, viewport: V });
 
-const right = at("right");
-ok("a right dock anchors at the right edge", right.anchorPosition.left === 1600 && right.anchorPosition.top === 0);
+ok("there are nine anchors", ext.DOCK_ANCHORS.length === 9);
+
+const expected = {
+  "top-left":     { pos: [0, 0],      origin: ["LEFT", "TOP"] },
+  "top":          { pos: [800, 0],    origin: ["CENTER", "TOP"] },
+  "top-right":    { pos: [1600, 0],   origin: ["RIGHT", "TOP"] },
+  "left":         { pos: [0, 450],    origin: ["LEFT", "CENTER"] },
+  "center":       { pos: [800, 450],  origin: ["CENTER", "CENTER"] },
+  "right":        { pos: [1600, 450], origin: ["RIGHT", "CENTER"] },
+  "bottom-left":  { pos: [0, 900],    origin: ["LEFT", "BOTTOM"] },
+  "bottom":       { pos: [800, 900],  origin: ["CENTER", "BOTTOM"] },
+  "bottom-right": { pos: [1600, 900], origin: ["RIGHT", "BOTTOM"] },
+};
+let anchorWrong = 0;
+for (const [anchor, want] of Object.entries(expected)) {
+  const p = at(anchor);
+  const posOk = p.anchorPosition.left === want.pos[0] && p.anchorPosition.top === want.pos[1];
+  const originOk = p.transformOrigin.horizontal === want.origin[0] && p.transformOrigin.vertical === want.origin[1];
+  if (!posOk || !originOk) { anchorWrong++; console.log("   wrong:", anchor, JSON.stringify(p.anchorPosition), JSON.stringify(p.transformOrigin)); }
+}
+ok("every anchor lands at its point and is pinned by the matching corner", anchorWrong === 0);
+
 // This is the one that matters for setWidth: pinned by its RIGHT corner, widening moves
 // the left edge inwards. Pinned by its left corner it would grow off the screen.
-ok("a right dock is pinned by its right corner", right.transformOrigin.horizontal === "RIGHT");
-ok("a right dock is full height", right.height === 900);
+ok("a right anchor is pinned by its right corner", at("right").transformOrigin.horizontal === "RIGHT");
+ok("a bottom anchor is pinned by its bottom corner", at("bottom").transformOrigin.vertical === "BOTTOM");
 
-const left = at("left");
-ok("a left dock anchors at the left edge", left.anchorPosition.left === 0);
-ok("a left dock is pinned by its left corner", left.transformOrigin.horizontal === "LEFT");
-ok("a left dock is full height", left.height === 900);
-
-const bottom = at("bottom");
-ok("a bottom dock anchors at the bottom edge", bottom.anchorPosition.top === 900 && bottom.anchorPosition.left === 0);
-ok("a bottom dock is pinned by its bottom corner", bottom.transformOrigin.vertical === "BOTTOM");
-ok("a bottom dock is full width", bottom.width === 1600);
-ok("a bottom dock takes its height from the dock", bottom.height === 420);
-
-// disableClickAway is the whole point of the release: without it the first click on the
-// map dismisses the sheet, which is the behaviour v2.0 exists to remove.
-ok("every dock disables click-away", [right, left, bottom].every((p) => p.disableClickAway === true));
-// MUI's default marginThreshold is 16, and a dock that stops 16px short of the edge
-// looks like a bug rather than a dock.
-ok("every dock sits flush to the edge", [right, left, bottom].every((p) => p.marginThreshold === 0));
-ok("every dock is positioned, not element-anchored", [right, left, bottom].every((p) => p.anchorReference === "POSITION"));
+// disableClickAway is the whole point of the docked sheet: without it the first click on
+// the map dismisses it. marginThreshold defaults to 16 in MUI, and a panel that stops
+// 16px short of the edge looks like a bug rather than a dock.
+const all = ext.DOCK_ANCHORS.map((a) => at(a));
+ok("every anchor disables click-away", all.every((p) => p.disableClickAway === true));
+ok("every anchor sits flush to its point", all.every((p) => p.marginThreshold === 0));
+ok("every anchor is positioned, not element-anchored", all.every((p) => p.anchorReference === "POSITION"));
 
 // -------------------------------------------------------------
-// It never eats the whole window
+// It never covers the whole table
 // -------------------------------------------------------------
-// A laptop, or a browser window on half a screen. A 1280 dock on a 600px viewport would
-// leave no map at all, which is the same problem as the modal.
-const small = ext.sheetPopover({ url: "u", dock: { side: "right", width: 1280 }, viewport: { width: 600, height: 400 } });
-ok("a side dock never takes more than three quarters of the width", small.width === 450);
-const smallBottom = ext.sheetPopover({ url: "u", dock: { side: "bottom", height: 1000 }, viewport: { width: 600, height: 400 } });
-ok("a bottom dock never takes more than three quarters of the height", smallBottom.height === 300);
+// The panel may fill EITHER axis but never both, so the map is always reachable. This is
+// what lets a full-height panel sit beside the map and a full-width one sit below it.
+let covered = 0;
+for (const anchor of ext.DOCK_ANCHORS) {
+  for (const v of [{ width: 1600, height: 900 }, { width: 600, height: 400 }, { width: 3000, height: 2000 }]) {
+    const p = ext.sheetPopover({ url: "u", dock: { anchor, width: 99999, height: 99999 }, viewport: v });
+    const fillsW = p.width >= v.width;
+    const fillsH = p.height >= v.height;
+    if (fillsW && fillsH) { covered++; console.log("   covers everything:", anchor, JSON.stringify(v), p.width + "x" + p.height); }
+  }
+}
+ok("a panel asked to fill everything still leaves the map reachable", covered === 0);
+ok("a full-width panel is capped in height", ext.sheetPopover({ url: "u", dock: { anchor: "bottom", width: 99999, height: 99999 }, viewport: V }).height === 675);
+ok("a narrow panel may still be full height", ext.sheetPopover({ url: "u", dock: { anchor: "right", width: 560, height: 99999 }, viewport: V }).height === 900);
 
-// A viewport that reads zero before the scene is up must not position the sheet at 0,0.
-const noViewport = ext.sheetPopover({ url: "u", dock: {}, viewport: null });
-ok("a missing viewport falls back rather than collapsing", noViewport.anchorPosition.left === 1600 && noViewport.height === 900);
-const zeroViewport = ext.sheetPopover({ url: "u", dock: {}, viewport: { width: 0, height: 0 } });
-ok("a zero viewport falls back too", zeroViewport.anchorPosition.left === 1600);
+// A viewport that reads zero before the scene is up must not position the panel at 0,0.
+ok("a missing viewport falls back rather than collapsing",
+  ext.sheetPopover({ url: "u", dock: {}, viewport: null }).anchorPosition.left === 1600);
+ok("a zero viewport falls back too",
+  ext.sheetPopover({ url: "u", dock: {}, viewport: { width: 0, height: 0 } }).anchorPosition.left === 1600);
+
+// -------------------------------------------------------------
+// A 1.0 dock still opens where it used to
+// -------------------------------------------------------------
+// 1.0 stored a `side`, and each side implied a size the stored object did not hold: a
+// side dock was full height whatever its stored height, and the bottom dock was full
+// width whatever its stored width. Carrying the anchor across without that fill would
+// silently shrink a bottom dock from the whole width to 560px on the update.
+const legacyRight = ext.sheetPopover({ url: "u", dock: { side: "right", width: 560, height: 420 }, viewport: V });
+ok("a 1.0 right dock is still right and still full height", legacyRight.width === 560 && legacyRight.height === 900);
+ok("and still pinned by its right corner", legacyRight.transformOrigin.horizontal === "RIGHT");
+const legacyBottom = ext.sheetPopover({ url: "u", dock: { side: "bottom", width: 560, height: 420 }, viewport: V });
+ok("a 1.0 bottom dock is still full width and still 420 tall", legacyBottom.width === 1600 && legacyBottom.height === 420);
+const legacyLeft = ext.sheetPopover({ url: "u", dock: { side: "left", width: 560, height: 420 }, viewport: V });
+ok("a 1.0 left dock survives even though Left is no longer offered", legacyLeft.anchorPosition.left === 0 && legacyLeft.height === 900);
+// A 1.1 dock carrying both keys is a 1.1 dock: its own size wins over the legacy fill.
+const both = ext.clampDock({ side: "bottom", anchor: "center", width: 700, height: 500 });
+ok("an anchor beats a leftover side", both.anchor === "center" && both.width === 700 && both.height === 500);
+
+// -------------------------------------------------------------
+// Which edges can be dragged
+// -------------------------------------------------------------
+// A right-anchored panel has its right edge against the window, so pulling it would do
+// nothing; only the edges facing into the screen are draggable.
+ok("a right anchor offers only its left edge and the two vertical ones",
+  ext.resizeEdges("right").sort().join("") === "nsw");
+ok("a centred anchor offers all four", ext.resizeEdges("center").sort().join("") === "ensw");
+ok("a top-left anchor offers only the two facing in", ext.resizeEdges("top-left").sort().join("") === "es");
+ok("a bottom-right anchor offers only the two facing in", ext.resizeEdges("bottom-right").sort().join("") === "nw");
+ok("an unknown anchor falls back to the default's edges",
+  ext.resizeEdges("nonsense").join("") === ext.resizeEdges("right").join(""));
 
 // -------------------------------------------------------------
 // The stored dock is untrusted
@@ -169,36 +233,35 @@ ok("a zero viewport falls back too", zeroViewport.anchorPosition.left === 1600);
 // hand. Same rule the character code follows: clamp on the way OUT of storage.
 const fakeStore = (value) => ({ getItem: () => value, setItem: () => {} });
 
-ok("no stored dock is the default", ext.readDock(fakeStore(null)).side === "right");
-ok("unparseable JSON is the default", ext.readDock(fakeStore("{{{")).side === "right");
+ok("no stored dock is the default", ext.readDock(fakeStore(null)).anchor === "right");
+ok("unparseable JSON is the default", ext.readDock(fakeStore("{{{")).anchor === "right");
 ok("a string instead of an object is the default", ext.readDock(fakeStore('"right"')).width === 560);
-ok("an unknown side is the default", ext.readDock(fakeStore('{"side":"ceiling"}')).side === "right");
-ok("a width far past the limit is clamped", ext.readDock(fakeStore('{"width":99999}')).width === 1280);
-ok("a negative width is clamped", ext.readDock(fakeStore('{"width":-4000}')).width === 380);
+ok("an unknown anchor is the default", ext.readDock(fakeStore('{"anchor":"ceiling"}')).anchor === "right");
+ok("a width far past the limit is clamped", ext.readDock(fakeStore('{"width":99999}')).width === 4000);
+ok("a negative width is clamped", ext.readDock(fakeStore('{"width":-4000}')).width === 320);
 ok("a non-numeric width falls back", ext.readDock(fakeStore('{"width":"wide"}')).width === 560);
-ok("a null dock survives", ext.readDock(fakeStore("null")).side === "right");
-// An array is an object, and its .side is undefined — the default path, not a throw.
-ok("an array survives", ext.readDock(fakeStore("[1,2,3]")).side === "right");
-// The clamp returns a fresh object with exactly three keys, so nothing extra rides in.
-ok("nothing else rides along", Object.keys(ext.readDock(fakeStore('{"side":"left","evil":1}'))).join() === "side,width,height");
+ok("a wild zoom is clamped", ext.readDock(fakeStore('{"zoom":99}')).zoom === 1.6);
+ok("a tiny zoom is clamped", ext.readDock(fakeStore('{"zoom":0.01}')).zoom === 0.6);
+ok("a non-numeric zoom falls back", ext.readDock(fakeStore('{"zoom":"big"}')).zoom === 1);
+// A zoom is stepped by 0.1 and stored; floating point would otherwise put 0.7000000000000001
+// into a readout built from it.
+ok("zoom is kept to one decimal", ext.readDock(fakeStore('{"zoom":1.2345}')).zoom === 1.2);
+ok("a null dock survives", ext.readDock(fakeStore("null")).anchor === "right");
+ok("an array survives", ext.readDock(fakeStore("[1,2,3]")).anchor === "right");
+ok("nothing else rides along",
+  Object.keys(ext.readDock(fakeStore('{"anchor":"left","evil":1}'))).sort().join() === "anchor,height,width,zoom");
 
-// A storage that throws is a frame with cookies blocked, not a bug.
 const throwingStore = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
-ok("a storage that throws on read gives the default", ext.readDock(throwingStore).side === "right");
-ok("a storage that throws on write still returns the dock", ext.writeDock(throwingStore, { side: "bottom" }).side === "bottom");
+ok("a storage that throws on read gives the default", ext.readDock(throwingStore).anchor === "right");
+ok("a storage that throws on write still returns the dock", ext.writeDock(throwingStore, { anchor: "center" }).anchor === "center");
 
-// Round trip.
 let held = null;
 const realStore = { getItem: () => held, setItem: (k, v) => { held = v; } };
-ext.writeDock(realStore, { side: "bottom", width: 700, height: 500 });
+ext.writeDock(realStore, { anchor: "bottom-left", width: 700, height: 500, zoom: 1.2 });
 const back = ext.readDock(realStore);
-ok("a written dock reads back", back.side === "bottom" && back.width === 700 && back.height === 500);
-ext.writeDock(realStore, { side: "left", width: 99999, height: 500 });
-ok("and is clamped on the way in as well", ext.readDock(realStore).width === 1280);
+ok("a written dock reads back", back.anchor === "bottom-left" && back.width === 700 && back.height === 500 && back.zoom === 1.2);
 
-// The creator's copy has to reject the same things, or a hand-edited localStorage would
-// open a sheet the extension and the sheet disagree about.
-for (const [name, stored] of [["unknown side", '{"side":"ceiling"}'], ["huge width", '{"width":99999}'], ["garbage", "{{{"]]) {
+for (const [name, stored] of [["unknown anchor", '{"anchor":"ceiling"}'], ["huge width", '{"width":99999}'], ["garbage", "{{{"], ["wild zoom", '{"zoom":99}']]) {
   const mine = JSON.stringify(ext.readDock(fakeStore(stored)));
   const theirs = g(`JSON.stringify(readDock({ getItem: () => ${JSON.stringify(stored)} }))`);
   ok(`both copies clamp ${name} the same way`, mine === theirs);
@@ -207,8 +270,8 @@ for (const [name, stored] of [["unknown side", '{"side":"ceiling"}'], ["huge wid
 // -------------------------------------------------------------
 // openSheetPopover is the one route in
 // -------------------------------------------------------------
-// The roller's party list and the token context menu both call this. They used to hold
-// a modal id and a URL each, and the comment in roller.js warned that opening under a
+// The roller's party list and the token context menu both call this. They used to hold a
+// modal id and a URL each, and the comment in roller.js warned that opening under a
 // second id would let one token's sheet be open twice, both saving over each other.
 const opened = [];
 const stubObr = (viewport) => ({
@@ -222,40 +285,31 @@ const stubObr = (viewport) => ({
 await ext.openSheetPopover(stubObr({ width: 1920, height: 1080 }), "token-1", null);
 ok("it opens one popover", opened.length === 1);
 ok("it points at the published creator", opened[0].url === "https://gsgrimoire.github.io/dnm-cc/?item=token-1");
-ok("it uses the live viewport", opened[0].anchorPosition.left === 1920 && opened[0].height === 1080);
+ok("it uses the live viewport", opened[0].anchorPosition.left === 1920);
 
-// A token id is an Owlbear id, but it reaches the URL as a query value either way.
 await ext.openSheetPopover(stubObr({ width: 1600, height: 900 }), "a b&c=d", null);
 ok("the item id is escaped into the URL", opened[1].url.endsWith("?item=a%20b%26c%3Dd"));
 
-// Before a scene is up, the viewport read throws. Opening the sheet anyway beats
-// refusing to open it.
 await ext.openSheetPopover(stubObr(null), "token-2", null);
 ok("a viewport that throws still opens the sheet", opened[2].anchorPosition.left === 1600);
 
-// And it honours the stored side, which is what makes the sheet reopen where you left it.
 held = null;
-ext.writeDock(realStore, { side: "left", width: 640 });
+ext.writeDock(realStore, { anchor: "top-left", width: 640, height: 480 });
 await ext.openSheetPopover(stubObr({ width: 1600, height: 900 }), "token-3", realStore);
-ok("it opens on the stored side", opened[3].anchorPosition.left === 0 && opened[3].transformOrigin.horizontal === "LEFT");
-ok("at the stored width", opened[3].width === 640);
+ok("it opens at the stored anchor", opened[3].anchorPosition.left === 0 && opened[3].anchorPosition.top === 0);
+ok("at the stored size", opened[3].width === 640 && opened[3].height === 480);
 
 // -------------------------------------------------------------
 // Moving the sheet saves it first
 // -------------------------------------------------------------
-// The reopened sheet reads the character back off the token, so an edit still sitting
-// in the 400ms save debounce would be undone by a move that was meant to be cosmetic.
-// v1.29's Pop out button flushed the save for exactly this reason and the reason
-// survives it, because a redock is a genuine reload.
+// The reopened sheet reads the character back off the token, so an edit still sitting in
+// the 400ms save debounce would be undone by a move that was meant to be cosmetic.
 //
-// This needs a sheet booted onto a REAL token — `ready` and `tokenId` are `let`
-// bindings in the module block, and jsdom gives each eval its own scope for those, so
-// they cannot be set from a test. Faking them was tried and quietly did nothing: commit()
-// returned early on `ready` being false and the ordering assertion passed on an empty
-// list. So the sheet is booted the way Owlbear boots it, with ?item= in the URL and a
-// character code on the token, and the character is built the way the app builds one.
+// This needs a sheet booted onto a REAL token — `ready` and `tokenId` are `let` bindings
+// in the module block, and jsdom gives each eval its own scope for those, so they cannot
+// be set from a test. Faking them was tried and quietly did nothing: commit() returned
+// early on `ready` being false and the ordering assertion passed on an empty list.
 {
-  // Built in the window already open above, which has the classic script live.
   const code = g(`(function(){
     var c = state.character = getDefaultCharacter();
     var arch = Object.keys(DM_DATA.archetypes)[0];
@@ -316,16 +370,91 @@ ok("at the stored width", opened[3].width === 640);
 
   ok("the fixture sheet loaded onto the token", g2("state.character.name") === "Dock Fixture");
 
-  // A real edit through a real setter, then a move before the debounce has fired.
   trace.length = 0;
   g2("state.character.name = 'Edited'; queueSave();");
-  await g2("redock('bottom')");
+  await g2("redock('center')");
   await new Promise((r) => setTimeout(r, 100));
 
   ok("the token is written before the popover closes",
     trace.indexOf("write") >= 0 && trace.indexOf("write") < trace.indexOf("close"));
   ok("and the popover is reopened after", trace.indexOf("close") < trace.indexOf("open"));
   ok("the move did not wait for the debounce", trace.filter((t) => t === "write").length === 1);
+  ok("the new anchor is remembered", g2("readDockSafe().anchor") === "center");
+
+  // -------------------------------------------------------------
+  // Rolls from the room reach the sheet (v2.1)
+  // -------------------------------------------------------------
+  // Until v2.1 Recent Rolls was written in exactly one place, by a roll made on this
+  // sheet. A roll made in the extension's roller reached the shared log and stopped
+  // there. It is read from the LOG rather than from broadcasts on purpose: the log is
+  // already the shared record, already sanitised by the extension before anything is
+  // written, and reading it catches up rolls made while this sheet was closed.
+  //
+  // Tested here rather than in embedded.test.mjs because it needs a sheet booted onto a
+  // real token: reconcileRolls() does nothing until `ready` is true, and `ready` is a
+  // `let` in the module block that no test can reach from outside.
+  const logRoll = (over) => Object.assign({
+    id: "r1", t: 1000, who: "Dock Fixture", an: "Might", av: 9, sn: "Fight", sv: 1,
+    detail: [{ d: 4, kind: "success" }, { d: 18, kind: "fail" }],
+    diff: 1, succ: 1, comp: 0, pass: true, gain: 0, compAt: 20,
+  }, over);
+  const room = (entries) => ({ "com.thuknights.dnm-rolls/state": { momentum: 0, threat: 0, log: entries } });
+  const recent = () => JSON.parse(g2("JSON.stringify(normalizeRecentRolls())"));
+  const adopt = (entries) => g2(`adoptRoom(${JSON.stringify(room(entries))})`);
+
+  // The move test above renamed the character to prove the save flushed. Set it back
+  // explicitly rather than inheriting whatever the previous assertions left behind — a
+  // fixture the assertions above already mutated is not a fixture.
+  g2("state.character.name = 'Dock Fixture'; state.character.recentRolls = [];");
+  adopt([logRoll({})]);
+  let list = recent();
+  ok("a roll for this character is picked up", list.length === 1);
+  ok("with its dice", list.length === 1 && list[0].d.join(",") === "4,18");
+  ok("and the threshold it was made under", list.length === 1 && list[0].at === 20);
+
+  // The same entry arriving again is the same roll. Without the id it would be listed
+  // once per metadata change, which is every pool press at the table.
+  adopt([logRoll({})]);
+  ok("the same roll is not added twice", recent().length === 1);
+
+  adopt([logRoll({ id: "r2", who: "Someone Else" })]);
+  ok("another character's roll is ignored", recent().length === 1);
+
+  // Matching is on a normalised name, the same rule bond effects use, so spacing and
+  // case do not decide whether your own roll reaches your sheet.
+  adopt([logRoll({ id: "r3", who: "  dock fixture  ", t: 2000 })]);
+  ok("the name match ignores case and spacing", recent().length === 2);
+
+  // A concealed roll stays concealed. The roller decides who may draw one, and quietly
+  // copying it onto a sheet would be a way around that decision.
+  adopt([logRoll({ id: "r4", conceal: "hidden", t: 3000 })]);
+  ok("a concealed roll is not copied to the sheet", recent().length === 2);
+
+  adopt([{ id: "a1", t: 4000, kind: "action", who: "Dock Fixture", label: "Manual adjustment", detail: "added 2 Threat" }]);
+  ok("an action entry is not a roll", recent().length === 2);
+
+  // Newest first, and a roll from the log can be OLDER than one already held — so the
+  // merge sorts rather than assuming the new ones go on top.
+  g2("state.character.recentRolls = [];");
+  adopt([logRoll({ id: "n1", t: 1000 }), logRoll({ id: "n2", t: 3000 }), logRoll({ id: "n3", t: 2000 })]);
+  ok("the merged list is newest first", recent().map((r) => r.t).join(",") === "3000,2000,1000");
+
+  // Everything here crossed a broadcast channel open to the whole room.
+  g2("state.character.recentRolls = [];");
+  adopt([logRoll({
+    id: "r5", av: 9999, sv: -3, diff: 99, succ: 1000000, gain: -5, compAt: 999,
+    detail: new Array(60).fill({ d: 99, kind: "success" }),
+  })]);
+  const clamped = recent()[0];
+  ok("a hostile entry is clamped on the way in", !!clamped
+    && clamped.av === 20 && clamped.sv === 0 && clamped.df === 5
+    && clamped.su === 99 && clamped.gn === 0 && clamped.at === 20);
+  ok("and its dice are bounded", !!clamped && clamped.d.length <= 20 && clamped.d.every((n) => n >= 1 && n <= 20));
+
+  // An unnamed character would match every unnamed roll at the table.
+  g2("state.character.name = ''; state.character.recentRolls = [];");
+  adopt([logRoll({ id: "r6", who: "" })]);
+  ok("an unnamed character picks up nothing", recent().length === 0);
 }
 
 // -------------------------------------------------------------
@@ -333,11 +462,12 @@ ok("at the stored width", opened[3].width === 640);
 // -------------------------------------------------------------
 // Named explicitly so that reintroducing it is a decision rather than an accident. It
 // never once connected in play, and the note in dnm.js says why.
-ok("dnm.js exports no popout channel", ext.POPOUT_CHANNEL === undefined && ext.POPOUT_PROTOCOL === undefined);
+//
 // Comments stripped first: the notes above sheetPopover() and the boot switch both
 // describe the window.open() route in order to say why it is gone, and a bare substring
 // search finds those and calls the prose a regression.
 const code = body.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+ok("dnm.js exports no popout channel", ext.POPOUT_CHANNEL === undefined && ext.POPOUT_PROTOCOL === undefined);
 ok("the creator opens no BroadcastChannel", !code.includes("new BroadcastChannel"));
 ok("the creator has no popout query flag", !code.includes('get("popout")'));
 ok("and no window.open", !code.includes("window.open("));
@@ -350,10 +480,8 @@ ok("roller.js opens the sheet as a popover", rollerSrc.includes("openSheetPopove
 // -------------------------------------------------------------
 // Versions moved together
 // -------------------------------------------------------------
-// The creator reaching 2.0 takes the extension to 1.0 — they are one product and a
-// headline release should read that way on both halves.
 const manifest = JSON.parse(fs.readFileSync(new URL("../out/dnm-obr/manifest.json", import.meta.url), "utf8"));
-ok("the manifest is at 1.0", manifest.version === "1.0");
+ok("the manifest is at 1.1", manifest.version === "1.1");
 ok("EXT_VERSION matches the manifest", ext.EXT_VERSION === manifest.version);
 
 console.log(`\ndock: ${pass} passed, ${fail} failed`);
@@ -363,5 +491,6 @@ Not covered here, and still live checks in UPGRADE_NOTES.md:
   · that the map stays interactive behind a popover with disableClickAway
   · that the sheet popover and the roller's action popover can be open at once
   · that setWidth on an open popover resizes without reloading the sheet
+  · that a pointer drag on a resize handle keeps reporting once it leaves the handle
 `);
 process.exit(fail ? 1 : 0);

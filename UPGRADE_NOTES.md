@@ -2,6 +2,191 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.1 / 1.1 — Put the sheet where you want it
+
+Creator **v2.1**, extension **1.1**. Both change; deploy the extension first. No room
+metadata schema change, and no change to the character code format.
+
+A number on both halves: several deliberate changes, one of which the table could not do
+before. All of it comes from Gus's QA of 2.0.
+
+## What Owlbear actually allows, settled
+
+Asked whether we could build Roll20's fully movable sheet. The answer is no, and it is
+structural rather than a matter of effort, so it is written down here to stop it being
+re-litigated.
+
+Roll20 IS the page. Its sheet is a div it owns, so it can be absolutely positioned and
+dragged like any other element. Ours is a separate site in an iframe Owlbear creates and
+places. We control everything inside the frame and nothing about where it sits.
+
+Checked against all twelve APIs in SDK 3.1.0, which npm confirms is the current release:
+
+| API | geometry it exposes |
+|---|---|
+| Popover | open, close, getWidth, setWidth, getHeight, setHeight |
+| Modal | open, close. Nothing else, not even size |
+| Action | the right-hand drawer: size only, Owlbear owns the position |
+
+**There is no setPosition anywhere**, and `anchorPosition` is read once at open. So size
+is live and free; position costs a close and a reopen, which reloads the sheet.
+
+The workaround that looks promising and is not: a full-screen modal with no backdrop, our
+own floating sheet drawn inside it. It fails on the map. Our frame would cover everything,
+and `disablePointerEvents` makes the frame transparent to hit-testing entirely — content
+in a different document cannot re-enable itself from the inside. You get a draggable sheet
+over a dead map, or a live map under a dead sheet. That last step is reasoning about
+pointer events rather than a room test, and is the one part of this worth proving before
+anyone acts on it.
+
+## Nine anchors instead of three sides
+
+`DOCK_SIDES` becomes `DOCK_ANCHORS`, a 3x3 grid. Placing the sheet was always "reopen at
+these coordinates", so the anchor is only which coordinates, and six more of them cost
+almost nothing.
+
+`anchorParts()` splits an anchor into its horizontal and vertical halves, and each half
+picks both the anchor point and the `transformOrigin` corner. That corner is what pins a
+panel to its edge: one held by its RIGHT corner grows leftwards under `setWidth`, one held
+by its left corner walks off the screen.
+
+**A 1.0 dock still opens where it used to, and that needed care.** Each old side implied a
+size the stored object did not hold: a side dock was full height whatever its stored
+height, and the bottom dock was full width whatever its stored width. Carrying the anchor
+across without that fill would have silently shrunk a bottom dock from the whole width to
+560px. `LEGACY_SIDES` restores the axis each side used to fill. A dock carrying both
+`side` and `anchor` is a 1.1 dock and its own size wins.
+
+**The one invariant: the panel may fill either axis but never both.** That is what lets a
+full-height panel sit beside the map and a full-width one sit below it, and guarantees
+some map is always reachable. Width is decided first and height gives way, so the result
+does not depend on which edge was dragged last — a geometry that answered differently for
+the same stored dock would be impossible to test.
+
+## Resize by dragging, zoom by pressing
+
+The `−` and `+` buttons resized the panel. They were the wrong control and they crowded a
+header that was already collapsing, so they now zoom instead, and resizing is a drag.
+
+- **Resize** uses `setWidth`/`setHeight`, which do not reload. `resizeEdges()` returns
+  only the edges facing into the screen, because the others are against the window;
+  corners appear where two of them meet. `setWidth` is called once per animation frame,
+  not once per `pointermove` — a move event fires far faster than a frame can be drawn and
+  each call is a real message across the SDK bus.
+- **Zoom** is CSS `zoom` on `#app`, which reflows the layout at the new scale. A transform
+  would keep the original 1280px layout and add horizontal scrolling, which is the
+  opposite of what is wanted. It never touches the popover.
+
+The drag measures from the panel's REAL width, not the stored one: a stored height of 4000
+means "fill", and dragging from 4000 would throw the edge off the screen on the first
+pixel.
+
+## Rolls from the roller reach the sheet
+
+Recent Rolls was written in exactly one place, by a roll made on this sheet, so the same
+character's rolls lived in two places depending on where they were made.
+
+`reconcileRolls()` reads the ROOM LOG rather than listening for broadcasts, on purpose:
+the log is already the shared record, already sanitised by the extension's
+`sanitizeEntry()` before anything is written, and reading it catches up rolls made while
+the sheet was closed. A broadcast listener would only ever see rolls made while it
+happened to be open.
+
+Matching is by character NAME through `bondNameKey()`, because that is what the roller
+knows — it has a token's character name, not a character id — and reusing the bond
+normaliser keeps one rule for "is this me" rather than two.
+
+Three rules that are not obvious:
+
+- **Every roll now carries an id**, stamped once in `doRoll()` and used by both the local
+  record and the entry broadcast to the room. Without that a sheet's own roll would come
+  back from the log as a stranger and be listed beside itself.
+- **A concealed roll is skipped.** The roller decides who may draw one, and quietly
+  copying it onto a sheet would be a way around that decision.
+- **An unnamed character picks up nothing**, or it would match every unnamed roll at the
+  table.
+
+Everything here crossed a broadcast channel open to the whole room, so every field is
+clamped on the way in as well as on the way out.
+
+## Smaller things from the same QA
+
+- **The header is two rows.** At 380px the single row put the character name under Copy
+  code and clipped BOTTOM to BOTTO. The identity row gives way first, because the sheet
+  below it already says whose it is.
+- **`.btn` is smaller in the embedded sheet below 700px.** It is sized for the standalone
+  page — 0.95rem, 28px of side padding, uppercase tracking — which turned every action
+  into a full-width block. Scoped to `.obr-embedded` and to narrow widths, so the
+  standalone creator at its designed width is untouched. The iframe is its own viewport,
+  so that media query reads the PANEL width, which is the right thing to decide it.
+- **The roller lost its Attribute and Skill dropdowns.** They duplicated a choice already
+  made by tapping the boxes on the sheet, and a duplicate control that can disagree with
+  the thing it duplicates is worse than no control. What is left is a readout.
+- **`pickRollStat()` no longer scrolls on every pick.** It scrolled the roller into view
+  each time, which was a kindness in the 1280px modal and yanks you to the middle of a
+  docked panel. It now measures after the re-render and scrolls only when the roller is
+  genuinely off screen.
+
+## Deliberately left out
+
+- **The drag-ghost.** Gus wants it, and it is the natural next step now that snap points
+  exist: both are the same operation, so a drag only has to produce coordinates the snap
+  quantises. The route is to inflate the panel to the full viewport with `setWidth` and
+  `setHeight` — which QA confirmed is reload-free — draw the ghost inside it, and reopen
+  at the target on release. Three things need a live check first: whether a popover with
+  its paper hidden is genuinely transparent so the map shows through, whether inflating
+  to the full viewport is reload-free at that size and not just at small increments, and
+  whether the pointer keeps reporting for the whole gesture. Snap points ship first
+  because they need none of that.
+- **The full responsive pass over the sheet.** Gus chose targeted fixes plus zoom, on the
+  theory that zoom does most of the work and a session at the table says what is left.
+- **The equipment catalogue**, still 89% of the rendered sheet and still rebuilt on every
+  render inside a collapsed section. Unchanged and still the biggest performance win
+  available.
+
+## Live checks — none of this is covered by a suite
+
+1. The sheet opens where you left it, at the size and zoom you left it.
+2. Press each of the nine squares. It lands on that corner, edge or centre, flush.
+3. A 1.0 right dock is still full height after the update; a 1.0 bottom dock is still full
+   width.
+4. Drag each available edge and the corner. It resizes live, with no reload.
+5. The edges against the window offer no handle.
+6. Widen until it stops. Some map is still visible.
+7. Zoom in and out. The sheet scales, the panel does not move.
+8. Roll in the Rolls and Actions roller. It appears in the sheet's Recent Rolls.
+9. Roll on the sheet. It appears once, not twice.
+10. A GM's hidden roll does not appear on the sheet.
+11. Tap a Skill and an Attribute. The readout changes and the sheet does not jump.
+12. The header survives the narrowest panel you can drag to.
+
+## Testing
+
+```sh
+cd dnm-cc
+npm install jsdom playwright --no-save
+mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
+rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
+for t in creator embedded party dock security; do node tests/$t.test.mjs; done
+```
+
+Current: creator 167, embedded 80, party 102, dock 90, security 92. All passing.
+
+Nine mutations were run against the staged copies to prove the new assertions fail without
+the fix: pinning an anchor by the wrong corner, dropping the never-cover-everything rule,
+losing the legacy fill axis, unfiltering `resizeEdges()`, inverting the drag direction,
+zooming nothing, and removing each of the roll merge's three guards.
+
+**The creator's dock helpers are now GENERATED from `dnm.js`** rather than hand-copied,
+which is the only reason a 3x3 rewrite of duplicated code was safe to attempt. Regenerate
+rather than edit the copy; `dock.test.mjs` compares them over 6336 inputs.
+
+One harness lesson, and it is the same one as last release wearing a different hat: the
+drag test compared the resized width against the STORED width and passed with the drag
+direction inverted, because the drag measures from the panel's real width and any drag at
+all cleared the stored number. An assertion has to compare against the thing the code
+actually starts from.
+
 # v2.0B / 1.0 — A character code is untrusted input, and the parser now says so
 
 Creator **v2.0B**. The extension is unchanged and stays at **1.0**, so there is nothing to
