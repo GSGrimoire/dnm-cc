@@ -375,6 +375,9 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   const controls = g("(function(){ var c = buildDockControls(); document.body.append(c); return c; })()");
   const cells = [...controls.querySelectorAll(".obr-pad-cell")];
   ok("the position pad offers nine anchors", cells.length === 9);
+  // v2.2. The character name is gone from the header. It was the first thing squeezed out
+  // at a narrow width and the sheet immediately below says whose it is in readable type.
+  ok("the header carries no character name", !g("!!document.querySelector('#obrBar .obr-name')"));
   ok("every cell names its anchor", cells.every((c) => !!c.dataset.anchor));
   // Where it already is: a readout, not a button. Pressing it would close and reopen the
   // popover to arrive exactly where it already was.
@@ -460,7 +463,24 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   await wait(40);
   const narrowed = calls("popover.setWidth").map((c) => c[1]);
   ok("pulling the west edge right makes it narrower", narrowed.every((n) => n < panelWidth));
-  ok("the dragged size is remembered", g("readDockSafe().width") === narrowed[narrowed.length - 1]);
+  ok("the dragged size is remembered",
+    g("dockSizeFor(readDockSafe(), 'right').width") === narrowed[narrowed.length - 1]);
+
+  // v2.2. A size per anchor. Dragging the panel at one anchor must not disturb the size
+  // it has at another, which is the point of the change: a sheet along the bottom wants
+  // to be broad and short and the same sheet at a side wants to be narrow and tall.
+  // Moved, not rewritten: a dock written without a sizes map is a FRESH dock and
+  // correctly resets every anchor to its default, which would erase the size just
+  // dragged above and leave this asserting nothing.
+  g("writeDockSafe({ ...readDockSafe(), anchor: 'bottom' })");
+  obrCalls.length = 0;
+  dragWest(800, 700);
+  await wait(40);
+  const bottomWidth = g("dockSizeFor(readDockSafe(), 'bottom').width");
+  const rightWidth = g("dockSizeFor(readDockSafe(), 'right').width");
+  ok("dragging at the bottom changes the bottom's size", bottomWidth > 0);
+  ok("and leaves the right's size alone", rightWidth === narrowed[narrowed.length - 1]);
+  ok("the anchor is unchanged by a resize", g("readDockSafe().anchor") === "bottom");
 
   // -------------------------------------------------------------
   // Moving

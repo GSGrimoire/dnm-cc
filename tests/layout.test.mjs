@@ -102,6 +102,24 @@ async function measure(width) {
       roll: rect(".dice-roll-btn"),
       picked: rect(".dice-field.dice-picked"),
       ident: rect(".owned-item-ident"),
+      // v2.2. Every tag on an owned item, and whether any of them is clipped or hangs
+      // past the panel. The catalogue wraps its tags with flex and this did not, which is
+      // why QA saw an item's tags cut off while the same tags in the catalogue were fine.
+      itemTags: (() => {
+        const meta = document.querySelector(".owned-item-ident .owned-item-meta");
+        if (!meta) return null;
+        const box = meta.getBoundingClientRect();
+        const tags = [...meta.children].map((t) => t.getBoundingClientRect());
+        // NOT scrollWidth. Every tag carries a hover tooltip as a hidden child, laid out
+        // far to the right, so the row's scrollWidth measures the tooltips and reports a
+        // clip that is not there. Measure the tags themselves.
+        return {
+          count: tags.length,
+          past: tags.filter((t) => t.right > box.right + 1 || t.right > w + 1).length,
+          zeroWidth: tags.filter((t) => t.width < 8).length,
+          rows: new Set(tags.map((t) => Math.round(t.top))).size,
+        };
+      })(),
       catalogue: rect(".catalogue-grid"),
     };
   }, width);
@@ -125,6 +143,12 @@ for (const width of [320, 400, 520, 560, 1280]) {
   ok(`${width}px: an item's name column has width`, m.ident && m.ident.w > 40);
   ok(`${width}px: the Roll button is inside the panel`, m.roll && m.roll.r <= width + 1);
   ok(`${width}px: the catalogue grid is inside the panel`, m.catalogue && m.catalogue.r <= width + 1);
+  ok(`${width}px: the item has tags to check`, m.itemTags && m.itemTags.count > 3);
+  ok(`${width}px: no item tag hangs past its row`, m.itemTags && m.itemTags.past === 0);
+  ok(`${width}px: no item tag is squashed to nothing`, m.itemTags && m.itemTags.zeroWidth === 0);
+  // Twelve tags cannot fit on one line in a narrow panel, so if they are all on one row
+  // they are not wrapping — which is the state that ran them past the edge.
+  ok(`${width}px: the tags wrap onto several rows`, m.itemTags && (width > 700 || m.itemTags.rows > 1));
 }
 
 await browser.close();

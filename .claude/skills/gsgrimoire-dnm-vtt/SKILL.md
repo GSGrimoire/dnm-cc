@@ -198,6 +198,13 @@ Four details that each look like a bug when got wrong:
 The popover id is `${ID}/sheet-panel`, deliberately **not** `${ID}/sheet` — that string is
 already the token context menu item.
 
+**Each anchor keeps its OWN size** (1.2). `clampDock()` returns `{ anchor, zoom, sizes }`
+with an entry for every anchor; `dockSizeFor()` reads one and `withDockSize()` replaces
+one, and the resize drag must write through the latter or dragging at one anchor silently
+resizes the rest. Defaults follow the anchor's shape: sides and centre are tall, top and
+bottom are broad, corners are a box. A 1.1 dock's single flat size seeds only the anchor
+it belonged to.
+
 **The creator's copy of the dock helpers is GENERATED from `dnm.js`**, not hand-copied.
 Regenerate it rather than editing it; that is what made a 3x3 rewrite of duplicated code
 safe to attempt. `dock.test.mjs` compares the two copies over thousands of inputs. The
@@ -429,6 +436,14 @@ between the test environment and the real one: a fixture the earlier assertions 
 normalised, an assertion sitting next to the thing it cared about rather than on it, and a
 test environment with the SDK removed. Green means the assertions passed, not that the
 thing works.
+
+**When an assertion fails against code you believe is correct, suspect the ASSERTION
+first.** Four times in five releases a first-draft assertion measured something adjacent to
+the thing it cared about: a character name instead of the header bar it sat next to, a
+regex over rendered HTML instead of the parsed DOM, a stored width instead of the real one
+the drag starts from, and `scrollWidth` on a tag row that was actually measuring the hidden
+tooltips inside each tag. Go and look at what it is really measuring before changing the
+code.
 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.

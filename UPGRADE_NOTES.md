@@ -2,6 +2,87 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.2 / 1.2 — Every position remembers its own size
+
+Creator **v2.2**, extension **1.2**. Both change; deploy the extension first. No room
+metadata schema change and no change to the character code.
+
+A number: the dock stores something it did not store before. All of it comes from Gus's
+first real session on the docked sheet, which otherwise went well.
+
+## A size per anchor
+
+The dock held ONE width and height shared by all nine anchors. From play: a sheet along
+the bottom wants to be broad and short and the same sheet at a side wants to be narrow and
+tall, so moving it meant re-dragging it, which made moving it something you stopped doing.
+
+`clampDock()` now returns `{ anchor, zoom, sizes }`, where `sizes` has an entry for
+**every** anchor so nothing downstream has to cope with a missing one. `dockSizeFor()`
+reads one, `withDockSize()` replaces one, and the resize drag writes through that — so
+dragging at the bottom cannot disturb the size the sheet has at a side.
+
+Defaults follow the SHAPE of the anchor rather than being one number:
+
+| anchors | default |
+|---|---|
+| left, right, centre | 560 wide, full height |
+| top, bottom | full width, 420 tall |
+| the four corners | 560 x 420 |
+
+`4000` is how "fill this axis" is stored. It is past any real viewport and clamps down to
+it, which keeps the stored value from going stale when the window is resized.
+
+**Two migrations, and the second is the one that needed care.** A 1.0 dock has a `side`
+and its implied fill, handled since 1.1. A 1.1 dock has ONE flat width and height, and
+those belong to whichever anchor was in use — so they seed **that anchor only** and leave
+the other eight at their defaults. Spreading them across all nine would hand a size chosen
+for a tall side panel to the bottom dock, which is the opposite of the point.
+
+## Three smaller ones from the same session
+
+- **An owned item's tags were cut off at the narrowest width; the catalogue's were not.**
+  `.cat-item-meta` has always been `display: flex; flex-wrap: wrap`; `.owned-item-meta` was
+  neither, so its tags were inline, and an inline tag with padding does not break inside
+  itself — the last one on a line ran past the edge and was clipped. Same two declarations
+  now.
+- **The character name is gone from the panel header.** It was the first thing to be
+  squeezed out at a narrow width, and the sheet immediately below carries the name in
+  readable type. Only the save state is left up there.
+- **A crit in the roller is `--warning`, not `--teal`.** The sheet painted a critical in
+  yellow with a glow and the roller painted it in the same teal it uses for an ordinary
+  success, so the same die read as special or unremarkable depending on where you looked.
+  Both files already defined `--warning` as `#ffd166`; one rule disagreed. `dock.test.mjs`
+  now asserts the rule across BOTH files and that the hex behind the variable matches, so
+  it cannot drift back.
+
+## A harness note, and it is the same one again
+
+The first version of the item-tag test asserted `scrollWidth > clientWidth` on the tag row.
+It failed at every width **with the fix in place**, because each tag carries its hover
+tooltip as a hidden child laid out far to the right, so scrollWidth was measuring tooltips
+rather than tags. It measures the tags' own rectangles now: none past the row's right edge,
+none squashed to nothing, and more than one row of them at narrow widths.
+
+Taking the wrap back off fails it at 320px, which is the width the report came from.
+
+That is the fourth time in five releases that a first-draft assertion measured something
+adjacent to the thing it cared about. The pattern is worth naming: **when an assertion
+fails against code you believe is correct, suspect the assertion before the code, and go
+and look at what it is actually measuring.**
+
+## Testing
+
+```sh
+cd dnm-cc
+npm install jsdom playwright --no-save
+mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
+rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
+for t in creator embedded party dock security layout; do node tests/$t.test.mjs; done
+```
+
+Current: creator 167, embedded 86, party 102, dock 129, security 92, layout 50. All
+passing.
+
 # v2.1D / 1.1B — Tidy at any width, and a suite that can see layout
 
 Creator **v2.1D**. The extension is unchanged at **1.1B**. From Gus's QA of 2.1C, where

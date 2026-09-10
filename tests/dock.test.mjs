@@ -48,7 +48,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 w.eval(`const OBR = { isAvailable: false };\n` + body);
 const g = (code) => w.eval(code);
 
-for (const fn of ["sheetPopover", "clampDock", "dockSize", "anchorParts", "resizeEdges", "readDock", "writeDock"]) {
+for (const fn of ["sheetPopover", "clampDock", "dockSize", "dockSizeFor", "withDockSize", "anchorParts", "resizeEdges", "readDock", "writeDock"]) {
   ok(`the creator carries its own ${fn}`, g(`typeof ${fn}`) === "function");
 }
 
@@ -91,7 +91,11 @@ for (const anchor of anchors) {
     for (const height of heights) {
       for (const viewport of viewports) {
         const zoom = zooms[compared % zooms.length];
-        const dock = { anchor, width, height, zoom };
+        // Both shapes go through the grid: a 1.1 flat dock, which must still migrate,
+        // and a 1.2 dock whose size lives under its anchor.
+        const dock = compared % 2 === 0
+          ? { anchor, width, height, zoom }
+          : { anchor, zoom, sizes: { [String(anchor)]: { width, height } } };
         const mine = ext.sheetPopover({ url: "u", dock, viewport });
         const theirs = g(`sheetPopover(${js({ url: "u", dock, viewport })})`);
         compared++;
@@ -211,7 +215,8 @@ const legacyLeft = ext.sheetPopover({ url: "u", dock: { side: "left", width: 560
 ok("a 1.0 left dock survives even though Left is no longer offered", legacyLeft.anchorPosition.left === 0 && legacyLeft.height === 900);
 // A 1.1 dock carrying both keys is a 1.1 dock: its own size wins over the legacy fill.
 const both = ext.clampDock({ side: "bottom", anchor: "center", width: 700, height: 500 });
-ok("an anchor beats a leftover side", both.anchor === "center" && both.width === 700 && both.height === 500);
+ok("an anchor beats a leftover side",
+  both.anchor === "center" && both.sizes.center.width === 700 && both.sizes.center.height === 500);
 
 // -------------------------------------------------------------
 // Which edges can be dragged
@@ -235,11 +240,21 @@ const fakeStore = (value) => ({ getItem: () => value, setItem: () => {} });
 
 ok("no stored dock is the default", ext.readDock(fakeStore(null)).anchor === "right");
 ok("unparseable JSON is the default", ext.readDock(fakeStore("{{{")).anchor === "right");
-ok("a string instead of an object is the default", ext.readDock(fakeStore('"right"')).width === 560);
+ok("a string instead of an object is the default", ext.readDock(fakeStore('"right"')).sizes.right.width === 560);
 ok("an unknown anchor is the default", ext.readDock(fakeStore('{"anchor":"ceiling"}')).anchor === "right");
-ok("a width far past the limit is clamped", ext.readDock(fakeStore('{"width":99999}')).width === 4000);
-ok("a negative width is clamped", ext.readDock(fakeStore('{"width":-4000}')).width === 320);
-ok("a non-numeric width falls back", ext.readDock(fakeStore('{"width":"wide"}')).width === 560);
+const storedWidth = (json) => ext.readDock(fakeStore(json)).sizes.right.width;
+ok("a width far past the limit is clamped", storedWidth('{"width":99999}') === 4000);
+ok("a negative width is clamped", storedWidth('{"width":-4000}') === 320);
+ok("a non-numeric width falls back", storedWidth('{"width":"wide"}') === 560);
+ok("a hostile sizes map is clamped entry by entry",
+  ext.readDock(fakeStore('{"sizes":{"bottom":{"width":99999,"height":-3},"nonsense":{"width":1}}}')).sizes.bottom.width === 4000);
+ok("and an unknown anchor in it is simply not there",
+  ext.readDock(fakeStore('{"sizes":{"nonsense":{"width":1}}}')).sizes.nonsense === undefined);
+ok("every anchor always has an entry",
+  ext.DOCK_ANCHORS.every((a) => {
+    const e = ext.readDock(fakeStore("{}")).sizes[a];
+    return e && Number.isFinite(e.width) && Number.isFinite(e.height);
+  }));
 ok("a wild zoom is clamped", ext.readDock(fakeStore('{"zoom":99}')).zoom === 1.6);
 ok("a tiny zoom is clamped", ext.readDock(fakeStore('{"zoom":0.01}')).zoom === 0.6);
 ok("a non-numeric zoom falls back", ext.readDock(fakeStore('{"zoom":"big"}')).zoom === 1);
@@ -249,7 +264,7 @@ ok("zoom is kept to one decimal", ext.readDock(fakeStore('{"zoom":1.2345}')).zoo
 ok("a null dock survives", ext.readDock(fakeStore("null")).anchor === "right");
 ok("an array survives", ext.readDock(fakeStore("[1,2,3]")).anchor === "right");
 ok("nothing else rides along",
-  Object.keys(ext.readDock(fakeStore('{"anchor":"left","evil":1}'))).sort().join() === "anchor,height,width,zoom");
+  Object.keys(ext.readDock(fakeStore('{"anchor":"left","evil":1}'))).sort().join() === "anchor,sizes,zoom");
 
 const throwingStore = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
 ok("a storage that throws on read gives the default", ext.readDock(throwingStore).anchor === "right");
@@ -259,7 +274,54 @@ let held = null;
 const realStore = { getItem: () => held, setItem: (k, v) => { held = v; } };
 ext.writeDock(realStore, { anchor: "bottom-left", width: 700, height: 500, zoom: 1.2 });
 const back = ext.readDock(realStore);
-ok("a written dock reads back", back.anchor === "bottom-left" && back.width === 700 && back.height === 500 && back.zoom === 1.2);
+ok("a written dock reads back",
+  back.anchor === "bottom-left" && back.sizes["bottom-left"].width === 700
+  && back.sizes["bottom-left"].height === 500 && back.zoom === 1.2);
+
+// -------------------------------------------------------------
+// A size per anchor (1.2)
+// -------------------------------------------------------------
+// From play: a sheet along the bottom wants to be broad and short, and the same sheet at
+// a side wants to be narrow and tall. One shared pair meant re-dragging it every time you
+// moved it, which made moving it something you did not do.
+{
+  const defaults = ext.clampDock(null);
+  ok("a side anchor defaults to full height", defaults.sizes.right.height === 4000 && defaults.sizes.right.width === 560);
+  ok("a bottom anchor defaults to full width", defaults.sizes.bottom.width === 4000 && defaults.sizes.bottom.height === 420);
+  ok("a corner defaults to neither", defaults.sizes["top-left"].width === 560 && defaults.sizes["top-left"].height === 420);
+
+  // Resizing one anchor must not disturb any other. This is the whole feature.
+  let d = ext.clampDock({ anchor: "right" });
+  d = ext.withDockSize(d, "right", { width: 700 });
+  d = ext.withDockSize(d, "bottom", { height: 300 });
+  ok("a resize is kept against its own anchor", ext.dockSizeFor(d, "right").width === 700);
+  ok("and against another separately", ext.dockSizeFor(d, "bottom").height === 300);
+  ok("and leaves the rest alone", ext.dockSizeFor(d, "left").width === 560 && ext.dockSizeFor(d, "left").height === 4000);
+  ok("the anchor itself is untouched by a resize elsewhere", d.anchor === "right");
+
+  // The size that actually opens follows the anchor.
+  const V2 = { width: 1600, height: 900 };
+  ok("moving to an anchor opens at ITS size",
+    ext.sheetPopover({ url: "u", dock: { ...d, anchor: "bottom" }, viewport: V2 }).height === 300);
+  ok("and moving back returns to the other",
+    ext.sheetPopover({ url: "u", dock: { ...d, anchor: "right" }, viewport: V2 }).width === 700);
+
+  // A 1.1 dock stored ONE pair. It belongs to the anchor that was in use; the other eight
+  // start from their defaults rather than inheriting a size chosen for a different shape.
+  const migrated = ext.clampDock({ anchor: "bottom", width: 900, height: 300 });
+  ok("a 1.1 size lands on the anchor it belonged to",
+    migrated.sizes.bottom.width === 900 && migrated.sizes.bottom.height === 300);
+  ok("and does not spread to the others",
+    migrated.sizes.right.width === 560 && migrated.sizes.right.height === 4000);
+
+  // Round trip through storage, since sizes is the first nested thing the dock has held.
+  let store = null;
+  const s2 = { getItem: () => store, setItem: (k, v) => { store = v; } };
+  ext.writeDock(s2, d);
+  const read = ext.readDock(s2);
+  ok("a per-anchor dock survives storage",
+    read.sizes.right.width === 700 && read.sizes.bottom.height === 300);
+}
 
 for (const [name, stored] of [["unknown anchor", '{"anchor":"ceiling"}'], ["huge width", '{"width":99999}'], ["garbage", "{{{"], ["wild zoom", '{"zoom":99}']]) {
   const mine = JSON.stringify(ext.readDock(fakeStore(stored)));
@@ -294,10 +356,11 @@ await ext.openSheetPopover(stubObr(null), "token-2", null);
 ok("a viewport that throws still opens the sheet", opened[2].anchorPosition.left === 1600);
 
 held = null;
+held = null;
 ext.writeDock(realStore, { anchor: "top-left", width: 640, height: 480 });
 await ext.openSheetPopover(stubObr({ width: 1600, height: 900 }), "token-3", realStore);
 ok("it opens at the stored anchor", opened[3].anchorPosition.left === 0 && opened[3].anchorPosition.top === 0);
-ok("at the stored size", opened[3].width === 640 && opened[3].height === 480);
+ok("at that anchor's stored size", opened[3].width === 640 && opened[3].height === 480);
 
 // -------------------------------------------------------------
 // Moving the sheet saves it first
@@ -575,10 +638,38 @@ const rollerSrc = fs.readFileSync(new URL("../out/dnm-obr/roller.js", import.met
 ok("roller.js opens the sheet as a popover", rollerSrc.includes("openSheetPopover") && !rollerSrc.includes("OBR.modal.open"));
 
 // -------------------------------------------------------------
+// A crit is the same colour in both halves (1.2)
+// -------------------------------------------------------------
+// The sheet painted a critical in --warning with a glow; the roller painted it in --teal,
+// which is what it paints an ordinary success. So the same die read as special on the
+// sheet and unremarkable in the log, depending only on where you happened to look. Both
+// files already defined --warning as the same yellow; one rule simply disagreed.
+//
+// Asserted across the two files rather than rendered, because the roller's stylesheet is
+// extension code that no suite here can lay out.
+{
+  const critRule = (src) => {
+    const m = src.match(/\.die\.crit\s*\{[^}]*\}/s);
+    return m ? m[0] : "";
+  };
+  const ccCrit = critRule(raw);
+  const rollerCss = fs.readFileSync(new URL("../out/dnm-obr/style.css", import.meta.url), "utf8");
+  const roCrit = critRule(rollerCss);
+  ok("the creator paints a crit in --warning", /var\(--warning\)/.test(ccCrit));
+  ok("and so does the roller", /var\(--warning\)/.test(roCrit));
+  ok("neither paints a crit in --teal", !/var\(--teal\)/.test(ccCrit) && !/var\(--teal\)/.test(roCrit));
+  // Same yellow behind the variable, not just the same variable name.
+  const warningOf = (src) => (src.match(/--warning:\s*(#[0-9a-fA-F]{3,8})/g) || []).map((x) => x.split(":")[1].trim().toLowerCase());
+  const ccWarn = warningOf(raw), roWarn = warningOf(rollerCss);
+  ok("both halves define the same crit yellow",
+    ccWarn.includes("#ffd166") && roWarn.includes("#ffd166"));
+}
+
+// -------------------------------------------------------------
 // Versions moved together
 // -------------------------------------------------------------
 const manifest = JSON.parse(fs.readFileSync(new URL("../out/dnm-obr/manifest.json", import.meta.url), "utf8"));
-ok("the manifest is at 1.1B", manifest.version === "1.1B");
+ok("the manifest is at 1.2", manifest.version === "1.2");
 ok("EXT_VERSION matches the manifest", ext.EXT_VERSION === manifest.version);
 
 console.log(`\ndock: ${pass} passed, ${fail} failed`);

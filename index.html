@@ -1428,7 +1428,16 @@ body::after {
 .owned-toggle { width: 1em; display: inline-flex; justify-content: center; color: var(--teal); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1; }
 .owned-toggle::before { content: '▾'; }
 .owned-item details[open] .owned-toggle::before { content: '▴'; }
-.owned-item-meta { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-dim); letter-spacing: 0.05em; }
+/* v2.2. display:flex and wrap, which .cat-item-meta has always had and this never did.
+   That is exactly why QA saw an item's tags cut off at the narrowest width while the same
+   tags in the catalogue were fine: inline tags with padding do not break inside
+   themselves, so the last one on a line ran past the edge and was clipped. */
+.owned-item-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 5px; align-items: center;
+  font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-dim); letter-spacing: 0.05em;
+}
+/* The print-only quantity is a bare "×1" that must not become a flex row of its own. */
+.owned-item-meta[data-print-qty] { display: none; }
 .owned-qty {
   display: flex; align-items: center; gap: 6px;
 }
@@ -2377,16 +2386,12 @@ body.obr-resizing .obr-resize { background: var(--teal-dim); }
 /* v2.1 header. Two rows: who it is, then what you can do about it. The identity row is
    the one that gives way when there is no room, because the sheet under it already says
    whose it is. */
+/* v2.2. Only the save state lives here now. It is right-aligned so it reads as a status
+   rather than a label, and the row is short enough that it no longer has to give way at
+   any width. */
 .obr-bar .obr-idline {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
-  min-width: 0;
-}
-.obr-bar .obr-idline .obr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 460px) {
-  .obr-bar .obr-idline .obr-on { display: none; }
-}
-@media (max-width: 380px) {
-  .obr-bar .obr-idline .obr-name { display: none; }
+  display: flex; align-items: baseline; justify-content: flex-end;
+  width: 100%; min-width: 0;
 }
 
 /* v2.1. The roller no longer carries Attribute and Skill dropdowns: those duplicated a
@@ -2843,7 +2848,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.1D';
+const APP_VERSION = '2.2';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -9658,8 +9663,36 @@ const LEGACY_SIDES = {
 
 // Height defaults past any real viewport so a fresh dock fills the screen vertically,
 // which is what the right-hand dock did in 1.0. Dragging the edge brings it down.
-const DOCK_DEFAULT = { anchor: "right", width: 560, height: 4000, zoom: 1 };
 const DOCK_LIMITS = { width: [320, 4000], height: [220, 4000], zoom: [0.6, 1.6] };
+
+// 1.2. A SIZE PER ANCHOR, not one size shared by all nine.
+//
+// From play: a sheet along the bottom wants to be broad and short, and the same sheet at
+// a side wants to be narrow and tall. With one shared pair you re-dragged it every time
+// you moved it, which made moving it something you did not do.
+//
+// So the defaults follow the shape of the anchor rather than being one number:
+//
+//   left, right, centre     narrow and full height  — the long document, beside the map
+//   top, bottom             full width and short    — a strip under or over it
+//   the four corners        a box, neither filling
+//
+// 4000 is past any real viewport and clamps down to it, which is how "fill this axis" is
+// expressed without storing a number that goes stale when the window resizes.
+const FILL = 4000;
+const ANCHOR_DEFAULT_SIZE = {
+  "top-left": { width: 560, height: 420 },
+  "top": { width: FILL, height: 420 },
+  "top-right": { width: 560, height: 420 },
+  "left": { width: 560, height: FILL },
+  "center": { width: 560, height: FILL },
+  "right": { width: 560, height: FILL },
+  "bottom-left": { width: 560, height: 420 },
+  "bottom": { width: FILL, height: 420 },
+  "bottom-right": { width: 560, height: 420 },
+};
+
+const DOCK_DEFAULT = { anchor: "right", zoom: 1 };
 
 // The one invariant: some map is always reachable. The panel may fill EITHER axis but
 // never both, so a sheet can be full height beside the map (1.0's right dock) or full
@@ -9687,19 +9720,55 @@ const clampZoom = (n) => {
 // Anything reaching this has been through localStorage, which any page on the origin
 // can write and a user can edit by hand. Clamp on the way OUT, the same rule the
 // character code follows.
+//
+// Every anchor gets an entry, so nothing downstream has to cope with a missing one.
 function clampDock(dock) {
   const d = dock && typeof dock === "object" ? dock : {};
-  // A 1.0 dock has `side` and no `anchor`. Only then does the legacy fill apply — a 1.1
-  // dock carrying both keys is a 1.1 dock, and its own width and height win.
+
+  // A 1.0 dock has `side` and no `anchor`. Each old side implied a size the stored object
+  // never held — a side dock was full height, the bottom dock full width — so the axis it
+  // filled is restored rather than dropped.
   const legacy = d.anchor == null && typeof d.side === "string" ? LEGACY_SIDES[d.side] : null;
   const raw = legacy ? legacy.anchor : d.anchor;
-  const fill = legacy ? legacy.fill : null;
-  return {
-    anchor: DOCK_ANCHORS.includes(raw) ? raw : DOCK_DEFAULT.anchor,
-    width: fill === "width" ? DOCK_LIMITS.width[1] : clampTo(DOCK_LIMITS.width, d.width, DOCK_DEFAULT.width),
-    height: fill === "height" ? DOCK_LIMITS.height[1] : clampTo(DOCK_LIMITS.height, d.height, DOCK_DEFAULT.height),
-    zoom: clampZoom(d.zoom),
-  };
+  const anchor = DOCK_ANCHORS.includes(raw) ? raw : DOCK_DEFAULT.anchor;
+
+  const stored = d.sizes && typeof d.sizes === "object" ? d.sizes : {};
+  // 1.1 stored ONE width and height at the top level. They belong to whichever anchor was
+  // in use, so they seed that anchor and leave the other eight at their defaults —
+  // otherwise moving the sheet after the update would throw away the size just carried
+  // across. A 1.2 dock has `sizes` and its entries win.
+  const flatW = d.width, flatH = d.height;
+  const hasFlat = flatW != null || flatH != null || legacy;
+
+  const sizes = {};
+  for (const a of DOCK_ANCHORS) {
+    const fallback = ANCHOR_DEFAULT_SIZE[a];
+    const from = stored[a] && typeof stored[a] === "object" ? stored[a]
+      : (hasFlat && a === anchor ? {
+          width: legacy && legacy.fill === "width" ? FILL : flatW,
+          height: legacy && legacy.fill === "height" ? FILL : flatH,
+        } : {});
+    sizes[a] = {
+      width: clampTo(DOCK_LIMITS.width, from.width, fallback.width),
+      height: clampTo(DOCK_LIMITS.height, from.height, fallback.height),
+    };
+  }
+
+  return { anchor, zoom: clampZoom(d.zoom), sizes };
+}
+
+// The stored size for one anchor, before the viewport has a say.
+function dockSizeFor(dock, anchor) {
+  const d = clampDock(dock);
+  return d.sizes[DOCK_ANCHORS.includes(anchor) ? anchor : d.anchor];
+}
+
+// Returns a dock with one anchor's size replaced. The resize drag writes through this so
+// it can never touch another anchor's setup.
+function withDockSize(dock, anchor, size) {
+  const d = clampDock(dock);
+  const a = DOCK_ANCHORS.includes(anchor) ? anchor : d.anchor;
+  return clampDock({ ...d, sizes: { ...d.sizes, [a]: { ...d.sizes[a], ...size } } });
 }
 
 function fitViewport(viewport) {
@@ -9718,8 +9787,9 @@ function fitViewport(viewport) {
 function dockSize(dock, viewport) {
   const d = clampDock(dock);
   const v = fitViewport(viewport);
-  const width = Math.min(d.width, v.width);
-  const height = Math.min(d.height, v.height);
+  const own = d.sizes[d.anchor];
+  const width = Math.min(own.width, v.width);
+  const height = Math.min(own.height, v.height);
   const fillsWidth = width > Math.round(v.width * DOCK_MAX_FILL);
   return {
     width,
@@ -10678,13 +10748,10 @@ function insertBar(name) {
   // row changes shape when it does.
   el.textContent = "";
 
-  const who = document.createElement("span");
-  who.className = "obr-name";
-  who.textContent = name || "No character yet";
-
-  const on = document.createElement("span");
-  on.className = "obr-on";
-  on.textContent = name ? "on this token" : "import or build one below";
+  // v2.2. No character name here any more. It was the first thing to be squeezed out at a
+  // narrow width, and it was never needed: the sheet immediately below carries the name
+  // in type you can actually read. What is left of the identity line is the save state,
+  // which has nowhere else to live.
 
   const save = document.createElement("span");
   save.className = "obr-save";
@@ -10709,7 +10776,7 @@ function insertBar(name) {
   // whose it is; the controls row is the one that must survive.
   const idLine = document.createElement("div");
   idLine.className = "obr-idline";
-  idLine.append(who, on, save);
+  idLine.append(save);
 
   // The panel's own controls, which never depend on a character.
   actions.append(buildDockControls());
@@ -10872,14 +10939,11 @@ function startResize(ev) {
   if (ev.button !== 0) return;
   ev.preventDefault();
   const dir = ev.currentTarget.dataset.dir || "";
-  const dock = readDockSafe();
   resizeDrag = {
     dir,
     x: ev.clientX,
     y: ev.clientY,
-    width: dock.width,
-    height: dock.height,
-    // The panel's real size, not the stored one. A stored height of 4000 means "fill",
+    // The panel's real size, not the stored one. A stored 4000 means "fill this axis",
     // and dragging from 4000 would jump the edge off the screen on the first pixel.
     startWidth: window.innerWidth,
     startHeight: window.innerHeight,
@@ -10917,9 +10981,15 @@ function moveResize(ev) {
   });
 }
 
+// v2.2. Written against THIS anchor's entry, so dragging the panel at the bottom cannot
+// disturb the size it has at the sides. That is the whole point of the change: a sheet
+// along the bottom wants to be broad and short and the same sheet at a side wants to be
+// narrow and tall, and one shared pair meant re-dragging it every time you moved it.
 function flushResize({ width, height }) {
-  const next = writeDockSafe({ ...readDockSafe(), width, height });
-  bridge.resizeSheet(next.width, next.height)
+  const current = readDockSafe();
+  const next = writeDockSafe(withDockSize(current, current.anchor, { width, height }));
+  const size = dockSizeFor(next, next.anchor);
+  bridge.resizeSheet(size.width, size.height)
     .catch((err) => console.error("[dnm] could not resize the sheet", err));
 }
 
