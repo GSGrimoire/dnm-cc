@@ -2,6 +2,267 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# v2.3 / 1.3 — Nothing is lost with the token
+
+Creator **v2.3**, extension **1.3**. Both change; deploy the extension first — a DM2 code
+read by extension 1.2 is refused outright, which is a broken sheet for anyone whose room
+has not reloaded.
+
+A number, not a letter: three things the table could not do before, plus one performance
+change big enough to feel.
+
+The question that started it, from Gus: *"ensure that character progression isn't lost if
+a token is deleted from the room/scene. Is there ANY way we can save characters either on
+the github page or somewhere else that requires minimum effort for the players? Having
+everything saved in a token in an owlbear room is very fragile."*
+
+**GitHub Pages cannot store anything and is not an option.** It is a static file host; the
+only way to write to that repo is a commit, which needs a token with write access to
+`gsgrimoire/dnm-cc` handed to every player. That is not low effort and it is not safe.
+This was ruled out before anything was built and should stay ruled out.
+
+## The character code: DM1 to DM2
+
+A DM1 code encoded every payload as `btoa(encodeURIComponent(json))`, which costs about
+**2.07x** the JSON — the URI step turns each non-ASCII byte into three ASCII characters
+and base64 inflates that again. Measured on a real played character (six items, two bonds,
+growth spent, injuries, a fragment):
+
+```
+full DM1 code            9,941 chars
+  SN  computed snapshot  6,405   66%
+  CP  character object   3,135   32%
+  the other 15 segments    221    2%
+the actual character JSON 1,513
+```
+
+Two thirds of every code was the snapshot: rules prose the extension reads so it does not
+need `DM_DATA`. `exhaustionTypes` alone is 839 characters of it and is *the same table for
+every character in the game*.
+
+DM2 deflates each payload before base64. The same character is **3,852** — 2.58x smaller.
+
+**The segment frame is unchanged.** Same tags, same order, same rule that an unrecognised
+tag is skipped. The version byte decides only which unpacker runs. Measured, compressing
+the whole code as one blob would have given 2,484 rather than 3,038 with the frame kept —
+**554 characters to keep `rebuildCode()` able to replace CP without understanding any
+other segment**, which is the property that lets the extension edit a character whose
+format it does not know. Cheap. Keep it.
+
+### Things considered and not done
+
+- **Dropping the invariant `exhaustionTypes` table out of SN.** Measured: it saves 266
+  characters *after* compression, because deflate already eats the repetition. Compression
+  subsumes the optimisation entirely. It would have been churn plus a version-skew
+  coupling between the repos for 266 characters. Do not revisit this.
+- **`CompressionStream`.** It is promise-based, and `buildCharacterCode()` is synchronous
+  and called from about forty mutation sites through `saveCharacterLocal()`, and again
+  from `queueSave()` on every render. Adopting it puts an `await` in the middle of the
+  token write and turns every one of those call sites into a race.
+
+### The codec
+
+Hand-written, synchronous, ~0.4ms for a whole character code. It emits **real RFC 1951**
+rather than anything bespoke, deliberately: a payload any zlib, any `DecompressionStream`
+and any Python install can read is a durability property in itself. If both halves of this
+toolchain disappear, a backup file is still base64 deflate and the characters come back.
+
+The encoder emits fixed-Huffman blocks only (`BTYPE=01`) — no tree construction, and it
+costs about 15% against zlib's dynamic trees (3,802 vs 3,038 on that character). The
+decoder reads **all three** block types, so it can read anything a compliant encoder
+produces, including our own if the encoder is ever upgraded.
+
+It is duplicated: canonical in `dnm-obr/dnm.js`, a copy in the creator's **classic
+script** (`buildCharacterCode()` lives there, not in the module block). `codec.test.mjs`
+extracts both copies between `// ==== BEGIN SHARED CODEC` markers and compares them
+**character for character** — stronger than the behavioural comparison `dock.test.mjs`
+uses for the geometry, and right for a codec, because two implementations can agree on
+every input a test thinks of and differ on the one it does not.
+
+### How it is tested, and why that shape
+
+`codec.test.mjs` fuzzes 414 inputs against zlib in **both** directions:
+
+| | proves |
+|---|---|
+| ours → zlib's decoder | we emit real RFC 1951 |
+| zlib's encoder → ours | we read what anyone else writes |
+| ours → ours | the pair agrees with itself |
+
+zlib is driven at levels 0, 1, 6 and 9 because **level 0 emits stored blocks and the
+others emit dynamic Huffman trees**, neither of which our encoder produces — without that
+sweep two of the decoder's three block paths would never run. It caught a slice-and-append
+in the match loop where a byte-at-a-time copy is required: a deflate match may overlap its
+own output, which is how a run is encoded. That is the exact bug that silently corrupts a
+character and passes every hand-written test.
+
+`creator.test.mjs` carries a **real DM1 code generated by v2.2 and frozen as a literal**,
+with a non-ASCII name (`Kesh Ålvaran ✦`) so DM1's `encodeURIComponent` step and DM2's
+UTF-8 encoder cannot both pass by accident. **Never regenerate that constant.** A
+compatibility test that rebuilds its own fixture proves only that the code agrees with
+itself, and a creator writing DM2 cannot produce a DM1 code at all.
+
+**DM1 is never written again and never removed from either parser.** Codes sit in chat
+logs and on tokens in rooms nobody has opened for months.
+
+## Character recovery
+
+Everything a character is lives in one token's metadata, so deleting the token loses it
+outright. Owlbear's own undo does not help: by the time anyone notices, it is several
+actions back.
+
+The GM's client keeps a local buffer in `localStorage`, keyed per room. The watcher is in
+**`background.js`, not `roller.js`** — a token is usually deleted with the drawer shut,
+and `background.js` runs for the whole room session.
+
+**Room metadata was not an option.** Owlbear allows 16 kB across *every* extension in the
+room and the roll log already reserves 11,000 of it. One DM2 code is ~3.8 kB. Two
+recovered characters would not fit, and overrunning that budget breaks metadata for
+unrelated extensions, not just ours.
+
+### The rule the design turns on
+
+Gus's constraint, verbatim: *"I don't like to have multiple versions of a character
+available, as one click could overwrite your updated version with a stale version and then
+you'd lose track of which is which."*
+
+So an entry is **offered only while no token holds that character**, matched on the name
+through `bondNameKey()` — a restored character has a new token id *and* a new code, so
+nothing else would match. The filter runs at **render** time against the live scene rather
+than trying to keep the stored list pruned, which is what makes the rule hold without
+bookkeeping. There is therefore no moment where two versions of one character are both on
+offer, and no button anywhere that can put a stale copy over a live one.
+
+That constraint is also why the "surface the existing Save Local autosave as a loadable
+list" idea was dropped: it is precisely a list of stale copies with a Load button.
+
+### The diff
+
+Three cases have to be told apart and only one is a loss:
+
+| | |
+|---|---|
+| the token id is still there | an ordinary edit — **every save rewrites the code**, so comparing codes would file a loss on every keystroke |
+| the id is gone, the code is on another token | a character moved |
+| the id is gone and so is the code | the loss this exists for |
+
+A **scene switch** empties the item list and would read as the whole party being deleted
+at once. `noteVanished()` deliberately does not handle that — the caller re-seeds its
+baseline on `onReadyChange` without diffing, because only the caller knows *why* the list
+emptied. Keeping that decision out of the function is what lets it be tested without a
+room, and `party.test.mjs` covers the rest: edit, detach, move, the cap, the TTL, and
+storage that throws on read or on write.
+
+### Deliberate limitations
+
+- **Per browser.** It does not follow the GM to another computer, and clearing site data
+  clears it. It is a safety net under one specific accident, not durable storage, and the
+  panel says so.
+- **GM only**, matching the panel that displays it. A player keeping a buffer they cannot
+  open is storage spent on nothing.
+- **An unnamed character cannot be matched by name**, so it falls back to the token id and
+  therefore lingers in the list. That is the safe direction: a row the GM dismisses costs
+  nothing; a character silently not offered costs a lot.
+
+## Backups
+
+One button writes every character in the scene out as codes. It is a **textarea with a
+download button** rather than a straight download, because an extension runs in an iframe
+Owlbear owns and whether a programmatic download is permitted there is Owlbear's decision,
+not ours. Select-and-copy always works; the download is the convenience. **Whether the
+download actually fires is a live check** — see below.
+
+It deliberately does **not** offer a one-click restore of the whole file. Reading one back
+means deciding which token each character belongs on, and the only safe answer to that is
+the GM deciding one at a time.
+
+## The lazy catalogue
+
+`renderInventorySection()` was **395,108 characters, of which 393,613 were the item
+catalogue** — 118 cards with a tooltip body each, built in full on every `renderAll()`,
+inside a `<details>` nobody had opened.
+
+`refreshInventory()` was the sharpest edge: it renders the whole section into a *detached*
+div purely to lift `#inventoryList` out of it, so pressing **+ Add to Sheet** built the
+entire catalogue and threw it away.
+
+Measured in Chromium at 560px on a finalized character:
+
+| | nodes | renderAll | + Add to Sheet |
+|---|---|---|---|
+| before | 5,191 | 52.1ms | 31.65ms |
+| after | 485 | 11.4ms | 1.68ms |
+
+52ms is three dropped frames on every click anywhere on the sheet.
+
+`catalogueUI.open` carries the state rather than it being read back off the DOM, so a
+re-render with the catalogue open writes it out **already open, in one pass** — no empty
+frame, no second build. `catalogueToggled()` fills it only when it is genuinely empty,
+which matters because `restoreDetailsState()` sets `el.open` programmatically after every
+re-render and that fires `toggle`.
+
+`layout.test.mjs` now **opens** the catalogue before measuring rather than dropping the
+assertion. `minmax(280px, 1fr)` on that grid hung 34px past a 320px panel in 2.1, and a
+lazy render that stopped it being measured would have retired the test written for that
+bug instead of fixing anything. It also records, before opening anything, that the
+catalogue really was empty — so the suite cannot quietly start measuring a catalogue that
+was there all along.
+
+## Party panel: exhaustion and injuries
+
+Exhaustion as warning-yellow initials with the full name (and the attribute it shuts down)
+on hover; Injuries as a **count only**. What someone is carrying is theirs to tell the
+table; that it is four of them is what the GM needs to pitch the next scene.
+
+Both read the way the rest of the panel reads a character — live values from `CP`, names
+for them from `SN`. No creator change. A character from before `exhaustionTypes` rode in
+the snapshot falls back to the key's own first letter rather than being dropped: a mark
+with a weak tooltip is still the warning the GM needs.
+
+That took the row from three children to six, and `.party-name` is the only one that gives
+way. **With `overflow: hidden` its automatic minimum size is 0**, so it collapsed to
+nothing at 400px and its neighbours overlapped where it had been — the same fault that put
+the Roll button 19px outside the panel in 2.1. Fixed with `flex: 1 1 9ch; min-width: 9ch`
+and `flex-wrap` on the row.
+
+**`layout.test.mjs` now measures the roller in Chromium.** The party panel is extension
+code and *no suite could reach it at all* until this release. Reverting the CSS fix fails
+eight assertions across 260/320/400px, so it would have shipped.
+
+## Live checks
+
+Nothing below is covered by any suite. Do these in a real room after deploying.
+
+1. **Reload the ROOM, not the tab.** Owlbear caches the background page for the whole room
+   session, so the watcher is not running until the room reloads. This is the first thing
+   to suspect if recovery does nothing.
+2. **Delete a token carrying a character** and confirm it appears under *Lost characters*.
+3. **Put it back** with *Attach to selected*, on a token with no character, and confirm the
+   row disappears on its own.
+4. **Confirm *Attach to selected* refuses** a token that already has a character.
+5. **Switch scenes** and confirm the whole party does NOT appear as lost. This is the case
+   the baseline re-seed exists for and the one most likely to be wrong.
+6. **Press Back up** and confirm the codes appear. Then press **Download** and see whether
+   a file actually arrives — if Owlbear's iframe has no `allow-downloads`, it will not, and
+   the button should be removed rather than left lying.
+7. **Paste a backed-up code** into a fresh token through *Attach D&M character*.
+8. **Open a character saved before this release** (a DM1 code on an existing token) and
+   confirm it loads, then confirm re-saving it writes a shorter DM2 code.
+9. **Check a player on the old extension** sees the "newer character creator … reload the
+   room" message rather than "does not look like a Dreams & Machines code".
+
+## Still not done
+
+- **The drag-ghost**, unchanged from 2.1: still gated on the three checks in the 2.1
+  section below.
+- **Durability beyond one browser.** Recovery and backups cover the accident; they do not
+  cover the GM changing computers or Owlbear itself going away. The only thing that would
+  is a small server keyed on room id plus player id — no login, no account, nothing for a
+  player to do. It stays unbuilt on purpose: it would be the first infrastructure this
+  project owns, and the accident was the thing worth fixing first.
+- **Tooltip bodies** are still ~48% of the remaining markup, now that the catalogue is
+  lazy. Worth a look only if the sheet feels slow again.
+
 # v2.2 / 1.2 — Every position remembers its own size
 
 Creator **v2.2**, extension **1.2**. Both change; deploy the extension first. No room

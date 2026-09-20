@@ -85,7 +85,9 @@ Change all of these together or the release is half-applied:
   footer note naming the required extension version. The banner and footer are easy to miss.
 - `dnm-cc/UPGRADE_NOTES.md` — a new section at the top
 - `dnm-cc/tests/creator.test.mjs` — the `APP_VERSION` assertion
-- `dnm-obr/manifest.json` — `version`, when the extension changed
+- `dnm-obr/manifest.json` — `version`, AND `EXT_VERSION` in `dnm.js`, which
+  `dock.test.mjs` asserts are equal
+- `dnm-cc/tests/dock.test.mjs` — the manifest version assertion
 
 **Edit `CHANGELOG.html` in place. Never regenerate it.** It was rebuilt from a description of
 itself once and silently lost eight entries. A document rebuilt from a summary loses whatever
@@ -247,6 +249,89 @@ Read `references/architecture.md` before changing how the halves talk — the ch
 format, the token metadata, the epoch mechanism and the event reducer are all documented
 there, along with the failure each design avoids.
 
+## Character codes: DM1 and DM2 (v2.3 / 1.3)
+
+**Two formats exist, both are read forever, and only DM2 is written.** The version byte
+decides which unpacker runs and NOTHING else — same tags, same order, same rule that an
+unrecognised tag is skipped. `unpackerFor()` in both repos is the whole of it.
+
+DM1 packed each payload as `btoa(encodeURIComponent(json))`, about 2.07x the JSON. DM2
+deflates first. A real played character went 9,941 → 3,852.
+
+**Never delete the DM1 path.** Codes sit in chat logs and on tokens in rooms nobody has
+opened for months. `creator.test.mjs` holds a real DM1 code from v2.2 frozen as a
+literal — **never regenerate that constant**; a creator writing DM2 cannot produce one,
+and a compatibility test that rebuilds its own fixture proves only self-consistency.
+
+**Keeping the segment frame cost 554 characters and is worth it**: it is what lets
+`rebuildCode()` replace CP without understanding any other segment, which is how the
+extension edits a character whose format it does not know. Compressing the whole code as
+one blob was measured and rejected.
+
+**`rebuildCode()` writes CP in the format the code ARRIVED in.** A DM2 payload in a DM1
+code parses without error and comes back as mojibake — no throw, no clue, a character
+quietly replaced by noise.
+
+The codec is a THIRD duplicated thing, alongside the four constants and
+`createPoolBatcher()`: canonical in `dnm.js`, copied into the creator's **classic script**
+(`buildCharacterCode()` lives there, not the module block). `codec.test.mjs` compares the
+two **character for character** between `// ==== BEGIN SHARED CODEC` markers. For a codec
+that is the right strictness — two implementations can agree on every input a test thinks
+of and differ on the one it does not.
+
+**Do not reach for `CompressionStream`.** It is promise-based, and `buildCharacterCode()`
+is synchronous and called from ~40 mutation sites plus `queueSave()` on every render.
+
+**Do not try to shrink `SN` by dropping the invariant `exhaustionTypes` table.** Measured:
+266 characters after compression, because deflate already eats the repetition. It buys a
+version-skew coupling between the repos for nothing.
+
+## A character lives on ONE token, and that is the fragility (1.3)
+
+Everything a character is sits in one token's metadata. Delete the token and it is gone.
+1.3 puts a safety net under that, and the net has one rule that governs its whole design:
+
+**A recovered character is offered only while NO token holds it.** Matched on the name
+through `bondNameKey()`, because a restored character has a new token id and a new code.
+The filter runs at RENDER time against the live scene, not by pruning the stored list —
+that is what makes the rule hold without bookkeeping. There is never a moment where two
+versions of one character are both on offer, and no button that can put a stale copy over
+a live one. That was Gus's explicit constraint and it is not negotiable: he does not want
+multiple versions of a character available, because one click could overwrite a current
+one with a stale one.
+
+The same constraint rules out surfacing the existing `saveCharacterLocal()` autosaves as a
+loadable list — that is exactly a list of stale copies with a Load button.
+
+- **The watcher is in `background.js`, not `roller.js`.** A token is usually deleted with
+  the drawer shut; only the background page runs for the whole room session.
+- **The diff compares token IDS, not codes.** Every save rewrites the whole code, so
+  comparing codes files a lost character on every keystroke.
+- **A scene switch empties the item list** and would read as the whole party being
+  deleted. `noteVanished()` does not handle that on purpose — the caller re-seeds its
+  baseline on `onReadyChange` without diffing, because only the caller knows why the list
+  emptied. That split is what lets the diff be tested without a room.
+- **Room metadata cannot hold characters.** 16 kB across every extension in the room, and
+  the log already reserves 11,000. One DM2 code is ~3.8 kB.
+- **GitHub Pages cannot store anything.** It is a static host; writing means a commit,
+  which means a repo-write token per player. Ruled out permanently.
+
+## Rendering cost lives in the catalogue (v2.3)
+
+`renderInventorySection()` was 395,108 characters, of which **393,613 were the item
+catalogue** — inside a `<details>` nobody had opened, rebuilt on every `renderAll()`. In
+Chromium: 5,191 nodes and 52ms per render, 31ms per **+ Add to Sheet**. After:
+485 nodes, 11.4ms, 1.68ms.
+
+`catalogueUI.open` carries the state rather than it being read off the DOM, so a re-render
+with it open writes it out already open in one pass. `restoreDetailsState()` sets
+`el.open` programmatically and that fires `toggle`, which is why `catalogueToggled()` has
+to check whether the block is genuinely empty before filling it.
+
+**When something stops being rendered, the assertions about it must OPEN it, not be
+deleted.** `layout.test.mjs` opens the catalogue before measuring, and separately records
+that it really was empty first.
+
 ## The trust boundary
 
 Owlbear's broadcast channel is open to every client in the room. **A check that runs in the
@@ -351,7 +436,7 @@ cd dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in creator embedded party dock security layout; do node tests/$t.test.mjs; done
+for t in codec creator embedded party dock security layout; do node tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -366,7 +451,10 @@ and playwright in ONE command or the next run dies on a missing module.
   hostile codes into the parser
 - `layout.test.mjs` — Chromium through Playwright, at the panel widths the sheet is
   actually read at. The only suite that can see layout at all; skips if Playwright is
-  missing
+  missing. Since 2.3 it also loads the ROLLER page and measures party rows — the party
+  panel is extension code and no suite could reach it at all before that
+- `codec.test.mjs` — the DM2 payload codec, fuzzed against zlib in both directions, plus
+  a character-for-character comparison of the two vendored copies
 
 `embedded.test.mjs` (v1.27) closed a gap the other three had disclaimed for fifteen
 releases. The block has no imports — the SDK is inlined — so once the SDK is removed it
@@ -447,6 +535,14 @@ code.
 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.
+
+**Fuzz against an implementation nobody here wrote, in BOTH directions, and drive it at
+settings your own code never produces.** The DM2 codec is checked against zlib at levels
+0, 1, 6 and 9 — level 0 emits stored blocks and the rest emit dynamic Huffman trees, and
+our encoder produces neither, so without that sweep two of the decoder's three block paths
+would never run. It caught a slice-and-append where a byte-at-a-time copy is required,
+because a deflate match may overlap its own output. That bug corrupts a character silently
+and passes every test written by reading the code.
 
 Do it against `out/`, not the source — mutate the staged copy, run, restage.
 

@@ -303,8 +303,8 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.2</h1>
-    <p class="lead">A room with no GM now says so, instead of quietly dropping every change to Momentum and Threat. The raised Complication range stands out in Threat&apos;s colour. The pop-out window still needs work, but it now tells you what went wrong.</p>
+    <h1>Version v.2.3</h1>
+    <p class="lead">Deleting a token no longer loses the character on it. The GM can keep a copy of the whole party in a couple of clicks. Character codes are a third of the length they were, and the sheet itself is several times quicker to use.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -313,6 +313,26 @@ h1 {
     </div>
 
     <div class="grid">
+      <article class="feature-card">
+        <h3>Lost Characters Come Back</h3>
+        <p>GM only. Delete a token by accident and the character it was carrying turns up under <em>Lost characters</em> in the panel, ready to put on a new token. It is listed only while nothing else is carrying that character, so there is never a stale copy sitting next to a live one.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Back Up the Party</h3>
+        <p>GM only. One press writes out every character in the scene as codes you can copy or download and keep somewhere that is not Owlbear.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Shorter Character Codes</h3>
+        <p>About a third of the length they were. Short enough to paste into a chat window without it swallowing the channel. Every code you already have still works and always will.</p>
+      </article>
+      <article class="feature-card">
+        <h3>A Quicker Sheet</h3>
+        <p>The item catalogue is built when you open it rather than every time anything on the sheet changes. Clicking around the sheet, and adding an item, are several times faster.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Exhaustion and Injuries at a Glance</h3>
+        <p>GM only. Each party row shows exhaustion as yellow initials &mdash; hover for the full name &mdash; and how many Injuries someone is carrying. Not what the Injuries are: that is theirs to tell the table.</p>
+      </article>
       <article class="feature-card">
         <h3>Injuries Are Visible</h3>
         <p>Taking, healing, reopening or renaming an Injury posts to the log. Injuries still change no numbers &mdash; they are a Truth about your character, and that has not changed.</p>
@@ -332,10 +352,6 @@ h1 {
       <article class="feature-card">
         <h3>Tidier Item Block</h3>
         <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
-      </article>
-      <article class="feature-card">
-        <h3>Sheet in Its Own Window</h3>
-        <p>Press <em>Pop out</em> and the sheet becomes a real browser window you can move, resize, or put on a second screen. The map and the log stay where they are.</p>
       </article>
       <article class="feature-card">
         <h3>Recent Rolls</h3>
@@ -367,7 +383,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.2 needs extension 1.2; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once.</div>
+    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.3; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
   </section>
 
   <section class="panel">
@@ -378,6 +394,25 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.3</span>
+          <span class="version-title">Nothing is lost with the token</span>
+        </summary>
+        <ul>
+        <li><strong>A character is no longer lost when its token is deleted.</strong> Everything a character is has always lived on the token, so deleting one took a whole session&apos;s growth, injuries and bonds with it, with no undo. The GM&apos;s panel now keeps a copy: anything whose token has left the scene appears under <em>Lost characters</em>, and can be copied or put straight onto a token you have selected.</li>
+        <li>It shows a character only while nothing in the scene is carrying it. Put it back on a token and it leaves the list on its own. There is no point at which two versions of one character are both on offer, and nothing that can put an old copy over a current one.</li>
+        <li>Kept in the GM&apos;s own browser for 30 days. It does not follow you to another computer, and clearing your browsing data clears it &mdash; so for anything you really want to keep, use the backup.</li>
+        <li><strong>Back up the whole party in two clicks.</strong> <em>Back up</em> in the Party panel writes every character in the scene out as codes to copy or download. Any one of them pastes back through <em>Attach D&amp;M character</em> on a token.</li>
+        <li><strong>Character codes are about a third the length.</strong> A code that ran to nearly ten thousand characters is now under four thousand &mdash; short enough to paste into a chat window. Every code you have ever copied still works, and always will.</li>
+        <li><strong>The sheet is several times quicker.</strong> The item catalogue is now built when you open it, instead of being rebuilt every single time anything on the sheet changed. Adding an item was the worst of it and is about twenty times faster.</li>
+        <li><strong>The Party panel shows exhaustion and injuries.</strong> Exhaustion as yellow initials with the full name on hover, and a count of Injuries &mdash; never what they are.</li>
+        <li>Requires extension 1.3. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.2</span>
           <span class="version-title">Every position remembers its own size</span>

@@ -15,9 +15,15 @@ what they are for.
 - [Room metadata budget](#room-metadata-budget)
 - [Known sharp edges](#known-sharp-edges)
 
-## The character code (DM1)
+## The character code (DM1, DM2)
 
 A `-` joined list of segments, built by `buildCharacterCode()`.
+
+**Two formats, from v2.3 / 1.3.** `DM1` packs each payload as
+`btoa(encodeURIComponent(json))`; `DM2` deflates it first and is ~2.6x shorter. The frame
+is IDENTICAL in both — same tags, same order, same skip-what-you-do-not-know rule — so the
+version byte decides only which unpacker runs. `unpackerFor()` exists in both repos.
+Only DM2 is written; both are read, permanently.
 
 It mixes **two kinds of segment**, and this is the part that bites:
 
@@ -43,6 +49,9 @@ extension.
 
 Only `CP` is ever rewritten. Every other segment is preserved byte for byte, which is what
 makes the round trip lossless: the extension never has to understand a segment to keep it.
+`rebuildCode()` packs the replacement in **the format the code arrived in**, read off its
+own version byte — a DM2 payload written into a DM1 code parses without error and comes
+back as mojibake.
 
 The `CP` payload is untrusted — pasted from chat, or read off a token any player can edit.
 `stripUnsafeKeys()` drops `__proto__`, `constructor` and `prototype` before it reaches
@@ -150,10 +159,26 @@ The roller's private copy lives in `localStorage` — this browser only, never r
 player, and not spending the room's shared budget. It used to be a plain array, so closing the
 popover discarded it, which read as concealed rolls working only sometimes.
 
+## Character recovery (1.3)
+
+The GM's `background.js` diffs `scene.items.onChange` and stashes the code of any token
+that stops carrying a character. Stored in `localStorage`, keyed per room, capped at 25
+entries and 30 days.
+
+The diff compares **token ids**, not codes — every save rewrites the code, so a code-based
+diff files a loss on every keystroke. A scene switch empties the item list, which is why
+the caller re-seeds its baseline on `onReadyChange` without diffing rather than
+`noteVanished()` trying to detect it.
+
+`visibleRecovery()` hides an entry while any token in the scene holds that character,
+matched on `bondNameKey()`. That filter runs at render time, and it is the whole reason
+there is never a live copy and a stale copy on offer at once.
+
 ## Room metadata budget
 
 Owlbear allows **16 kB of room metadata total across every extension in the room** — not per
-extension. `MAX_STATE_BYTES` is 11000 to leave headroom.
+extension. `MAX_STATE_BYTES` is 11000 to leave headroom. This is why recovery buffers live
+in `localStorage` and not here: one DM2 code is ~3.8 kB.
 
 `trimState()` drops log entries until the state fits but stops at one entry, so a single
 oversized entry could still exceed the budget and break metadata for unrelated extensions.
