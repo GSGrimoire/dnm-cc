@@ -3,7 +3,9 @@
 import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
   COMP_AT_MIN, COMP_AT_MAX, readBondQueue, pruneBondQueue, bondNamesMatch,
   MAX_BOND_EFFECTS, BOND_EFFECT_TTL_MS, trimState, MAX_LOG_ENTRIES,
-  createPoolBatcher, sanitizeBondEffect, DRIVE_THREAT_SPEND_MIN, FIELD_LIMITS } from "../out/dnm-obr/dnm.js";
+  createPoolBatcher, sanitizeBondEffect, DRIVE_THREAT_SPEND_MIN, FIELD_LIMITS,
+  CHAR_KEY, characterTokens, noteVanished, trimRecovery, readRecovery, writeRecovery,
+  visibleRecovery, recoveryKeyFor, MAX_RECOVERY_ENTRIES, RECOVERY_TTL_MS } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -408,6 +410,161 @@ ok("a zero Threat delta is not a spend",
     b.add("threat", 2, "manual");
     b.flush();
     ok("a re-entrant flush does not send twice or recurse", calls === 1 && maxDepth === 1);
+  }
+}
+
+
+// =============================================================
+// Character recovery (1.3)
+// =============================================================
+// The diff is the whole feature. Get it wrong in one direction and a deleted
+// character is not captured, which is the failure this exists to prevent; get it
+// wrong in the other and every keystroke files a "lost" character, which buries
+// the real one. Both are tested, and so is the case that produced the design —
+// a scene switch, which empties the item list and must not read as a massacre.
+{
+  const token = (id, code) => ({ id, metadata: { [CHAR_KEY]: { v: 1, code } } });
+  const plain = (id) => ({ id, metadata: {} });
+  const NOW = 1_700_000_000_000;
+
+  // --- characterTokens ---
+  ok("characterTokens finds tokens carrying a character",
+    JSON.stringify(characterTokens([token("a", "DM2-x"), plain("b")])) === JSON.stringify([{ id: "a", code: "DM2-x" }]));
+  ok("characterTokens ignores an empty code string",
+    characterTokens([token("a", "")]).length === 0);
+  ok("characterTokens survives junk", characterTokens([null, {}, { metadata: null }, undefined]).length === 0);
+  ok("characterTokens survives no items at all", characterTokens(undefined).length === 0);
+
+  // --- the loss this exists for ---
+  {
+    const before = characterTokens([token("a", "DM2-kesh"), token("b", "DM2-vera")]);
+    const after = characterTokens([token("b", "DM2-vera")]);
+    const list = noteVanished([], before, after, NOW);
+    ok("a deleted token's character is captured", list.length === 1 && list[0].code === "DM2-kesh");
+    ok("the capture records which token it was", list[0].tokenId === "a");
+    ok("the capture is stamped", list[0].at === NOW);
+    ok("a token that stayed is not captured", !list.some((e) => e.code === "DM2-vera"));
+  }
+
+  // --- detaching a character is the same loss, by a different route ---
+  {
+    const before = characterTokens([token("a", "DM2-kesh")]);
+    const after = characterTokens([plain("a")]);
+    ok("clearing a token's character is captured too",
+      noteVanished([], before, after, NOW).length === 1);
+  }
+
+  // --- an ordinary edit must not look like a loss ---
+  // Every save rewrites the whole code, so comparing CODES rather than ids would
+  // file a lost character on every keystroke. This is the assertion that pins that.
+  {
+    const before = characterTokens([token("a", "DM2-kesh-v1")]);
+    const after = characterTokens([token("a", "DM2-kesh-v2")]);
+    ok("editing a character does not file it as lost",
+      noteVanished([], before, after, NOW).length === 0);
+  }
+
+  // --- a character moved to another token is not a loss either ---
+  {
+    const before = characterTokens([token("a", "DM2-kesh")]);
+    const after = characterTokens([token("b", "DM2-kesh")]);
+    ok("a character moved to a different token is not captured",
+      noteVanished([], before, after, NOW).length === 0);
+  }
+
+  // --- several at once ---
+  {
+    const before = characterTokens([token("a", "DM2-1"), token("b", "DM2-2"), token("c", "DM2-3")]);
+    const after = characterTokens([token("b", "DM2-2")]);
+    const list = noteVanished([], before, after, NOW);
+    ok("deleting several tokens captures all of them", list.length === 2);
+    ok("the newest capture is first", list[0].at === NOW && list.length === 2);
+  }
+
+  // --- no duplicate rows for the same character ---
+  {
+    let list = noteVanished([], characterTokens([token("a", "DM2-kesh")]), [], NOW);
+    list = noteVanished(list, characterTokens([token("z", "DM2-kesh")]), [], NOW + 1000);
+    ok("losing the same character twice leaves one row", list.length === 1);
+    ok("and the row is the newer one", list[0].at === NOW + 1000 && list[0].tokenId === "z");
+  }
+
+  // --- bounds ---
+  {
+    let list = [];
+    for (let i = 0; i < MAX_RECOVERY_ENTRIES + 10; i++) {
+      list = noteVanished(list, characterTokens([token("t" + i, "DM2-" + i)]), [], NOW + i);
+    }
+    ok(`the buffer is capped at ${MAX_RECOVERY_ENTRIES}`, list.length === MAX_RECOVERY_ENTRIES);
+    ok("and it is the newest that are kept", list[0].code === "DM2-" + (MAX_RECOVERY_ENTRIES + 9));
+  }
+  {
+    const old = [{ code: "DM2-old", tokenId: "a", at: NOW - RECOVERY_TTL_MS - 1 }];
+    ok("an entry past its time is dropped", trimRecovery(old, NOW).length === 0);
+    ok("an entry inside its time is kept",
+      trimRecovery([{ code: "DM2-new", tokenId: "a", at: NOW - 1000 }], NOW).length === 1);
+  }
+
+  // --- storage is untrusted on the way out, the same rule the dock follows ---
+  {
+    const store = (value) => ({ getItem: () => value, setItem() {} });
+    ok("unparseable storage reads as empty", readRecovery(store("{{{"), "room").length === 0);
+    ok("a stored object rather than a list reads as empty", readRecovery(store('{"a":1}'), "room").length === 0);
+    ok("entries without a code are dropped",
+      readRecovery(store('[{"tokenId":"a","at":' + NOW + '}]'), "room", NOW).length === 0);
+    ok("entries with a junk timestamp are dropped",
+      readRecovery(store('[{"code":"DM2-x","at":"soon"}]'), "room", NOW).length === 0);
+    ok("no storage at all reads as empty", readRecovery(null, "room").length === 0);
+    // A storage that throws on read is what a cookie-blocked frame actually does.
+    ok("storage that throws reads as empty",
+      readRecovery({ getItem() { throw new Error("blocked"); } }, "room").length === 0);
+    // And one that throws on WRITE must not take the caller down with it: this is
+    // called from the scene-change handler, so an exception here stops the watcher.
+    let threw = false;
+    try { writeRecovery({ setItem() { throw new Error("quota"); } }, "room", [{ code: "DM2-x", at: NOW }], NOW); }
+    catch (err) { threw = true; }
+    ok("storage that throws on write does not throw out", !threw);
+  }
+
+  ok("the storage key is per room", recoveryKeyFor("room-a") !== recoveryKeyFor("room-b"));
+  ok("a missing room id still produces a key", typeof recoveryKeyFor(undefined) === "string");
+
+  // --- the rule the whole design turns on ---
+  // An entry is offered only while NO token holds that character. This is what
+  // makes it impossible to put a stale copy over a live one, and it is matched on
+  // the NAME because a restored character has a new token id and a new code.
+  {
+    const names = { "DM2-kesh-old": "Kesh Alvaran", "DM2-kesh-new": "Kesh Alvaran", "DM2-vera": "Vera Sunn" };
+    const resolve = (code) => names[code] || "";
+    const list = [{ code: "DM2-kesh-old", tokenId: "gone", at: NOW }];
+
+    ok("a lost character is offered while no token holds it",
+      visibleRecovery(list, [token("b", "DM2-vera")], resolve).length === 1);
+    ok("and is hidden the moment a token holds it again, under a NEW code and id",
+      visibleRecovery(list, [token("z", "DM2-kesh-new")], resolve).length === 0);
+    ok("matching ignores case and stray spaces",
+      visibleRecovery(list, [token("z", "DM2-spaced")], (c) => c === "DM2-spaced" ? "  kesh ALVARAN " : names[c] || "").length === 0);
+
+    // An unnamed character cannot be matched by name, so it falls back to the token
+    // id — which all but guarantees it lingers. That is the safe direction: a row
+    // the GM dismisses costs nothing, a character silently not offered costs a lot.
+    const unnamed = [{ code: "DM2-blank", tokenId: "gone", at: NOW }];
+    ok("an unnamed lost character stays on offer",
+      visibleRecovery(unnamed, [token("z", "DM2-other")], () => "").length === 1);
+    ok("unless that very token comes back",
+      visibleRecovery(unnamed, [token("gone", "DM2-other")], () => "").length === 0);
+  }
+
+  // --- a real round trip through a real storage object ---
+  {
+    const backing = new Map();
+    const storage = {
+      getItem: (k) => (backing.has(k) ? backing.get(k) : null),
+      setItem: (k, v) => backing.set(k, v),
+    };
+    writeRecovery(storage, "room-1", [{ code: "DM2-kesh", tokenId: "a", at: NOW }], NOW);
+    ok("a written buffer reads back", readRecovery(storage, "room-1", NOW).length === 1);
+    ok("and not from another room", readRecovery(storage, "room-2", NOW).length === 0);
   }
 }
 

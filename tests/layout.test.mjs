@@ -80,6 +80,23 @@ async function measure(width) {
     c.items = [{ id: weapon.id, qty: 1, equipped: true, discharged: false }];
     state.currentStep = STEPS.indexOf("summary");
     renderAll();
+
+    // Recorded before anything is opened: proves the catalogue really is lazy in a
+    // real browser, not only in jsdom, and that this harness is measuring a
+    // catalogue it opened rather than one that was there all along.
+    window.__lazy = document.querySelectorAll(".cat-item").length === 0;
+
+    // v2.3: the catalogue is rendered only while its <details> is open, and it
+    // starts closed. It is OPENED here rather than dropped from the suite —
+    // minmax(280px, 1fr) on that grid hung 34px past a 320px panel in 2.1, and a
+    // lazy render that stopped it being measured would have quietly retired the
+    // assertion written for that bug rather than fixed anything.
+    const catalogue = [...document.querySelectorAll("details.collapsible-section")]
+      .find((d) => (d.querySelector(":scope > summary") || {}).textContent === "Item Catalogue");
+    if (!catalogue) throw new Error("no catalogue section to open");
+    catalogue.open = true;
+    catalogueToggled(catalogue);
+    if (!document.querySelector(".catalogue-grid")) throw new Error("opening the catalogue rendered nothing");
   });
   await page.waitForTimeout(150);
 
@@ -121,6 +138,7 @@ async function measure(width) {
         };
       })(),
       catalogue: rect(".catalogue-grid"),
+      lazy: window.__lazy,
     };
   }, width);
 
@@ -143,12 +161,126 @@ for (const width of [320, 400, 520, 560, 1280]) {
   ok(`${width}px: an item's name column has width`, m.ident && m.ident.w > 40);
   ok(`${width}px: the Roll button is inside the panel`, m.roll && m.roll.r <= width + 1);
   ok(`${width}px: the catalogue grid is inside the panel`, m.catalogue && m.catalogue.r <= width + 1);
+  ok(`${width}px: the catalogue was closed until the harness opened it`, m.lazy === true);
   ok(`${width}px: the item has tags to check`, m.itemTags && m.itemTags.count > 3);
   ok(`${width}px: no item tag hangs past its row`, m.itemTags && m.itemTags.past === 0);
   ok(`${width}px: no item tag is squashed to nothing`, m.itemTags && m.itemTags.zeroWidth === 0);
   // Twelve tags cannot fit on one line in a narrow panel, so if they are all on one row
   // they are not wrapping — which is the state that ran them past the edge.
   ok(`${width}px: the tags wrap onto several rows`, m.itemTags && (width > 700 || m.itemTags.rows > 1));
+}
+
+// -------------------------------------------------------------
+// The roller's party rows, v2.3 / 1.3
+// -------------------------------------------------------------
+// A party row was three children — name, Spirit, status — and is now up to six:
+// exhaustion initials and an injury count joined them, and the GM's "Sheet" button
+// was already there. The name is the only child that gives way, and with
+// overflow:hidden its automatic minimum size is zero, so this is the exact shape
+// that put the Roll button outside the panel in 2.1.
+//
+// It is measured here rather than reasoned about because jsdom does no cascade:
+// the party panel is extension code and was never reachable by any suite at all
+// until this block. The rows are built by hand rather than through refreshParty(),
+// which needs a live room — the CSS is what is under test, not the plumbing.
+const rollerUrl = "file://" + path.resolve("out/dnm-obr/index.html");
+
+async function measureParty(width) {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(rollerUrl);
+  await page.waitForLoadState("domcontentloaded");
+
+  return { errors, ...(await page.evaluate(() => {
+    const panel = document.getElementById("party-panel");
+    const list = document.getElementById("party-list");
+    panel.hidden = false;
+    list.innerHTML = "";
+    // Worst realistic case in every direction at once: a long name, four
+    // exhaustions, a double-digit injury count, and the badge that says the most.
+    const rows = [
+      { name: "Kesh Ålvaran of the Long Road", marks: ["W", "S", "H", "D"], injuries: 12, badge: "Not synced" },
+      { name: "Vee", marks: ["W"], injuries: 1, badge: "Behind" },
+      { name: "Orrin Sunn-Halvardsson", marks: [], injuries: 0, badge: "Caught up" },
+    ];
+    for (const row of rows) {
+      const li = document.createElement("li");
+      li.className = "party-row";
+      const head = document.createElement("div");
+      head.className = "party-head";
+      const name = document.createElement("span");
+      name.className = "party-name"; name.textContent = row.name; head.append(name);
+      const spirit = document.createElement("span");
+      spirit.className = "party-spirit"; spirit.textContent = "Spirit 8/12"; head.append(spirit);
+      if (row.marks.length) {
+        const marks = document.createElement("span");
+        marks.className = "party-exhaustion";
+        for (const m of row.marks) {
+          const mark = document.createElement("span");
+          mark.className = "party-mark"; mark.textContent = m; marks.append(mark);
+        }
+        head.append(marks);
+      }
+      if (row.injuries) {
+        const hurt = document.createElement("span");
+        hurt.className = "party-injuries";
+        hurt.textContent = row.injuries === 1 ? "1 Injury" : row.injuries + " Injuries";
+        head.append(hurt);
+      }
+      const badge = document.createElement("span");
+      badge.className = "party-status is-behind"; badge.textContent = row.badge; head.append(badge);
+      const open = document.createElement("button");
+      open.className = "ghost party-open"; open.type = "button"; open.textContent = "Sheet";
+      head.append(open);
+      li.append(head);
+      list.append(li);
+    }
+
+    const limit = document.documentElement.clientWidth;
+    const past = [];
+    let zeroWidth = 0, narrowestName = Infinity, marksSeen = 0;
+    for (const li of list.children) {
+      for (const child of li.querySelector(".party-head").children) {
+        const r = child.getBoundingClientRect();
+        if (r.right > limit + 1) past.push(child.className + " to " + Math.round(r.right));
+        if (r.width < 1) zeroWidth++;
+      }
+      const n = li.querySelector(".party-name").getBoundingClientRect().width;
+      if (n < narrowestName) narrowestName = n;
+      marksSeen += li.querySelectorAll(".party-mark").length;
+      for (const mark of li.querySelectorAll(".party-mark")) {
+        if (mark.getBoundingClientRect().width < 6) zeroWidth++;
+      }
+    }
+    const warning = getComputedStyle(document.documentElement).getPropertyValue("--warning").trim();
+    const markColour = list.querySelector(".party-mark")
+      ? getComputedStyle(list.querySelector(".party-mark")).color : "";
+    const hurtColour = list.querySelector(".party-injuries")
+      ? getComputedStyle(list.querySelector(".party-injuries")).color : "";
+    const asRgb = (hex) => {
+      const n = parseInt(hex.replace("#", ""), 16);
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+    };
+    return { past, zeroWidth, narrowestName, marksSeen,
+             warningMatches: markColour === asRgb(warning) && hurtColour === asRgb(warning) };
+  })) };
+}
+
+// 260 is below anything Owlbear actually gives the drawer; it is here because the
+// failure mode is silent overlap rather than a scrollbar, so the floor has to be
+// proven somewhere the layout is genuinely under pressure.
+for (const width of [260, 320, 400, 520]) {
+  const m = await measureParty(width);
+  ok(`party ${width}px: the roller throws nothing`, m.errors.length === 0);
+  if (m.errors.length) console.log("      " + m.errors[0]);
+  ok(`party ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
+  if (m.past.length) console.log("      " + m.past.join(", "));
+  ok(`party ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
+  ok(`party ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
+     m.narrowestName >= 40);
+  ok(`party ${width}px: all five exhaustion marks are drawn`, m.marksSeen === 5);
+  ok(`party ${width}px: marks and injuries are warning yellow`, m.warningMatches);
 }
 
 await browser.close();

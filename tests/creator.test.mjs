@@ -1006,6 +1006,108 @@ const DM1_EXPECTED = {
   ok("and that DM2 code imports back", !again.error && again.character.name === DM1_EXPECTED.name);
 }
 
+
+// -------------------------------------------------------------
+// The lazy catalogue, v2.3
+// -------------------------------------------------------------
+// renderInventorySection() was 395,108 characters, of which 393,613 were the item
+// catalogue — 118 cards with a tooltip body each, rebuilt on every renderAll() and
+// on every press of + Add to Sheet, inside a <details> nobody had opened.
+//
+// refreshInventory() was the sharpest edge: it renders the whole section into a
+// DETACHED div purely to lift #inventoryList out of it, so adding one item built
+// the entire catalogue and then threw it away.
+//
+// These assertions are about the DOM, not the markup string, because the thing that
+// costs is the nodes the browser has to build. And they check the catalogue still
+// WORKS when opened — a lazy render that never fills is a much worse bug than a
+// slow one.
+{
+  const catalogueDetails = `[...document.querySelectorAll('details.collapsible-section')]
+    .find(d => (d.querySelector(':scope > summary') || {}).textContent === 'Item Catalogue')`;
+
+  g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    var arch = Object.keys(DM_DATA.archetypes)[0];
+    c.name = 'Catalogue Fixture';
+    c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = arch;
+    c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    var a = DM_DATA.archetypes[arch];
+    if (!a.forcedTalent) { var t = Object.keys(a.talents || {}); if (t.length) c.talent = t[0]; }
+    c.finalized = true;
+    normalizeEditableLists(); normalizeCurrentValues();
+    if (!computeStats()) throw new Error('fixture does not compute');
+    state.currentStep = STEPS.indexOf('summary');
+    renderAll();
+  })()`);
+
+  const itemCount = g(`(DM_DATA.items || []).length`);
+  ok("there is a catalogue to be lazy about", itemCount > 50);
+  ok("the catalogue section exists", g(`!!(${catalogueDetails})`));
+  ok("it starts closed", g(`!(${catalogueDetails}).open`));
+  ok("and empty — no cards are built before it is opened",
+    g(`document.querySelectorAll('.cat-item').length`) === 0);
+
+  // The section as a whole is now small. Asserted as a RATIO against the catalogue
+  // it no longer carries, so the numbers keep meaning if items are added.
+  const sectionLength = g(`renderInventorySection().length`);
+  const blockLength = g(`renderCatalogueBlock().length`);
+  ok(`the equipment section no longer carries the catalogue (${sectionLength} vs ${blockLength})`,
+    sectionLength * 10 < blockLength);
+
+  // --- opening it fills it ---
+  g(`(function(){ var d = ${catalogueDetails}; d.open = true; catalogueToggled(d); })()`);
+  ok(`opening the catalogue builds every card (${g(`document.querySelectorAll('.cat-item').length`)})`,
+    g(`document.querySelectorAll('.cat-item').length`) === itemCount);
+  ok("the toolbar is there too", g(`!!document.getElementById('catSearch')`));
+  ok("exactly one catalogue block", g(`document.querySelectorAll('#catalogueBlock').length`) === 1);
+  // The summary must stay the FIRST child or the <details> has no visible label to
+  // click, which is the one way this could break while still looking rendered.
+  ok("the summary is still the first child",
+    g(`(${catalogueDetails}).firstElementChild.tagName`) === "SUMMARY");
+
+  // --- and it still works ---
+  {
+    const term = g(`(DM_DATA.items || [])[0].name.split(' ')[0]`);
+    g(`updateCatalogueSearch(${JSON.stringify(term)})`);
+    const found = g(`document.querySelectorAll('.cat-item').length`);
+    ok(`searching the catalogue filters it (${found} of ${itemCount} for ${JSON.stringify(term)})`,
+      found > 0 && found < itemCount);
+    g(`clearCatalogueSearch()`);
+    ok("clearing the search brings them all back",
+      g(`document.querySelectorAll('.cat-item').length`) === itemCount);
+  }
+
+  // --- adding from it does not tear it down ---
+  {
+    const id = g(`(DM_DATA.items || [])[0].id`);
+    g(`addItemToSheet(${JSON.stringify(id)})`);
+    ok("adding from the catalogue reaches the character",
+      g(`(state.character.items || []).length`) === 1);
+    ok("and does not empty the catalogue underneath it",
+      g(`document.querySelectorAll('.cat-item').length`) === itemCount);
+  }
+
+  // --- a re-render with it open puts it back, once, without an empty frame ---
+  {
+    g(`renderAll()`);
+    ok("the open state survives a re-render", g(`catalogueUI.open`) === true);
+    ok("the cards are there immediately, not a tick later",
+      g(`document.querySelectorAll('.cat-item').length`) === itemCount);
+    ok("and it was not built twice", g(`document.querySelectorAll('#catalogueBlock').length`) === 1);
+  }
+
+  // --- closing it stops the cost coming back ---
+  {
+    g(`(function(){ var d = ${catalogueDetails}; d.open = false; catalogueToggled(d); })()`);
+    ok("closing it records the state", g(`catalogueUI.open`) === false);
+    g(`renderAll()`);
+    ok("and a re-render after closing builds no cards",
+      g(`document.querySelectorAll('.cat-item').length`) === 0);
+  }
+}
+
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — OBR.isAvailable is false, so the module block never ran.

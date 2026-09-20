@@ -9108,7 +9108,10 @@ const CATALOGUE_CATEGORIES = [
   { key: 'glif', label: 'GLIFs' }
 ];
 
-const catalogueUI = { filter: 'all', subfilter: 'all', search: '' };
+// `open` is part of the UI state and not just a DOM flag, so a re-render can put
+// the catalogue back the way the player left it WITHOUT having to rebuild it and
+// then throw it away. See renderInventorySection().
+const catalogueUI = { filter: 'all', subfilter: 'all', search: '', open: false };
 
 function getItemById(id) {
   return (DM_DATA.items || []).find(it => it.id === id) || null;
@@ -9256,6 +9259,24 @@ function clearCatalogueSearch() {
   catalogueUI.filter = 'all';
   catalogueUI.subfilter = 'all';
   refreshCatalogue();
+}
+
+// Fires for both directions, and on the programmatic el.open that
+// restoreDetailsState() performs after a re-render — which is exactly when the
+// block has to be filled, because that path writes the markup before this flag
+// has been set for the first time.
+function catalogueToggled(details) {
+  if (!details) return;
+  catalogueUI.open = !!details.open;
+  if (!details.open) return;
+  // Only when it is genuinely empty. A re-render that already wrote the block out
+  // must not have it built a second time and swapped under the player's cursor.
+  if (details.querySelector('#catalogueBlock')) return;
+  const summary = details.querySelector(':scope > summary');
+  const host = document.createElement('div');
+  host.innerHTML = renderCatalogueBlock();
+  while (host.firstChild) details.append(host.firstChild);
+  if (summary) details.prepend(summary);
 }
 
 function renderCatalogueBlock() {
@@ -9412,9 +9433,20 @@ function renderInventorySection() {
       <div style="font-size:0.82rem;color:var(--text-dim);">${archetypeData ? archetypeData.equipment : '—'}</div>
       ${originData && originData.specialNote ? `<div style="font-size:0.82rem;color:var(--warning);margin-top:8px;">⚠ ${originData.specialNote}</div>` : ''}
     </details>
-    <details class="collapsible-section no-print">
+    <!-- v2.3. The catalogue is rendered only while it is OPEN, and it starts closed.
+         Measured: renderInventorySection() was 395,108 characters, of which 393,613
+         were this block — 118 item cards with a tooltip body each, built in full on
+         every renderAll() and on every press of + Add to Sheet, inside a <details>
+         nobody had opened. refreshInventory() was the worst of it: it renders this
+         whole section into a DETACHED div just to lift #inventoryList out of it, so
+         adding one item built the entire catalogue and discarded it.
+
+         catalogueUI.open carries the state rather than reading it back off the DOM,
+         so a re-render with the catalogue open writes it out once, already open,
+         with no empty frame in between. -->
+    <details class="collapsible-section no-print" ontoggle="catalogueToggled(this)"${catalogueUI.open ? ' open' : ''}>
       <summary>Item Catalogue</summary>
-      ${renderCatalogueBlock()}
+      ${catalogueUI.open ? renderCatalogueBlock() : ''}
     </details>
     <details class="collapsible-section" open>
       <summary>Owned Items</summary>
