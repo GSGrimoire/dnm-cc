@@ -1,0 +1,28 @@
+import fs from "fs";
+import { JSDOM } from "jsdom";
+const raw = fs.readFileSync("/home/user/dnm-cc/out/dnm-cc/index.html", "utf8");
+const s = raw.indexOf('<script type="module">'), e = raw.indexOf("</script>", s);
+const dom = new JSDOM(raw.slice(0,s)+raw.slice(e+9), { runScripts:"dangerously", pretendToBeVisual:true, url:"https://gsgrimoire.github.io/dnm-cc/" });
+const w = dom.window;
+await new Promise(r => w.document.readyState === "complete" ? r() : w.addEventListener("load", r));
+const g = c => w.eval(c);
+g(`(function(){
+  var c = state.character = getDefaultCharacter();
+  c.origin = Object.keys(DM_DATA.origins)[0];
+  c.archetype = Object.keys(DM_DATA.archetypes)[0];
+  c.temperament = Object.keys(DM_DATA.temperaments)[0];
+  c.name='Kesh Alvaran';
+  c.shortTermGoal='Find the caravan that left without me.';
+  c.longTermGoal='Learn what the Machine remembers of my mother.';
+  normalizeCurrentValues();
+  c.items = Object.keys(DM_DATA.equipment||{}).slice(0,6).map(k=>({key:k,qty:1}));
+  c.bonds=[{name:'Vera Sunn',detail:'Owes me a debt she will not name.'},{name:'Orrin',detail:'My old crew chief.'}];
+  c.growthPool=4;
+  c.growthPurchases=[{type:'attr',label:'Might +1',detail:'',cost:3},{type:'skill',label:'Survival +1',detail:'',cost:2}];
+  c.injuries=['Cracked ribs','Burned hand'];
+  c.knowledgeFragments=['The tower answers to no one.'];
+  computeStats();
+})()`);
+fs.writeFileSync("/tmp/claude-0/-home-user/adf8030a-c5e0-52b0-af10-4baa6a9cbb95/scratchpad/cp.json", g("JSON.stringify(state.character)"));
+fs.writeFileSync("/tmp/claude-0/-home-user/adf8030a-c5e0-52b0-af10-4baa6a9cbb95/scratchpad/sn.json", g("JSON.stringify(buildOwlbearSnapshot())"));
+console.log("dumped");

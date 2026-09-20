@@ -546,12 +546,14 @@ ok("at that anchor's stored size", opened[3].width === 640 && opened[3].height =
     var code = buildCharacterCode();
     var over = ${JSON.stringify("PLACEHOLDER")};
     if (!over) return code;
+    // Unpack and repack through the app's OWN codec rather than a hand-written
+    // atob/btoa pair. A test that spells the encoding out for itself stops
+    // compiling the moment the format moves, which is exactly what DM2 did to it.
     var seg = code.split('-').find(function(p){ return p.slice(0,2) === 'CP'; });
-    var pad = seg.slice(2); while (pad.length % 4) pad += '=';
-    var obj = JSON.parse(decodeURIComponent(atob(pad)));
+    var obj = JSON.parse(unpackerFor(code.split('-')[0])(seg.slice(2)));
     obj.archetype = over;
-    var b64 = btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=/g,'');
-    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+    var packed = packPayload(JSON.stringify(obj));
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + packed : p; }).join('-');
   })()`.replace('"PLACEHOLDER"', JSON.stringify(over)));
 
   const goodCode = codeFor(null);

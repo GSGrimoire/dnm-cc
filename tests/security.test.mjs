@@ -500,12 +500,13 @@ const rollEv = (entry) => ({ type: "roll", entry });
   // rather than a payload that happens to omit everything else.
   const withKey = (over) => g(`(function(){
     var code = ${JSON.stringify(good)};
+    // Through the app's own codec, so this keeps poisoning a REAL payload
+    // whatever format buildCharacterCode() is writing this release.
     var seg = code.split('-').find(function(p){ return p.slice(0,2) === 'CP'; });
-    var pad = seg.slice(2); while (pad.length % 4) pad += '=';
-    var obj = JSON.parse(decodeURIComponent(atob(pad)));
+    var obj = JSON.parse(unpackerFor(code.split('-')[0])(seg.slice(2)));
     Object.assign(obj, ${JSON.stringify(over)});
-    var b64 = btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=/g,'');
-    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+    var packed = packPayload(JSON.stringify(obj));
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + packed : p; }).join('-');
   })()`);
 
   for (const [what, over] of [
@@ -537,8 +538,8 @@ const rollEv = (entry) => ({ type: "roll", entry });
   const unfinished = g(`(function(){
     var code = ${JSON.stringify(good)};
     var payload = { name: 'Half Built', origin: '', archetype: '', temperament: '' };
-    var b64 = btoa(encodeURIComponent(JSON.stringify(payload))).replace(/=/g,'');
-    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + b64 : p; }).join('-');
+    var packed = packPayload(JSON.stringify(payload));
+    return code.split('-').map(function(p){ return p.slice(0,2) === 'CP' ? 'CP' + packed : p; }).join('-');
   })()`);
   const half = g(`parseCharacterCode(${JSON.stringify(unfinished)})`);
   ok("an unfinished character still imports", !half.error);
