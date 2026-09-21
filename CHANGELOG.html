@@ -303,8 +303,9 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3</h1>
-    <p class="lead">Deleting a token no longer loses the character on it. The GM can keep a copy of the whole party in a couple of clicks. Character codes are a third of the length they were, and the sheet itself is several times quicker to use.</p>
+    <h1>Version v.2.3 &middot; extension 1.4</h1>
+    <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
+    <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -313,6 +314,22 @@ h1 {
     </div>
 
     <div class="grid">
+      <article class="feature-card">
+        <h3>Initiative</h3>
+        <p>The GM presses <em>Start Initiative</em> and the party fills in by itself. Names grey out as people act, <em>Next Round</em> lights up once everyone has gone, and the round number counts up. Everyone can see it.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Adversaries in the Order</h3>
+        <p>GM only. Type a name at the bottom of the tracker and it joins the order. <em>Hide</em> keeps the name from the table &mdash; they still see that something is taking a turn, just not what it is called.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Mark Your Own Turn</h3>
+        <p>Press <em>Acted</em> on your own row when you are done, and <em>Undo</em> if you were not. The GM can mark and unmark anyone.</p>
+      </article>
+      <article class="feature-card">
+        <h3>A Shared Party Panel</h3>
+        <p>The Party panel used to be the GM&apos;s alone. Now the GM can share it, so everyone sees the party&apos;s Spirit, exhaustion and injury counts. On by default; the <em>Shared</em> button turns it off.</p>
+      </article>
       <article class="feature-card">
         <h3>Lost Characters Come Back</h3>
         <p>GM only. Delete a token by accident and the character it was carrying turns up under <em>Lost characters</em> in the panel, ready to put on a new token. It is listed only while nothing else is carrying that character, so there is never a stale copy sitting next to a live one.</p>
@@ -383,7 +400,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log and the Party panel are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.3; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
+    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.4; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
   </section>
 
   <section class="panel">
@@ -394,6 +411,27 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">1.4</span>
+          <span class="version-title">Initiative, and a party panel the table can see</span>
+        </summary>
+        <ul>
+        <li><strong>This one is the extension only.</strong> The character creator is unchanged at 2.3. Reload the room to pick it up.</li>
+        <li><strong>An initiative tracker.</strong> <em>Start Initiative</em> in Table Controls fills the order with every character on a token in the scene. Names grey out as people act. The round number counts up, and <em>Next Round</em> lights up once everyone has gone &mdash; it never fires on its own, because a round that ended itself while someone was still deciding would be worse than no tracker at all.</li>
+        <li>It tracks <strong>who is left</strong> rather than whose turn it is, because that is how the table actually plays: anyone who has not gone may go.</li>
+        <li><strong>Everyone sees it.</strong> Players get the list and a button on their own row; the GM gets the controls.</li>
+        <li><strong>Adversaries go in the order too.</strong> Type a name in the box at the bottom and it joins. No stat block, no token needed &mdash; just a name and a place in the order.</li>
+        <li><strong>Hide keeps a name from the table.</strong> Players still see that a row exists and whether it has acted, which is right &mdash; in a fight you can see something taking its turn. They never see the name: it is not sent to them at all, rather than sent and hidden.</li>
+        <li><strong>Up and down arrows reorder the list</strong> so it matches the order you are actually running.</li>
+        <li><strong>End Scene ends initiative.</strong> A Breather, Break or Bed does not &mdash; those happen during a fight.</li>
+        <li><strong>The Party panel can be shared with the players.</strong> It used to be the GM&apos;s alone. Sharing is on by default; the <em>Shared</em> button in its header turns it off again. <em>Back up</em> and <em>Lost characters</em> stay the GM&apos;s whatever the switch says.</li>
+        <li>Requires extension 1.4. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.3</span>
           <span class="version-title">Nothing is lost with the token</span>

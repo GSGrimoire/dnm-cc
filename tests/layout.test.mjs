@@ -283,6 +283,110 @@ for (const width of [260, 320, 400, 520]) {
   ok(`party ${width}px: marks and injuries are warning yellow`, m.warningMatches);
 }
 
+// -------------------------------------------------------------
+// The initiative tracker, v2.4 / 1.4
+// -------------------------------------------------------------
+// The same shape that collapsed the party name at 400px: a flex row whose only
+// giving-way child has overflow:hidden, so its automatic minimum size is 0. An
+// initiative row is worse — up to six children, and the GM's rows carry two stacked
+// arrows, a hidden mark and three buttons.
+async function measureInitiative(width) {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(rollerUrl);
+  await page.waitForLoadState("domcontentloaded");
+
+  return { errors, ...(await page.evaluate(() => {
+    const panel = document.getElementById("initiative");
+    const list = document.getElementById("init-list");
+    panel.hidden = false;
+    document.getElementById("init-gm-controls").hidden = false;
+    document.getElementById("init-add-row").hidden = false;
+    document.getElementById("init-round").textContent = "Round 12";
+    list.innerHTML = "";
+
+    // The GM's view, which is the heavy one, at its worst: a long name, a hidden
+    // row, an acted row, and every control drawn.
+    const rows = [
+      { name: "Kesh \u00c5lvaran of the Long Road", npc: false, hidden: false, acted: true },
+      { name: "Reaver Pack Leader (Wounded)", npc: true, hidden: true, acted: false },
+      { name: "Vee", npc: false, hidden: false, acted: false },
+    ];
+    rows.forEach((row, i) => {
+      const li = document.createElement("li");
+      li.className = "init-row" + (row.acted ? " is-acted" : "") + (row.hidden ? " is-hidden-row" : "");
+      const moves = document.createElement("span");
+      moves.className = "init-moves";
+      for (const glyph of ["\u25b2", "\u25bc"]) {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "ghost init-move"; b.textContent = glyph;
+        b.disabled = (glyph === "\u25b2" && i === 0) || (glyph === "\u25bc" && i === rows.length - 1);
+        moves.append(b);
+      }
+      li.append(moves);
+      const name = document.createElement("span");
+      name.className = "init-name" + (row.npc ? " is-npc" : "");
+      name.textContent = row.hidden ? "Reaver Pack Leader (Wounded)" : row.name;
+      li.append(name);
+      if (row.hidden) {
+        const mark = document.createElement("span");
+        mark.className = "init-hidden-mark"; mark.textContent = "hidden";
+        li.append(mark);
+      }
+      const actions = document.createElement("div");
+      actions.className = "init-row-actions";
+      for (const [cls, text] of [["ghost init-act", row.acted ? "Undo" : "Acted"],
+                                 ["ghost", row.hidden ? "Show" : "Hide"],
+                                 ["ghost init-drop", "\u00d7"]]) {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = cls; b.textContent = text;
+        actions.append(b);
+      }
+      li.append(actions);
+      list.append(li);
+    });
+
+    const limit = document.documentElement.clientWidth;
+    const past = [];
+    let zeroWidth = 0, narrowestName = Infinity;
+    for (const li of list.children) {
+      for (const child of li.children) {
+        const r = child.getBoundingClientRect();
+        if (r.right > limit + 1) past.push(child.className + "@" + Math.round(r.right));
+        if (r.width < 1) zeroWidth++;
+      }
+      const n = li.querySelector(".init-name").getBoundingClientRect();
+      if (n.width < narrowestName) narrowestName = n.width;
+    }
+    // Every control has to be reachable: a button that has been squeezed to nothing
+    // is a control the GM cannot press, which is indistinguishable from a bug.
+    let tinyButtons = 0;
+    for (const b of list.querySelectorAll("button")) {
+      if (b.getBoundingClientRect().width < 8) tinyButtons++;
+    }
+    const addBox = document.getElementById("init-add").getBoundingClientRect();
+    const dimmed = getComputedStyle(list.querySelector(".is-acted .init-name")).opacity;
+    return { past, zeroWidth, narrowestName, tinyButtons,
+             addPast: addBox.right > limit + 1, dimmed: Number(dimmed) };
+  })) };
+}
+
+for (const width of [260, 320, 400, 520]) {
+  const m = await measureInitiative(width);
+  ok(`initiative ${width}px: the roller throws nothing`, m.errors.length === 0);
+  if (m.errors.length) console.log("      " + m.errors[0]);
+  ok(`initiative ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
+  if (m.past.length) console.log("      " + m.past.join(", "));
+  ok(`initiative ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
+  ok(`initiative ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
+     m.narrowestName >= 34);
+  ok(`initiative ${width}px: every control is still pressable`, m.tinyButtons === 0);
+  ok(`initiative ${width}px: the add-adversary box fits`, m.addPast === false);
+  // Dimmed, not invisible: the GM has to be able to read a row to undo it.
+  ok(`initiative ${width}px: an acted row is dimmed but legible`, m.dimmed > 0.3 && m.dimmed < 1);
+}
+
 await browser.close();
 console.log(`\nlayout: ${pass} passed, ${fail} failed`);
 console.log(`

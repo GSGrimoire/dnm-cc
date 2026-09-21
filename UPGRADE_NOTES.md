@@ -2,6 +2,173 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 1.4 — Initiative, and a party panel the table can see
+
+**Extension only.** `dnm-obr` goes to **1.4**; the creator is unchanged at **2.3** and
+`index.html` is not touched. Nothing about the character code, the sheet or the snapshot
+moves. The only deploy step is `dnm-obr`, then a room reload.
+
+Room metadata schema goes **v4 → v5**. Backward compatible in the direction that
+matters — see the migration note below.
+
+A number rather than a `.x`: a new panel, a new rule, and a deliberate reversal of who
+can see the party panel.
+
+## Why a tracker of who is LEFT, not whose turn it is
+
+The table does not play in a strict order. Anyone who has not acted may go. A turn
+pointer would be a rule the game does not have, so the tracker holds a row per
+combatant with an `acted` flag and answers "who is still to go", which is the question
+actually asked out loud.
+
+That is also why **Next Round never fires itself.** It lights up when everyone has
+acted — `initiativeAllActed()` — and waits. A round that ended itself while someone was
+still deciding would be worse than no tracker.
+
+## Where it lives, and what that costs
+
+`state.initiative = { round, rows: [{ id, name, kind, acted, hidden }] }` in room
+metadata, beside the epochs, because every client has to agree and it has to survive a
+reload mid-fight. `null` when no round is running — absent rather than empty, so
+"is there a fight on" is one check.
+
+`trimState()` normalises it. **Note what that is for**, because the obvious reading is
+wrong: the spread at the top of `trimState()` already CARRIES initiative through, and
+the trim loop only pops log entries, so survival was never in question. What the
+normalise buys is the clamp. The loop stops at one log entry, so a forged initiative
+carrying four thousand rows would strip the log to nothing and still overrun the 16 kB
+budget — which breaks room metadata for every OTHER extension in the room, not just
+ours. Measured in the test: 1,351,084 bytes without the clamp, under 11,000 with it.
+
+## Hiding a row, and what "hidden" has to mean
+
+The GM can hide an adversary's name from the table. Players still see that the row
+exists and whether it has acted — correct, because in a fight you can see something
+taking its turn — but never the name.
+
+**The name is not published at all.** `applyInitiativeAction`'s `hide` case sets
+`name: ""`; the GM's client keeps `{ rowId: name }` in its own `localStorage`.
+
+This is not fussiness. Room metadata is readable by every client in the room, so a name
+published there is public no matter what the interface draws. Flagging a row `hidden`
+and still sending the name would be a secret in name only, readable from any player's
+console. The precedent is already in the codebase: the concealed-roll log is kept in
+`localStorage` rather than room metadata for exactly this reason.
+
+`party.test.mjs` asserts it the only way worth asserting it:
+`!JSON.stringify(state).includes("Reaver")`.
+
+Consequences, both accepted:
+
+- **The GM's hidden names do not follow them to another browser.** `initRowLabel()`
+  returns `"Hidden"` rather than inventing something, so the GM can see a row they
+  cannot name. Unhiding it lets them retype it.
+- **Ending initiative deletes the room's hidden names.** They name adversaries in a
+  fight that is over, and keeping them would have the next fight's row inherit the last
+  one's name.
+
+## The trust boundary
+
+| action | who |
+|---|---|
+| `start` `end` `next` `add` `remove` `move` `hide` | GM only, enforced in `background.js` |
+| `act` | anyone |
+| `partyShared` | GM only |
+
+**`act` is deliberately open**, and the limitation is worth stating plainly rather than
+implying a control that does not exist. `mayMarkRow()` says a player may tick only their
+own row, and that check runs **in the sender's own tab**. `background.js` — the only real
+check in the system — verifies connection ids against the room's GMs and has no map from
+a connection to a character, so it cannot tell whether a sender owns the row they ticked.
+
+The check stops a misclick and nothing more. A forged tick is one GM press to undo. The
+thing that would make it airtight is a connection-to-character binding, which is a lot of
+machinery for something reversible in one click — the same judgement bond effects already
+run on.
+
+`mayMarkRow()` and `initRowLabel()` live in `dnm.js` rather than `roller.js` **because
+they are rules about who may see and do what**, and a rule nobody can test is a rule
+nobody can trust. That is the same argument that put `isGmOnlyEvent()` there.
+
+## The party panel is shared now
+
+It was GM-only since 0.9.0. From 1.4 the GM has a switch, stored in room metadata so
+every client agrees, and **it defaults to on**.
+
+Defaulting to on is a deliberate reversal of an existing privacy boundary, so it is worth
+saying why: the table asked for it, on the grounds that seeing where everyone stands is
+what makes a player lean in rather than wait to be told. The alternative — default off,
+preserving the old behaviour — would have meant shipping the feature in the opposite
+position from the one that was asked for and making the GM find a switch to get it.
+
+A room written before 1.4 has no `partyShared` key at all. `trimState()` reads a missing
+flag as `true` (`next.partyShared !== false`), so an old room lands on the documented
+default rather than silently off.
+
+**What stays GM-only whatever the switch says:** `Back up`, which reads every character
+in the scene, and `Lost characters`, which could hand someone a copy of a character that
+is not theirs. `renderRecovery()` keeps its own role check for that reason.
+
+`refreshParty()` is no longer GM-gated, but a player whose GM has not shared builds
+nothing at all rather than building a list and hiding it — so a player's client never
+parses characters it is not meant to be showing.
+
+## Ad-hoc adversary rows
+
+Type a name in the box at the foot of the tracker, press enter, it joins the order. No
+stat block, no token, no bestiary.
+
+The blank row is always present, the way the sheet's Injuries and Truths work, rather
+than sitting behind a `+`. The objection to that was that a permanent blank row is wasted
+space — true in general, and not here, because **the tracker only exists while a round is
+running**, and that is exactly when adversaries are being added.
+
+This is deliberately the seam a future NPC roster plugs into: an adversary from a roster
+is a tracker row that also carries stats. See `BACKLOG.md`.
+
+## v4 → v5
+
+A 1.3 client reading a v5 room sees keys it ignores; a 1.4 client reading a v4 room gets
+`initiative: null` (no fight running) and `partyShared: true` (the default). Neither
+breaks. `party.test.mjs` walks a real v4 state through `trimState()` and checks the pools,
+epochs and Complication level all survive.
+
+There is no forced migration and none is needed — the initiative is per-fight and the
+share flag has a safe default.
+
+## What is NOT in this release
+
+- **An NPC roster or bestiary.** Out of scope on purpose; the hosting question is
+  unanswered. Written up in `BACKLOG.md` with the three candidate shapes and the
+  measurements that rule options in and out.
+- **Drag to reorder.** Arrows instead, for now. Drag targets in a 320–420px drawer are
+  fiddly, and pointer-drag inside an iframe Owlbear owns is the thing that already needed
+  explicit pointer capture for the sheet's resize handles. Add it if reordering turns out
+  to be frequent.
+- **Rolling does not mark you as acted.** Tempting and wrong: people roll out of turn
+  constantly — assists, reactions, a check the GM asks for mid-scene.
+
+## Live checks
+
+No suite can reach a real room. Do these after deploying.
+
+1. **Reload the ROOM.** The background page is cached for the whole room session.
+2. Press **Start Initiative** and confirm the party fills in by itself, one row per
+   character on a token.
+3. Confirm **a player sees the tracker** and can press Acted on their own row and only
+   their own.
+4. Add an adversary, **Hide** it, and confirm from a player's client that the name is
+   nowhere — check the row, and check `OBR.room.getMetadata()` in their console. That is
+   the assertion the unit test makes; this is the one that proves it end to end.
+5. **Next Round** lights up once everyone has acted, and does not fire on its own.
+6. **End Scene** ends initiative. A **Breather** does not.
+7. Flip **Shared** off and on and confirm a player's party panel appears and disappears
+   without them reloading.
+8. Confirm a player can never see **Back up** or **Lost characters** even while shared.
+9. Reorder with the arrows and confirm every client sees the same order.
+10. Start a fight, hide a row, end initiative, start another: the new row 3 must NOT
+    inherit the old fight's hidden name.
+
 # v2.3 / 1.3 — Nothing is lost with the token
 
 Creator **v2.3**, extension **1.3**. Both change; deploy the extension first — a DM2 code

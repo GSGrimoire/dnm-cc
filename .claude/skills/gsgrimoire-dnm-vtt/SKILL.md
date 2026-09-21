@@ -245,6 +245,52 @@ string, never a URL, and nothing is fetched from it. It is load-bearing as a key
 orphans every attached character and every room's log, so it needs a migration, not a
 find-and-replace.
 
+## Where ideas go (1.4)
+
+`dnm-cc/BACKLOG.md`. Before it existed there was nowhere to put one: `UPGRADE_NOTES.md`
+is a 2,400-line cumulative log with a "Still not done" section per release that nobody
+reads back through, and Asana is the QA log.
+
+Record the REASONING and especially what was measured and rejected — a rejected option
+with a number beside it stops the next session re-deriving it. When an entry ships,
+delete it; `UPGRADE_NOTES.md` carries the record from then on.
+
+## The initiative tracker (1.4)
+
+**It tracks who is LEFT, not whose turn it is.** The table does not play in a strict
+order — anyone who has not acted may go — so a turn pointer would be a rule the game does
+not have. Rows with an `acted` flag, and `initiativeAllActed()` lights Next Round. **It
+never fires itself**, and that is a decision, not an omission.
+
+**A hidden row's name is NOT PUBLISHED, not merely flagged.** Room metadata is readable
+by every client, so a name sent there is public whatever the interface draws. `hide` sets
+`name: ""` and the GM's client keeps the names in its own `localStorage` — the same reason
+the concealed-roll log lives there. The test that matters is
+`!JSON.stringify(state).includes(theName)`. If you ever find yourself publishing a secret
+and hiding it in CSS, this is the precedent that says don't.
+
+Consequences, both accepted: the GM's hidden names do not follow them to another browser
+(the row reads "Hidden" rather than inventing a name), and ending initiative deletes them
+so the next fight cannot inherit the last one's.
+
+**`act` is open to everyone and the limit is real.** `mayMarkRow()` says a player may tick
+only their own row, and it runs in the sender's own tab. `background.js` has no map from a
+connection id to a character, so it CANNOT enforce it. Do not describe it as a control. A
+forged tick is one GM press to undo, which is why the connection-to-character binding that
+would make it airtight is not worth building.
+
+**`mayMarkRow()` and `initRowLabel()` live in `dnm.js`, not `roller.js`**, for the same
+reason `isGmOnlyEvent()` does: they are rules about who may see and do what, and a rule
+nobody can test is a rule nobody can trust.
+
+**End Scene ends initiative; the rests do not.** A Breather happens DURING a fight.
+
+**The party panel is shared by default from 1.4**, with a GM switch in room metadata.
+Defaulting ON reverses an existing privacy boundary on purpose — the table asked for it.
+A room from before 1.4 has no flag, and `next.partyShared !== false` lands it on the
+documented default rather than silently off. **Back up and Lost characters stay GM-only
+whatever the switch says**, and `renderRecovery()` keeps its own role check to enforce it.
+
 Read `references/architecture.md` before changing how the halves talk — the character code
 format, the token metadata, the epoch mechanism and the event reducer are all documented
 there, along with the failure each design avoids.
@@ -535,6 +581,15 @@ code.
 
 **Prove a new regression test fails without the fix.** Revert the fix, watch it fail, restore.
 A test written after the fix can pass for reasons unrelated to the bug.
+
+**Check what a defensive line is actually defending.** `trimState()` normalises the
+initiative, and the obvious reading — "so it survives trimming" — is wrong: the spread at
+the top already carries it through and the loop only pops log entries. What it really buys
+is the CLAMP, because the loop stops at one log entry, so a forged four-thousand-row
+initiative would strip the log to nothing and still overrun the shared 16 kB budget,
+breaking metadata for other extensions. Reverting the line failed one unrelated assertion
+until a test was written for the thing it was really for. A test aimed at the wrong reason
+passes for the wrong reason.
 
 **Fuzz against an implementation nobody here wrote, in BOTH directions, and drive it at
 settings your own code never produces.** The DM2 codec is checked against zlib at levels

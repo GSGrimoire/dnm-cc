@@ -1,11 +1,14 @@
 // Party-status tests. These exercise the real exported helpers from dnm.js — no
 // reimplementation, no hand-built status objects.
-import { epochStatus, readAppliedEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
+import { epochStatus, readAppliedEpochs, readEpochs, EPOCH_KEYS, emptyEpochs, EPOCH_LABELS, isGmOnlyEvent, readCompAt, classifyDie, applyEvent, EMPTY_STATE,
   COMP_AT_MIN, COMP_AT_MAX, readBondQueue, pruneBondQueue, bondNamesMatch,
   MAX_BOND_EFFECTS, BOND_EFFECT_TTL_MS, trimState, MAX_LOG_ENTRIES,
   createPoolBatcher, sanitizeBondEffect, DRIVE_THREAT_SPEND_MIN, FIELD_LIMITS,
   CHAR_KEY, characterTokens, noteVanished, trimRecovery, readRecovery, writeRecovery,
-  visibleRecovery, recoveryKeyFor, MAX_RECOVERY_ENTRIES, RECOVERY_TTL_MS } from "../out/dnm-obr/dnm.js";
+  visibleRecovery, recoveryKeyFor, MAX_RECOVERY_ENTRIES, RECOVERY_TTL_MS,
+  readInitiative, applyInitiativeAction, emptyInitiative, initiativeAllActed,
+  INITIATIVE_ACTIONS, MAX_INITIATIVE_ROWS, INITIATIVE_NAME_MAX,
+  mayMarkRow, initRowLabel, initRowIdForCharacter } from "../out/dnm-obr/dnm.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -565,6 +568,297 @@ ok("a zero Threat delta is not a spend",
     writeRecovery(storage, "room-1", [{ code: "DM2-kesh", tokenId: "a", at: NOW }], NOW);
     ok("a written buffer reads back", readRecovery(storage, "room-1", NOW).length === 1);
     ok("and not from another room", readRecovery(storage, "room-2", NOW).length === 0);
+  }
+}
+
+
+// =============================================================
+// Initiative (1.4)
+// =============================================================
+{
+  const NOW = 1_700_000_000_000;
+  const fresh = () => structuredClone(EMPTY_STATE);
+  const run = (state, ...events) => events.reduce((s, ev) => applyEvent(s, ev), state);
+  const init = (state) => readInitiative(state);
+  const names = (state) => init(state).rows.map((r) => r.name);
+
+  // --- the shape of it ---
+  ok("a fresh room has no initiative running", readInitiative(fresh()) === null);
+  ok("starting one gives round 1 and no rows",
+    JSON.stringify(readInitiative(run(fresh(), { type: "init", action: "start" })))
+      === JSON.stringify({ round: 1, rows: [] }));
+  ok("ending one removes it entirely",
+    readInitiative(run(fresh(), { type: "init", action: "start" }, { type: "init", action: "end" })) === null);
+
+  const started = run(fresh(),
+    { type: "init", action: "start" },
+    { type: "init", action: "add", id: "a", name: "Kesh", kind: "pc" },
+    { type: "init", action: "add", id: "b", name: "Orrin", kind: "pc" },
+    { type: "init", action: "add", id: "n1", name: "Reaver", kind: "npc" });
+
+  ok("rows arrive in the order they were added",
+    JSON.stringify(names(started)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+  ok("a row remembers whether it is a character or an adversary",
+    init(started).rows.map((r) => r.kind).join() === "pc,pc,npc");
+  ok("nobody has acted yet", init(started).rows.every((r) => !r.acted));
+
+  // --- marking a turn ended ---
+  {
+    const acted = run(started, { type: "init", action: "act", id: "a", acted: true });
+    ok("marking acted marks only that row",
+      init(acted).rows.filter((r) => r.acted).map((r) => r.name).join() === "Kesh");
+    const back = run(acted, { type: "init", action: "act", id: "a", acted: false });
+    ok("and it can be taken back", init(back).rows.every((r) => !r.acted));
+    ok("acting on a row that is not there changes nothing",
+      JSON.stringify(init(run(started, { type: "init", action: "act", id: "nope", acted: true })))
+        === JSON.stringify(init(started)));
+  }
+
+  // --- the round ---
+  {
+    const all = run(started,
+      { type: "init", action: "act", id: "a", acted: true },
+      { type: "init", action: "act", id: "b", acted: true },
+      { type: "init", action: "act", id: "n1", acted: true });
+    ok("all acted is detected", initiativeAllActed(init(all)) === true);
+    ok("an empty tracker is NOT 'all acted' — nothing to light the button for",
+      initiativeAllActed(emptyInitiative()) === false);
+
+    const nextRound = run(all, { type: "init", action: "next" });
+    ok("next round advances the number", init(nextRound).round === 2);
+    ok("next round clears every acted flag", init(nextRound).rows.every((r) => !r.acted));
+    // The whole point of tracking rows rather than a turn pointer: the fight does not
+    // change between rounds, only the round does.
+    ok("next round keeps the rows and their order",
+      JSON.stringify(names(nextRound)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+    ok("next round keeps hidden flags and kinds",
+      init(nextRound).rows.map((r) => r.kind).join() === "pc,pc,npc");
+  }
+
+  // --- reordering ---
+  {
+    const down = run(started, { type: "init", action: "move", id: "a", delta: 1 });
+    ok("moving down swaps with the row below",
+      JSON.stringify(names(down)) === JSON.stringify(["Orrin", "Kesh", "Reaver"]));
+    const up = run(down, { type: "init", action: "move", id: "a", delta: -1 });
+    ok("and moving up puts it back",
+      JSON.stringify(names(up)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+    // Clamped, not wrapped. Up on the top row must do nothing — sending it to the
+    // bottom would be the opposite of what the press asked for.
+    ok("up on the top row does nothing",
+      JSON.stringify(names(run(started, { type: "init", action: "move", id: "a", delta: -1 })))
+        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+    ok("down on the bottom row does nothing",
+      JSON.stringify(names(run(started, { type: "init", action: "move", id: "n1", delta: 1 })))
+        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+    ok("a move of zero does nothing",
+      JSON.stringify(names(run(started, { type: "init", action: "move", id: "a", delta: 0 })))
+        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+  }
+
+  // --- hiding, which is the part that has to be actually private ---
+  {
+    const hidden = run(started, { type: "init", action: "hide", id: "n1", hidden: true });
+    const row = init(hidden).rows[2];
+    ok("a hidden row is flagged", row.hidden === true);
+    // THE ASSERTION THAT MATTERS. Room metadata is readable by every client, so a
+    // name that is published is public no matter what the interface draws. Hiding has
+    // to DROP the name, not flag it — the same reason concealed rolls are kept in the
+    // GM's localStorage rather than in the room.
+    ok("a hidden row's name is not in the room state at all", row.name === "");
+    ok("the whole serialised state contains no trace of the hidden name",
+      !JSON.stringify(hidden).includes("Reaver"));
+    ok("a hidden row keeps its position", init(hidden).rows.map((r) => r.id).join() === "a,b,n1");
+    ok("a hidden row can still be marked as acted",
+      init(run(hidden, { type: "init", action: "act", id: "n1", acted: true })).rows[2].acted === true);
+    const shown = run(hidden, { type: "init", action: "hide", id: "n1", hidden: false, name: "Reaver" });
+    ok("unhiding restores the name from the event", init(shown).rows[2].name === "Reaver");
+  }
+
+  // --- removing ---
+  {
+    const gone = run(started, { type: "init", action: "remove", id: "b" });
+    ok("removing takes the row out", JSON.stringify(names(gone)) === JSON.stringify(["Kesh", "Reaver"]));
+    ok("removing something absent changes nothing",
+      JSON.stringify(names(run(started, { type: "init", action: "remove", id: "nope" })))
+        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+  }
+
+  // --- End Scene ends the fight; a rest during one must not ---
+  {
+    const afterScene = run(started, { type: "epoch", boundary: "scene" });
+    ok("End Scene ends initiative", readInitiative(afterScene) === null);
+    for (const boundary of ["breather", "break", "bed", "session", "adventure"]) {
+      const after = run(started, { type: "epoch", boundary });
+      // A Breather happens DURING a fight. Clearing the tracker under the table
+      // mid-combat would be worse than not having one.
+      ok(`a ${boundary} does not end initiative`, readInitiative(after) !== null);
+    }
+  }
+
+  // --- bounds, because this is rendered in a loop from shared state ---
+  {
+    let many = run(fresh(), { type: "init", action: "start" });
+    for (let i = 0; i < MAX_INITIATIVE_ROWS + 10; i++) {
+      many = applyEvent(many, { type: "init", action: "add", id: "r" + i, name: "Row " + i, kind: "npc" });
+    }
+    ok(`rows are capped at ${MAX_INITIATIVE_ROWS}`, init(many).rows.length === MAX_INITIATIVE_ROWS);
+
+    ok("a duplicate id is refused rather than doubling a row",
+      init(run(started, { type: "init", action: "add", id: "a", name: "Impostor", kind: "pc" })).rows.length === 3);
+    ok("a row with no id is refused",
+      init(run(started, { type: "init", action: "add", id: "", name: "Nameless", kind: "pc" })).rows.length === 3);
+
+    const long = run(started, { type: "init", action: "add", id: "long", name: "x".repeat(500), kind: "npc" });
+    ok(`a long name is clamped to ${INITIATIVE_NAME_MAX}`,
+      init(long).rows[3].name.length <= INITIATIVE_NAME_MAX);
+
+    const silly = { ...fresh(), initiative: { round: 1e9, rows: [{ id: "a", name: "A", kind: "pc" }] } };
+    ok("an absurd round number is clamped", readInitiative(silly).round <= 999);
+    const negative = { ...fresh(), initiative: { round: -5, rows: [] } };
+    ok("a negative round number is clamped up", readInitiative(negative).round >= 1);
+  }
+
+  // --- junk from the room, which is where this is read from ---
+  {
+    ok("initiative that is not an object reads as none",
+      readInitiative({ ...fresh(), initiative: "yes" }) === null);
+    ok("rows that are not an array read as empty",
+      readInitiative({ ...fresh(), initiative: { round: 1, rows: "nope" } }).rows.length === 0);
+    ok("junk rows are dropped",
+      readInitiative({ ...fresh(), initiative: { round: 1, rows: [null, {}, 7, { id: "ok", name: "Fine" }] } })
+        .rows.length === 1);
+    ok("an unknown kind falls back to pc",
+      readInitiative({ ...fresh(), initiative: { round: 1, rows: [{ id: "a", name: "A", kind: "dragon" }] } })
+        .rows[0].kind === "pc");
+    ok("an unknown action leaves the tracker alone",
+      JSON.stringify(init(run(started, { type: "init", action: "explode" }))) === JSON.stringify(init(started)));
+    ok("INITIATIVE_ACTIONS does not contain the unknown action", !INITIATIVE_ACTIONS.has("explode"));
+  }
+
+
+  // --- who may tick a row ---
+  {
+    const pc = { id: initRowIdForCharacter("Kesh Alvaran"), name: "Kesh Alvaran", kind: "pc", hidden: false };
+    const other = { id: initRowIdForCharacter("Orrin"), name: "Orrin", kind: "pc", hidden: false };
+    const npc = { id: "npc:1", name: "Reaver", kind: "npc", hidden: false };
+    const secret = { id: "npc:2", name: "", kind: "npc", hidden: true };
+
+    ok("the GM may tick anyone", [pc, other, npc, secret].every((r) => mayMarkRow(r, { role: "GM" })));
+    ok("a player may tick their own row",
+      mayMarkRow(pc, { role: "PLAYER", myNameKey: "Kesh Alvaran" }) === true);
+    ok("case and stray spaces do not stop them",
+      mayMarkRow(pc, { role: "PLAYER", myNameKey: "  kesh ALVARAN " }) === true);
+    ok("a player may not tick someone else's row",
+      mayMarkRow(other, { role: "PLAYER", myNameKey: "Kesh Alvaran" }) === false);
+    ok("a player may not tick an adversary",
+      mayMarkRow(npc, { role: "PLAYER", myNameKey: "Kesh Alvaran" }) === false);
+    // They cannot know whose it is, so there is nothing to offer them.
+    ok("a player may not tick a hidden row",
+      mayMarkRow(secret, { role: "PLAYER", myNameKey: "Kesh Alvaran" }) === false);
+    ok("an unnamed player matches nothing",
+      mayMarkRow(pc, { role: "PLAYER", myNameKey: "" }) === false);
+    ok("and nothing at all is not a row", mayMarkRow(null, { role: "GM" }) === false);
+    ok("one character on two tokens is still one row id",
+      initRowIdForCharacter("Kesh Alvaran") === initRowIdForCharacter("kesh alvaran "));
+    ok("a nameless character gets no row id", initRowIdForCharacter("  ") === "");
+  }
+
+  // --- what a row is labelled ---
+  {
+    const shown = { id: "npc:1", name: "Reaver", kind: "npc", hidden: false };
+    const secret = { id: "npc:2", name: "", kind: "npc", hidden: true };
+    ok("a visible row shows its name", initRowLabel(shown, { role: "PLAYER" }) === "Reaver");
+    ok("a row with no name at all is not blank", initRowLabel({ id: "x", name: "" }, { role: "GM" }) === "Unnamed");
+    // The player's client HAS no name to draw — it was never published.
+    ok("a player sees a hidden row as Hidden", initRowLabel(secret, { role: "PLAYER" }) === "Hidden");
+    ok("a player is not handed the name even if one is passed in",
+      initRowLabel(secret, { role: "PLAYER", hiddenNames: { "npc:2": "Reaver Boss" } }) === "Hidden");
+    ok("the GM sees it from their own storage",
+      initRowLabel(secret, { role: "GM", hiddenNames: { "npc:2": "Reaver Boss" } }) === "Reaver Boss");
+    // Honest rather than inventing one: the GM cleared their site data, or is on a
+    // different machine from the one that hid it.
+    ok("and sees Hidden when their storage has lost it",
+      initRowLabel(secret, { role: "GM", hiddenNames: {} }) === "Hidden");
+    ok("a remembered name is still clamped",
+      initRowLabel(secret, { role: "GM", hiddenNames: { "npc:2": "z".repeat(500) } }).length <= INITIATIVE_NAME_MAX);
+  }
+
+  // --- the trust boundary ---
+  {
+    for (const action of ["start", "end", "next", "add", "remove", "move", "hide"]) {
+      ok(`running the round is the GM's: ${action}`,
+        isGmOnlyEvent({ type: "init", action }) === true);
+    }
+    // Deliberately open. Players mark themselves, which is the participatory half of
+    // the feature; a forged tick is one GM click to undo.
+    ok("marking a turn ended is open to everyone",
+      isGmOnlyEvent({ type: "init", action: "act", id: "a", acted: true }) === false);
+    ok("the party-share switch is the GM's",
+      isGmOnlyEvent({ type: "partyShared", value: false }) === true);
+  }
+
+  // --- surviving the metadata budget ---
+  {
+    // The tracker must outlive a flooded log, the same way the epochs do. A tracker
+    // that vanishes mid-fight because someone rolled a lot is worse than no tracker.
+    let busy = run(fresh(),
+      { type: "init", action: "start" },
+      { type: "init", action: "add", id: "a", name: "Kesh", kind: "pc" },
+      { type: "init", action: "add", id: "n1", name: "Reaver", kind: "npc" });
+    busy = run(busy, { type: "init", action: "act", id: "a", acted: true }, { type: "init", action: "next" });
+    for (let i = 0; i < 400; i++) {
+      busy = applyEvent(busy, { type: "roll", entry: {
+        id: "e" + i, t: NOW + i, kind: "roll", who: "Flooder",
+        label: "x".repeat(40), detail: "y".repeat(120) } });
+    }
+    const trimmed = trimState(busy);
+    ok("the log really was trimmed", JSON.stringify(trimmed).length <= 11000);
+    ok("initiative survives trimming", readInitiative(trimmed) !== null);
+    ok("and keeps its round", readInitiative(trimmed).round === 2);
+    ok("and keeps its rows", readInitiative(trimmed).rows.length === 2);
+    ok("and keeps the party-share setting", trimmed.partyShared === true);
+
+    // What the normalise in trimState() is actually FOR. The spread already carries
+    // initiative through — the trim loop only pops log entries — so survival is not
+    // the point. The point is that the loop stops at one log entry, so a forged
+    // initiative big enough to blow the 16 kB budget on its own would strip the log
+    // to nothing and still overrun, breaking room metadata for every OTHER extension
+    // in the room. Clamping on the way through is what stops that.
+    const forged = { ...fresh(), initiative: { round: 1, rows: Array.from({ length: 4000 },
+      (_, i) => ({ id: "x" + i, name: "n".repeat(300), kind: "npc" })) } };
+    const clamped = trimState(forged);
+    ok(`a forged oversized initiative is cut to ${MAX_INITIATIVE_ROWS} rows`,
+      readInitiative(clamped).rows.length === MAX_INITIATIVE_ROWS);
+    ok("and its names are cut to the limit",
+      readInitiative(clamped).rows.every((r) => r.name.length <= INITIATIVE_NAME_MAX));
+    ok(`and the trimmed state fits the room budget (${JSON.stringify(clamped).length})`,
+      JSON.stringify(clamped).length <= 11000);
+  }
+
+  // --- the party-share switch ---
+  {
+    ok("sharing is on by default", fresh().partyShared === true);
+    const off = run(fresh(), { type: "partyShared", value: false });
+    ok("the GM can turn it off", off.partyShared === false);
+    ok("and back on", run(off, { type: "partyShared", value: true }).partyShared === true);
+    // A room written before 1.4 has no flag at all. It must read as SHARED rather than
+    // as off, or the switch would silently be in the opposite position from the default.
+    const old = { ...fresh() };
+    delete old.partyShared;
+    ok("a room from before 1.4 reads as shared", trimState(old).partyShared === true);
+  }
+
+  // --- a v4 room meeting a 1.4 client ---
+  {
+    const v4 = { v: 4, momentum: 2, threat: 1, log: [],
+      epochs: { scene: 3, session: 1, adventure: 0, breather: 0, break: 0, bed: 2 },
+      compAt: 18, bonds: [] };
+    const seen = trimState(v4);
+    ok("a v4 room keeps its pools", seen.momentum === 2 && seen.threat === 1);
+    ok("a v4 room keeps its epochs", readEpochs(seen).scene === 3 && readEpochs(seen).bed === 2);
+    ok("a v4 room keeps its Complication level", readCompAt(seen) === 18);
+    ok("a v4 room simply has no initiative running", readInitiative(seen) === null);
   }
 }
 

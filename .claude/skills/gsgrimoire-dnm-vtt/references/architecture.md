@@ -174,6 +174,27 @@ the caller re-seeds its baseline on `onReadyChange` without diffing rather than
 matched on `bondNameKey()`. That filter runs at render time, and it is the whole reason
 there is never a live copy and a stale copy on offer at once.
 
+## Initiative (1.4)
+
+`state.initiative = { round, rows: [{ id, name, kind, acted, hidden }] }`, or `null` when
+no round is running. Row ids are `pc:<bondNameKey>` for characters — so one character on
+two tokens is one row — and `npc:<random>` for ad-hoc adversaries.
+
+**A hidden row carries no name.** `hide` sets `name: ""` and the GM's client keeps the
+real one in its own `localStorage`, because room metadata is readable by every client and
+a name published there is public whatever the interface draws.
+
+`trimState()` normalises it, which is the clamp rather than the survival — the spread
+already carries it through. Without the clamp a forged oversized initiative strips the log
+to nothing and still overruns the shared budget.
+
+Every action is GM-only except `act`. `mayMarkRow()` limits a player to their own row in
+their own tab only; `background.js` cannot enforce it, having no connection-to-character
+map.
+
+`state.partyShared` is the GM's switch for whether players see the party panel. Defaults
+to `true`, including for rooms written before 1.4.
+
 ## Room metadata budget
 
 Owlbear allows **16 kB of room metadata total across every extension in the room** — not per
