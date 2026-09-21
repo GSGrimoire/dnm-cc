@@ -255,7 +255,23 @@ Record the REASONING and especially what was measured and rejected — a rejecte
 with a number beside it stops the next session re-deriving it. When an entry ships,
 delete it; `UPGRADE_NOTES.md` carries the record from then on.
 
-## The initiative tracker (1.4)
+## The initiative tracker (1.4, merged into the party panel in 1.4B)
+
+**There is ONE list.** `partyRow()` renders a character, an adversary, an ordered row
+and an unordered one. 1.4 shipped a separate Initiative panel directly above a Party
+panel already listing the same people, and it looked exactly as redundant as it was.
+Ordering follows the initiative while a round runs and is alphabetical otherwise.
+
+**The name is the link to the sheet.** That freed the row for the controls; the old
+`Sheet` button spent space repeating what the name identified.
+
+**The epoch badge is not drawn during a round**, gated on the round rather than the
+row so a list cannot come out half badged.
+
+**Panel visibility and stat visibility are two questions.** A running round opens the
+panel for players; the GM's switch decides whether Spirit, exhaustion, injuries and
+the badge are drawn in it (`partyStatsVisible()`). Folding the panels made it easy to
+answer them as one by accident.
 
 **It tracks who is LEFT, not whose turn it is.** The table does not play in a strict
 order — anyone who has not acted may go — so a turn pointer would be a rule the game does
@@ -501,6 +517,10 @@ and playwright in ONE command or the next run dies on a missing module.
   panel is extension code and no suite could reach it at all before that
 - `codec.test.mjs` — the DM2 payload codec, fuzzed against zlib in both directions, plus
   a character-for-character comparison of the two vendored copies
+- `rollerui.test.mjs` — the only suite that RUNS `roller.js`. Chromium, with the
+  vendored SDK swapped for a stub in a staged copy, so the test can push a scene, a
+  room and a role at it. Added in 1.4B and it found four real bugs on its first run,
+  including one that meant no Acted button was drawn for anybody
 
 `embedded.test.mjs` (v1.27) closed a gap the other three had disclaimed for fifteen
 releases. The block has no imports — the SDK is inlined — so once the SDK is removed it
@@ -564,6 +584,17 @@ have parsed cleanly and threw on render — a blank sheet with no message. The l
 is a character from a newer creator meeting a room serving the cached older one, or a
 renamed key. Refuse only a key that is SET and does not RESOLVE: an EMPTY origin is an
 unfinished character and has always imported.
+
+**Serve the extension over http, never `file://`.** Chromium refuses to load an ES
+module from `file://` and reports the refusal to the CONSOLE, not as a page error. A
+suite that loads `dnm-obr/index.html` off disk therefore gets a page whose script never
+ran, with nothing thrown — and every "it starts without throwing" assertion passes
+against an empty page. `layout.test.mjs` did exactly that from 1.3 until 1.4B. Both
+browser suites go through `tests/serve.mjs` now.
+
+**An assertion that nothing went wrong is worthless until you have proved the thing
+ran.** Inject a `throw` and watch it fail; that is the only way to tell a green
+"no errors" from a green "no code".
 
 **Ask what a green suite cannot see.** Three releases running, the bug was in the gap
 between the test environment and the real one: a fixture the earlier assertions had already

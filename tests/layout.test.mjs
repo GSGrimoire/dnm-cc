@@ -18,6 +18,7 @@
 // =============================================================
 import fs from "fs";
 import path from "path";
+import { serve } from "./serve.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log("  FAIL:", name); } };
@@ -171,79 +172,130 @@ for (const width of [320, 400, 520, 560, 1280]) {
 }
 
 // -------------------------------------------------------------
-// The roller's party rows, v2.3 / 1.3
+// The roller's party rows, v2.3 / 1.3, merged with initiative in 1.4B
 // -------------------------------------------------------------
-// A party row was three children — name, Spirit, status — and is now up to six:
-// exhaustion initials and an injury count joined them, and the GM's "Sheet" button
-// was already there. The name is the only child that gives way, and with
-// overflow:hidden its automatic minimum size is zero, so this is the exact shape
-// that put the Roll button outside the panel in 2.1.
+// One list now. A party row was three children; with the initiative folded in it is
+// up to seven — stacked arrows, the name, Spirit, exhaustion marks, an injury count,
+// a hidden mark, and three buttons. The name is the only child that gives way, and
+// with overflow:hidden its automatic minimum size is 0, which is the exact shape that
+// put the Roll button outside the panel in 2.1 and collapsed the party name in 1.3.
 //
-// It is measured here rather than reasoned about because jsdom does no cascade:
-// the party panel is extension code and was never reachable by any suite at all
-// until this block. The rows are built by hand rather than through refreshParty(),
-// which needs a live room — the CSS is what is under test, not the plumbing.
-const rollerUrl = "file://" + path.resolve("out/dnm-obr/index.html");
+// Measured rather than reasoned about because jsdom does no cascade: the party panel
+// is extension code and was unreachable by any suite before 1.3.
+// Served over http rather than file://, because Chromium refuses to load an ES
+// module from file:// and reports the refusal only to the console. Loaded that way,
+// roller.js never ran and "the roller throws nothing" below was passing against a
+// page with no script on it. The measurements were always real — they are made
+// against DOM this file builds — but the error claim was not. See serve.mjs.
+const rollerSite = await serve("out/dnm-obr");
+const rollerUrl = rollerSite.origin + "/index.html";
 
-async function measureParty(width) {
+// `running` drives both states from one harness: the quiet party list, and the same
+// list mid-fight carrying adversaries and every control.
+async function measureParty(width, running) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(rollerUrl);
   await page.waitForLoadState("domcontentloaded");
 
-  return { errors, ...(await page.evaluate(() => {
+  return { errors, ...(await page.evaluate((isRunning) => {
     const panel = document.getElementById("party-panel");
     const list = document.getElementById("party-list");
     panel.hidden = false;
     list.innerHTML = "";
-    // Worst realistic case in every direction at once: a long name, four
-    // exhaustions, a double-digit injury count, and the badge that says the most.
+    if (isRunning) {
+      document.getElementById("init-round").hidden = false;
+      document.getElementById("init-round").textContent = "Round 12";
+      document.getElementById("init-next").hidden = false;
+      document.getElementById("init-end").hidden = false;
+      document.getElementById("init-add-row").hidden = false;
+    }
+
+    // Worst realistic case in every direction at once.
     const rows = [
-      { name: "Kesh Ålvaran of the Long Road", marks: ["W", "S", "H", "D"], injuries: 12, badge: "Not synced" },
-      { name: "Vee", marks: ["W"], injuries: 1, badge: "Behind" },
-      { name: "Orrin Sunn-Halvardsson", marks: [], injuries: 0, badge: "Caught up" },
+      { name: "Kesh Ålvaran of the Long Road", marks: ["W", "S", "H", "D"], injuries: 12, acted: true, npc: false, hidden: false },
+      { name: "Reaver Pack Leader (Wounded)", marks: [], injuries: 0, acted: false, npc: true, hidden: true },
+      { name: "Vee", marks: ["W"], injuries: 1, acted: false, npc: false, hidden: false },
     ];
     for (const row of rows) {
       const li = document.createElement("li");
-      li.className = "party-row";
+      li.className = "party-row" + (isRunning && row.acted ? " is-acted" : "");
       const head = document.createElement("div");
       head.className = "party-head";
-      const name = document.createElement("span");
-      name.className = "party-name"; name.textContent = row.name; head.append(name);
-      const spirit = document.createElement("span");
-      spirit.className = "party-spirit"; spirit.textContent = "Spirit 8/12"; head.append(spirit);
-      if (row.marks.length) {
-        const marks = document.createElement("span");
-        marks.className = "party-exhaustion";
-        for (const m of row.marks) {
-          const mark = document.createElement("span");
-          mark.className = "party-mark"; mark.textContent = m; marks.append(mark);
+
+      if (isRunning) {
+        const moves = document.createElement("span");
+        moves.className = "init-moves";
+        for (const glyph of ["▲", "▼"]) {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "ghost init-move"; b.textContent = glyph;
+          moves.append(b);
         }
-        head.append(marks);
+        head.append(moves);
       }
-      if (row.injuries) {
-        const hurt = document.createElement("span");
-        hurt.className = "party-injuries";
-        hurt.textContent = row.injuries === 1 ? "1 Injury" : row.injuries + " Injuries";
-        head.append(hurt);
+
+      // The name is a BUTTON now, not a span — it is the link to the sheet.
+      const name = document.createElement(row.npc ? "span" : "button");
+      name.className = "party-name" + (row.npc ? " is-npc" : " is-link");
+      name.textContent = row.name;
+      head.append(name);
+
+      if (!row.npc) {
+        const spirit = document.createElement("span");
+        spirit.className = "party-spirit"; spirit.textContent = "Spirit 8/12"; head.append(spirit);
+        if (row.marks.length) {
+          const marks = document.createElement("span");
+          marks.className = "party-exhaustion";
+          for (const m of row.marks) {
+            const mark = document.createElement("span");
+            mark.className = "party-mark"; mark.textContent = m; marks.append(mark);
+          }
+          head.append(marks);
+        }
+        if (row.injuries) {
+          const hurt = document.createElement("span");
+          hurt.className = "party-injuries";
+          hurt.textContent = row.injuries === 1 ? "1 Injury" : row.injuries + " Injuries";
+          head.append(hurt);
+        }
+        // The epoch badge is drawn ONLY when no round is running — it answers a
+        // between-scenes question and is the longest thing on the row.
+        if (!isRunning) {
+          const badge = document.createElement("span");
+          badge.className = "party-status is-behind"; badge.textContent = "Not synced";
+          head.append(badge);
+        }
       }
-      const badge = document.createElement("span");
-      badge.className = "party-status is-behind"; badge.textContent = row.badge; head.append(badge);
-      const open = document.createElement("button");
-      open.className = "ghost party-open"; open.type = "button"; open.textContent = "Sheet";
-      head.append(open);
+      if (isRunning && row.hidden) {
+        const mark = document.createElement("span");
+        mark.className = "init-hidden-mark"; mark.textContent = "hidden"; head.append(mark);
+      }
+
+      // Appended only when it HAS controls, matching appendInitControls(). An empty
+      // flex child still takes a slot and reads as a zero-width child, which is
+      // exactly what the assertion below is watching for.
+      if (isRunning) {
+        const actions = document.createElement("div");
+        actions.className = "party-row-actions";
+        for (const text of [row.acted ? "Undo" : "Acted", row.hidden ? "Show" : "Hide", "×"]) {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "ghost"; b.textContent = text;
+          actions.append(b);
+        }
+        head.append(actions);
+      }
       li.append(head);
       list.append(li);
     }
 
     const limit = document.documentElement.clientWidth;
     const past = [];
-    let zeroWidth = 0, narrowestName = Infinity, marksSeen = 0;
+    let zeroWidth = 0, narrowestName = Infinity, marksSeen = 0, tinyButtons = 0;
     for (const li of list.children) {
       for (const child of li.querySelector(".party-head").children) {
         const r = child.getBoundingClientRect();
-        if (r.right > limit + 1) past.push(child.className + " to " + Math.round(r.right));
+        if (r.right > limit + 1) past.push(child.className + "@" + Math.round(r.right));
         if (r.width < 1) zeroWidth++;
       }
       const n = li.querySelector(".party-name").getBoundingClientRect().width;
@@ -253,141 +305,67 @@ async function measureParty(width) {
         if (mark.getBoundingClientRect().width < 6) zeroWidth++;
       }
     }
+    // A control squeezed to nothing is a control the GM cannot press, which is
+    // indistinguishable from a bug.
+    for (const b of list.querySelectorAll("button")) {
+      if (b.getBoundingClientRect().width < 8) tinyButtons++;
+    }
     const warning = getComputedStyle(document.documentElement).getPropertyValue("--warning").trim();
-    const markColour = list.querySelector(".party-mark")
-      ? getComputedStyle(list.querySelector(".party-mark")).color : "";
-    const hurtColour = list.querySelector(".party-injuries")
-      ? getComputedStyle(list.querySelector(".party-injuries")).color : "";
+    const markEl = list.querySelector(".party-mark");
+    const hurtEl = list.querySelector(".party-injuries");
     const asRgb = (hex) => {
       const n = parseInt(hex.replace("#", ""), 16);
       return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
     };
-    return { past, zeroWidth, narrowestName, marksSeen,
-             warningMatches: markColour === asRgb(warning) && hurtColour === asRgb(warning) };
-  })) };
+    const actedName = list.querySelector(".is-acted .party-name");
+    const headBox = document.querySelector("#party-panel .gm-panel-head");
+    return {
+      past, zeroWidth, narrowestName, marksSeen, tinyButtons,
+      warningMatches: markEl && hurtEl
+        && getComputedStyle(markEl).color === asRgb(warning)
+        && getComputedStyle(hurtEl).color === asRgb(warning),
+      // Only ONE list: the merged panel means there is no second copy of these names.
+      nameCount: document.querySelectorAll(".party-name").length,
+      dimmed: actedName ? Number(getComputedStyle(actedName).opacity) : null,
+      headPast: headBox.getBoundingClientRect().right > limit + 1,
+      addPast: isRunning
+        ? document.getElementById("init-add").getBoundingClientRect().right > limit + 1
+        : false,
+    };
+  }, running)) };
 }
 
-// 260 is below anything Owlbear actually gives the drawer; it is here because the
-// failure mode is silent overlap rather than a scrollbar, so the floor has to be
-// proven somewhere the layout is genuinely under pressure.
+// 260 is below anything Owlbear gives the drawer; it is here because the failure mode
+// is silent overlap rather than a scrollbar, so the floor has to be proven somewhere
+// the layout is genuinely under pressure.
 for (const width of [260, 320, 400, 520]) {
-  const m = await measureParty(width);
-  ok(`party ${width}px: the roller throws nothing`, m.errors.length === 0);
-  if (m.errors.length) console.log("      " + m.errors[0]);
-  ok(`party ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
-  if (m.past.length) console.log("      " + m.past.join(", "));
-  ok(`party ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
-  ok(`party ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
-     m.narrowestName >= 40);
-  ok(`party ${width}px: all five exhaustion marks are drawn`, m.marksSeen === 5);
-  ok(`party ${width}px: marks and injuries are warning yellow`, m.warningMatches);
-}
-
-// -------------------------------------------------------------
-// The initiative tracker, v2.4 / 1.4
-// -------------------------------------------------------------
-// The same shape that collapsed the party name at 400px: a flex row whose only
-// giving-way child has overflow:hidden, so its automatic minimum size is 0. An
-// initiative row is worse — up to six children, and the GM's rows carry two stacked
-// arrows, a hidden mark and three buttons.
-async function measureInitiative(width) {
-  const page = await browser.newPage({ viewport: { width, height: 900 } });
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(rollerUrl);
-  await page.waitForLoadState("domcontentloaded");
-
-  return { errors, ...(await page.evaluate(() => {
-    const panel = document.getElementById("initiative");
-    const list = document.getElementById("init-list");
-    panel.hidden = false;
-    document.getElementById("init-gm-controls").hidden = false;
-    document.getElementById("init-add-row").hidden = false;
-    document.getElementById("init-round").textContent = "Round 12";
-    list.innerHTML = "";
-
-    // The GM's view, which is the heavy one, at its worst: a long name, a hidden
-    // row, an acted row, and every control drawn.
-    const rows = [
-      { name: "Kesh \u00c5lvaran of the Long Road", npc: false, hidden: false, acted: true },
-      { name: "Reaver Pack Leader (Wounded)", npc: true, hidden: true, acted: false },
-      { name: "Vee", npc: false, hidden: false, acted: false },
-    ];
-    rows.forEach((row, i) => {
-      const li = document.createElement("li");
-      li.className = "init-row" + (row.acted ? " is-acted" : "") + (row.hidden ? " is-hidden-row" : "");
-      const moves = document.createElement("span");
-      moves.className = "init-moves";
-      for (const glyph of ["\u25b2", "\u25bc"]) {
-        const b = document.createElement("button");
-        b.type = "button"; b.className = "ghost init-move"; b.textContent = glyph;
-        b.disabled = (glyph === "\u25b2" && i === 0) || (glyph === "\u25bc" && i === rows.length - 1);
-        moves.append(b);
-      }
-      li.append(moves);
-      const name = document.createElement("span");
-      name.className = "init-name" + (row.npc ? " is-npc" : "");
-      name.textContent = row.hidden ? "Reaver Pack Leader (Wounded)" : row.name;
-      li.append(name);
-      if (row.hidden) {
-        const mark = document.createElement("span");
-        mark.className = "init-hidden-mark"; mark.textContent = "hidden";
-        li.append(mark);
-      }
-      const actions = document.createElement("div");
-      actions.className = "init-row-actions";
-      for (const [cls, text] of [["ghost init-act", row.acted ? "Undo" : "Acted"],
-                                 ["ghost", row.hidden ? "Show" : "Hide"],
-                                 ["ghost init-drop", "\u00d7"]]) {
-        const b = document.createElement("button");
-        b.type = "button"; b.className = cls; b.textContent = text;
-        actions.append(b);
-      }
-      li.append(actions);
-      list.append(li);
-    });
-
-    const limit = document.documentElement.clientWidth;
-    const past = [];
-    let zeroWidth = 0, narrowestName = Infinity;
-    for (const li of list.children) {
-      for (const child of li.children) {
-        const r = child.getBoundingClientRect();
-        if (r.right > limit + 1) past.push(child.className + "@" + Math.round(r.right));
-        if (r.width < 1) zeroWidth++;
-      }
-      const n = li.querySelector(".init-name").getBoundingClientRect();
-      if (n.width < narrowestName) narrowestName = n.width;
+  for (const running of [false, true]) {
+    const label = running ? "party+init" : "party";
+    const m = await measureParty(width, running);
+    ok(`${label} ${width}px: the roller throws nothing`, m.errors.length === 0);
+    if (m.errors.length) console.log("      " + m.errors[0]);
+    ok(`${label} ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
+    if (m.past.length) console.log("      " + m.past.join(", "));
+    ok(`${label} ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
+    ok(`${label} ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
+       m.narrowestName >= 34);
+    ok(`${label} ${width}px: every control is still pressable`, m.tinyButtons === 0);
+    ok(`${label} ${width}px: the panel header fits`, m.headPast === false);
+    // The whole point of 1.4B: three combatants, three names, not six.
+    ok(`${label} ${width}px: each name appears exactly once (${m.nameCount})`, m.nameCount === 3);
+    if (running) {
+      ok(`${label} ${width}px: the add-adversary box fits`, m.addPast === false);
+      // Dimmed, not invisible — the GM has to read a row to undo it.
+      ok(`${label} ${width}px: an acted row is dimmed but legible`, m.dimmed > 0.3 && m.dimmed < 1);
+    } else {
+      ok(`${label} ${width}px: all five exhaustion marks are drawn`, m.marksSeen === 5);
+      ok(`${label} ${width}px: marks and injuries are warning yellow`, m.warningMatches);
     }
-    // Every control has to be reachable: a button that has been squeezed to nothing
-    // is a control the GM cannot press, which is indistinguishable from a bug.
-    let tinyButtons = 0;
-    for (const b of list.querySelectorAll("button")) {
-      if (b.getBoundingClientRect().width < 8) tinyButtons++;
-    }
-    const addBox = document.getElementById("init-add").getBoundingClientRect();
-    const dimmed = getComputedStyle(list.querySelector(".is-acted .init-name")).opacity;
-    return { past, zeroWidth, narrowestName, tinyButtons,
-             addPast: addBox.right > limit + 1, dimmed: Number(dimmed) };
-  })) };
-}
-
-for (const width of [260, 320, 400, 520]) {
-  const m = await measureInitiative(width);
-  ok(`initiative ${width}px: the roller throws nothing`, m.errors.length === 0);
-  if (m.errors.length) console.log("      " + m.errors[0]);
-  ok(`initiative ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
-  if (m.past.length) console.log("      " + m.past.join(", "));
-  ok(`initiative ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
-  ok(`initiative ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
-     m.narrowestName >= 34);
-  ok(`initiative ${width}px: every control is still pressable`, m.tinyButtons === 0);
-  ok(`initiative ${width}px: the add-adversary box fits`, m.addPast === false);
-  // Dimmed, not invisible: the GM has to be able to read a row to undo it.
-  ok(`initiative ${width}px: an acted row is dimmed but legible`, m.dimmed > 0.3 && m.dimmed < 1);
+  }
 }
 
 await browser.close();
+await rollerSite.close();
 console.log(`\nlayout: ${pass} passed, ${fail} failed`);
 console.log(`
 Not covered here — this is one browser at one zoom, laying out one character:

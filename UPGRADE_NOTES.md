@@ -2,6 +2,103 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 1.4B — one list, not two
+
+Extension only. `dnm-obr` **1.4 → 1.4B**. No schema change, no creator change.
+
+A letter, not a number: 1.4 shipped a separate Initiative panel that printed the same
+names the Party panel was already printing, with a different set of buttons beside
+them. Nothing new here — this is 1.4 laid out the way it should have been.
+
+## The merge
+
+One `<ol>`. `partyRow()` is now the only row renderer, and it serves four cases that
+used to be two panels:
+
+| | drawn |
+|---|---|
+| character, no round | name (link), Spirit, exhaustion, injuries, epoch badge |
+| character, in the order | arrows, name, Spirit, exhaustion, injuries, Acted / Hide / × |
+| character in the scene but not in the order | the above minus the controls, plus **+ Order** |
+| adversary | arrows, name, Acted / Hide / × — it has no Spirit and no epochs |
+
+Ordering follows the initiative while a round is running and falls back to
+alphabetical when one is not. `renderInitiative()` is gone; only
+`renderInitiativeHeader()` survives, for the round number and Next Round / End.
+
+**The name is the link to the sheet.** That is what freed the room for the controls —
+a separate `Sheet` button sat on every row spending horizontal space to say a second
+time what the name already identified. `.party-open` went with it.
+
+**The epoch badge is not drawn while a round is running.** It answers "did my rest
+reach everyone", which is a between-scenes question, and it was the longest thing on
+the row. Gated on the round rather than on the row so the list cannot end up half
+badged.
+
+## Two questions that are easy to answer as one
+
+Folding the tracker into the party panel put "can players see whose turn it is" and
+"can players see the party's Spirit and injuries" into the same container. They are
+not the same decision.
+
+- The panel **opens** for a player when the GM has shared it **or** a round is running.
+- The **stat columns** are drawn only when it is shared (`partyStatsVisible()`).
+
+So a GM who keeps the party's condition private still gets a tracker the table can
+see. `rollerui.test.mjs` asserts both halves of that in both directions.
+
+## rollerui.test.mjs, and a vacuous assertion it exposed
+
+**The first suite that runs `roller.js` at all.** Until now the extension's interface
+was reachable only through `layout.test.mjs`, which builds rows by hand — so it proved
+the stylesheet and nothing about the code deciding what a row contains, who sees it,
+or what order it is in. That gap became untenable the moment one renderer started
+serving characters and adversaries, GM and player, shared and private.
+
+It swaps the vendored SDK for a stub in a staged copy. `roller.js` does
+`import OBR from "./sdk.js"`, so replacing that one file is the whole trick — no
+request interception, no fixture framework. The stub records subscriptions and the
+test pushes a scene, a room and a role at it the way Owlbear would. Character codes
+come from the real creator, so the panel parses what it would parse in a room.
+
+**It found four bugs on its first run, all of which would have shipped:**
+
+1. `initControls()` called `mayMarkRow(initRow)` — the SHARED rule, which takes an
+   options object — instead of the local `mayToggleRow(initRow)` wrapper that supplies
+   the role. With no role it fell through to the player branch and matched nothing, so
+   **no Acted button was drawn for anybody**, GM included. The feature did not work.
+2. The `hidden` mark was lost in the merge. Hiding worked; nothing said so.
+3. An unordered row kept its epoch badge mid-fight, so a running round drew a list
+   half with badges and half without.
+4. The party list is signature-guarded, and the signature did not include **who this
+   client is** — which now decides whose row gets an Acted button. A player typing
+   their character's name into the Character box got no button until something
+   unrelated moved. `charEl` had no listener at all, because nothing outside the roll
+   had ever read it.
+
+**And it exposed a vacuous assertion.** Chromium refuses to load an ES module over
+`file://`, and reports the refusal to the **console**, not as a page error. So
+`layout.test.mjs` had been loading the roller from disk since 1.3 with roller.js never
+executing, and its "the roller throws nothing" assertions were passing against a page
+with no script on it. The measurements were always real — they are made against DOM
+that file builds itself — but the error claim was empty. Both suites now serve over
+http through `tests/serve.mjs`, and injecting a `throw` into `roller.js` fails both.
+
+The lesson generalises and is worth keeping: **an assertion that something did not go
+wrong is worthless unless you have proved the thing ran.**
+
+## Live checks
+
+1. Reload the ROOM.
+2. With no round running, the panel should look as it did — one row per character,
+   alphabetical, with the badge — except the name is now the link and the Sheet
+   button is gone.
+3. Start a round. The same rows reorder into the initiative, adversaries appear among
+   them, and the badges step aside.
+4. A character attached mid-fight should appear below the order with **+ Order**.
+5. Turn sharing off with a round running: a player keeps the order, loses the Spirit.
+6. Check a player's own Acted button appears when they type their character's name.
+
 # 1.4 — Initiative, and a party panel the table can see
 
 **Extension only.** `dnm-obr` goes to **1.4**; the creator is unchanged at **2.3** and

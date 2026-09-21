@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3 &middot; extension 1.4</h1>
+    <h1>Version v.2.3 &middot; extension 1.4B</h1>
     <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
     <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
 
@@ -316,7 +316,7 @@ h1 {
     <div class="grid">
       <article class="feature-card">
         <h3>Initiative</h3>
-        <p>The GM presses <em>Start Initiative</em> and the party fills in by itself. Names grey out as people act, <em>Next Round</em> lights up once everyone has gone, and the round number counts up. Everyone can see it.</p>
+        <p>The GM presses <em>Start Initiative</em> and the Party panel becomes the turn order. Names grey out as people act, <em>Next Round</em> lights up once everyone has gone, and the round number counts up. Everyone can see it.</p>
       </article>
       <article class="feature-card">
         <h3>Adversaries in the Order</h3>
@@ -400,7 +400,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.4; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
+    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.4B; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
   </section>
 
   <section class="panel">
@@ -411,6 +411,24 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">1.4B</span>
+          <span class="version-title">One list, not two</span>
+        </summary>
+        <ul>
+        <li><strong>The initiative tracker is part of the Party panel now.</strong> 1.4 put it in a panel of its own, directly above a Party panel that was already listing the same people. One row per person, with the turn-order controls on it.</li>
+        <li><strong>A character&apos;s name is the link to their sheet.</strong> The separate <em>Sheet</em> button is gone &mdash; it was spending space to say a second time what the name already said, and that space is what the turn controls needed.</li>
+        <li><strong>Adversaries sit among the party in the order</strong>, where they belong, rather than in a second list.</li>
+        <li><strong>The caught-up badge steps aside during a fight.</strong> It answers a between-scenes question and it was the longest thing on the row.</li>
+        <li><strong>Someone who joins mid-fight</strong> appears below the order with a <em>+ Order</em> button to drop them in.</li>
+        <li>A player can see the turn order even when the GM has not shared the party&apos;s Spirit and injuries. Those are two different decisions and they now behave like it.</li>
+        <li>Requires extension 1.4B. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">1.4</span>
           <span class="version-title">Initiative, and a party panel the table can see</span>
