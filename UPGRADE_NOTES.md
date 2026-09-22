@@ -2,6 +2,78 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.3.F0.5 — DM_DATA moves, verbatim
+
+Creator **2.3.F0.4 → 2.3.F0.5**. Extension **unchanged at 1.5.F0.4**. No behaviour
+change; the emitted data is deep-equal to what it replaced.
+
+## Verbatim, and proved so
+
+1,039 lines, 191,686 characters, of which one line is 129,142 characters of equipment
+catalogue. Pure data: the only `function` token anywhere in it is the English word inside
+eleven item descriptions.
+
+Proof, rather than inspection: both copies were evaluated in a vm and `JSON.stringify`d.
+184,103 characters on each side, identical. Then the same comparison was run again
+against the EMITTED region after the build, which is what `tests/data.test.mjs` now does
+on every run.
+
+`computeStats()` did not come with it. It reads the creator's module-level mutable
+`character` and `state`, so extracting it means parameterising it — a refactor, not a
+move, and the first thing in this project that could break the creator.
+
+## This region de-duplicates nothing, and that is the point
+
+The extension does not use `DM_DATA`. `grep -c DM_DATA dnm-obr/*.js` returns zero. Every
+region before this one converged two copies; this one has only ever had one.
+
+It is here so that something which is not the creator can read the game data without
+parsing a 700 KB HTML file. An importer, a Foundry system, anything. That is the whole
+return on it today, and it is worth being honest that the return is deferred.
+
+It stays a single object literal. Splitting it into composable fragments is the shape a
+Foundry build actually wants, and that is a separate decision: not a no-op, touches
+`computeStats()` and its call sites, and worth nothing if the licensing answer is no.
+
+## A text comparison could not have caught a truncated extraction
+
+`npm run check` compares the emitted text against the source. That catches drift, and
+says nothing about whether either side is INTACT — a truncated extraction would be
+faithfully emitted and faithfully compared, and the whole thing is one 129,000-character
+line that nobody is going to read.
+
+So `tests/data.test.mjs` evaluates the emitted region and deep-compares it, then asserts
+the shape: 16 top-level keys, the counts each one held when it moved, the four attributes
+and seven skills by name, every item having an id, name and category, and item ids being
+unique. Proved by deleting one item from the catalogue: two assertions fail, naming the
+count and the mismatch.
+
+## The two halves no longer share a slice number
+
+Until now `versions.json` held one `slice` and both repos carried it, on the reasoning
+that every slice wrote into both so the suffix said they came from one core revision.
+
+F0.5 broke that. It touched only the creator, so the extension's emitted regions came out
+byte-identical. Bumping it anyway would have announced a release where nothing changed,
+and the deploy note would have told the whole table to reload the room for it.
+
+`versions.json` now carries a base and a slice per half. Each reads as "the slice this
+one was last touched in". What it no longer claims is that both came from the same core
+revision — a claim that was going to be false the first time a slice touched one side
+only, which turned out to be the next one.
+
+## Deploy
+
+Creator only. No extension change, no reinstall, no room reload needed for this slice by
+itself — though it sits on top of F0.4, which does need both.
+
+## Live checks this slice needs
+
+- The equipment catalogue opens and lists items.
+- An origin, an archetype and a temperament can each be picked, and the sheet computes.
+- A talent can be bought.
+- A character made before this release still loads.
+
 # 2.3.F0.4 — adversaries join hidden, and the row that became two
 
 Extension **1.4B.F0.3 → 1.5.F0.4**. Creator unchanged at **2.3.F0.4**. This is the first
