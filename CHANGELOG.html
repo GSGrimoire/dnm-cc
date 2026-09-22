@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3 &middot; extension 1.4B</h1>
+    <h1>Version v.2.3.F0.1 &middot; extension 1.4B.F0.1</h1>
     <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
     <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
 
@@ -411,6 +411,21 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">2.3.F0.1</span>
+          <span class="version-title">Groundwork: one source for shared code</span>
+        </summary>
+        <ul>
+        <li><strong>Nothing has changed at the table.</strong> The sheet, the roller and the party panel behave exactly as they did in 2.3 with extension 1.4B. This entry exists so the version number on your sheet has something to point at.</li>
+        <li><strong>Why the number looks like that.</strong> Releases during this piece of work carry an <em>.F</em> suffix that counts up on its own. Both halves carry the same one, so <em>2.3.F0.1</em> and extension <em>1.4B.F0.1</em> tell you the creator and the extension were built from the same source.</li>
+        <li><strong>What actually changed.</strong> The compressor that turns a character into a character code existed as two copies kept in step by hand, one in the creator and one in the extension. It is now written into both from a single source, so they cannot drift apart. The code itself is byte-for-byte what it was.</li>
+        <li>Requires extension 1.4B.F0.1. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">1.4B</span>
           <span class="version-title">One list, not two</span>

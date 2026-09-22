@@ -2,6 +2,100 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.3.F0.1 — the multi-platform split begins
+
+Creator **2.3 → 2.3.F0.1**. Extension **1.4B → 1.4B.F0.1**. No behaviour change in
+either half. The generated code is byte-identical to what 2.3 and 1.4B shipped, and all
+eight suites pass unchanged.
+
+## The .F suffix
+
+Slices of the multi-platform split carry an `.F` suffix that counts up on its own,
+starting at F0.1, independent of the base version. Both repos carry the SAME slice
+number, because every slice writes into both, so the suffix answers "were these two
+halves built from the same core revision" by looking at either one. If the creator ships
+a real 2.4 partway through, the next slice is `2.4.F0.3` — the F number does not reset.
+
+The suffix makes the version string non-comparable as a number. Nothing compares them
+today; `APP_VERSION` is read in two places, the header link and the `from:` field of the
+backup payload, and neither parses it.
+
+## What moved, and why this first
+
+A new repository, `mps` (multi-platform split), holds code that more than one build
+needs. `dnm-cc` and `dnm-obr` stay exactly where they are and keep serving; `mps` writes
+into them.
+
+The DM1/DM2 payload codec went first because it was the clearest case. Both copies
+carried the word GENERATED and **nothing generated them** — they matched because
+`codec.test.mjs` compared them character for character and someone fixed it by hand each
+time it failed. The dock helpers are the same arrangement. The comments described a build
+step that had never been written.
+
+Measured before moving it: the two copies differed by a four-line header comment and four
+`export` keywords, across 12,453 and 12,314 characters. The hand discipline had held. That
+is the argument for mechanising it now rather than after it fails.
+
+## How the build works
+
+`mps/src/*.mjs` are ordinary ES modules and the only place to edit that code.
+`mps/build/regions.mjs` says where each one lands. `npm run build` writes them between the
+fences already in the target files; `npm run check` compares instead and exits 1 on drift.
+
+Two transforms, because the targets are different kinds of file. `dnm-obr/dnm.js` is a
+module and keeps its `export` keywords. `dnm-cc/index.html` gets the `export` stripped to
+plain declarations, because it cannot import without becoming a page that needs the
+network to work — the property the vendored SDK exists to protect.
+
+Three guards, each tested by making it fire rather than by feeding it a good input:
+
+- **No top-level name of one or two characters** in anything written into the creator's
+  module block. v2.1 declared `const H` and `const V` beside the minified SDK, `V` was
+  taken, and a duplicate top-level const is a SyntaxError that stops the module running
+  at all. `embedded.test.mjs` catches that after the fact. The build now refuses to write
+  it.
+- **A UTF-8 round trip before any write.** `index.html` holds a NUL byte and is otherwise
+  valid UTF-8; a lenient decode would round-trip 700 KB into mojibake with nothing
+  thrown.
+- **A begin marker may appear only once per file**, or a second fence would be invisible
+  to the build and silently keep whatever had been hand-written in it.
+
+## Version stamping
+
+`mps/build/version.mjs` writes all six version locations from `mps/versions.json`, so the
+half-applied release this file has recorded before is no longer possible by hand. It does
+NOT write the CHANGELOG entry or this section: `CHANGELOG.html` is never regenerated, and
+prose is not a thing a script should invent. It checks that both exist for the current
+slice and fails if they do not.
+
+The CHANGELOG check requires the version to appear **twice** in the file. The banner
+carries it and the script has just stamped the banner, so a single occurrence proves only
+that the stamping ran.
+
+## Deliberately not done in this slice
+
+- **The shared constants are written but not emitted.** `mps/src/constants.mjs` exists.
+  `dnm.js` calls the namespace `ID` and the creator calls it `EXT_ID`, so emitting needs
+  either a rename in `dnm-obr` (7 uses, imported by `roller.js` and `background.js`) or a
+  rename map in the region entry. Take the rename; the mismatch is itself a drift hazard.
+- **There are seven keys derived from the namespace, not four.** The "four constants are
+  the contract" rule has always silently covered `${ID}/dock`, `${ID}/recovery` and
+  `${ID}/sheet` as well. They carry the same risk and have never been named.
+- **`createPoolBatcher()` and the dock helpers have not moved.** Next slice.
+- **`DM_DATA` and `computeStats()` have not moved.** They are the part a Foundry build
+  actually wants, and they are the largest piece: 1,040 lines and 190 KB sitting in the
+  middle of a 700 KB HTML file.
+- **No LICENSE anywhere.** Neither existing repo has one and `mps` does not either. This
+  has become a live question rather than an oversight — see `BACKLOG.md`.
+
+## Live checks this slice needs
+
+No suite can see any of these:
+
+- That the creator still loads in a room and the sheet still opens docked.
+- That a character code written by 2.3 still reads in 2.3.F0.1, and the reverse.
+- That the version in the header bar reads `2.3.F0.1`.
+
 # 1.4B — one list, not two
 
 Extension only. `dnm-obr` **1.4 → 1.4B**. No schema change, no creator change.
