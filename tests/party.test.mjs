@@ -581,6 +581,9 @@ ok("a zero Threat delta is not a spend",
   const run = (state, ...events) => events.reduce((s, ev) => applyEvent(s, ev), state);
   const init = (state) => readInitiative(state);
   const names = (state) => init(state).rows.map((r) => r.name);
+  // 1.5: an adversary's name is never published, so order has to be read off the ids.
+  // The assertions below always cared about order rather than about names.
+  const order = (state) => init(state).rows.map((r) => r.id);
 
   // --- the shape of it ---
   ok("a fresh room has no initiative running", readInitiative(fresh()) === null);
@@ -597,7 +600,7 @@ ok("a zero Threat delta is not a spend",
     { type: "init", action: "add", id: "n1", name: "Reaver", kind: "npc" });
 
   ok("rows arrive in the order they were added",
-    JSON.stringify(names(started)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+    JSON.stringify(order(started)) === JSON.stringify(["a", "b", "n1"]));
   ok("a row remembers whether it is a character or an adversary",
     init(started).rows.map((r) => r.kind).join() === "pc,pc,npc");
   ok("nobody has acted yet", init(started).rows.every((r) => !r.acted));
@@ -630,7 +633,7 @@ ok("a zero Threat delta is not a spend",
     // The whole point of tracking rows rather than a turn pointer: the fight does not
     // change between rounds, only the round does.
     ok("next round keeps the rows and their order",
-      JSON.stringify(names(nextRound)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(nextRound)) === JSON.stringify(["a", "b", "n1"]));
     ok("next round keeps hidden flags and kinds",
       init(nextRound).rows.map((r) => r.kind).join() === "pc,pc,npc");
   }
@@ -639,21 +642,58 @@ ok("a zero Threat delta is not a spend",
   {
     const down = run(started, { type: "init", action: "move", id: "a", delta: 1 });
     ok("moving down swaps with the row below",
-      JSON.stringify(names(down)) === JSON.stringify(["Orrin", "Kesh", "Reaver"]));
+      JSON.stringify(order(down)) === JSON.stringify(["b", "a", "n1"]));
     const up = run(down, { type: "init", action: "move", id: "a", delta: -1 });
     ok("and moving up puts it back",
-      JSON.stringify(names(up)) === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(up)) === JSON.stringify(["a", "b", "n1"]));
     // Clamped, not wrapped. Up on the top row must do nothing — sending it to the
     // bottom would be the opposite of what the press asked for.
     ok("up on the top row does nothing",
-      JSON.stringify(names(run(started, { type: "init", action: "move", id: "a", delta: -1 })))
-        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(run(started, { type: "init", action: "move", id: "a", delta: -1 })))
+        === JSON.stringify(["a", "b", "n1"]));
     ok("down on the bottom row does nothing",
-      JSON.stringify(names(run(started, { type: "init", action: "move", id: "n1", delta: 1 })))
-        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(run(started, { type: "init", action: "move", id: "n1", delta: 1 })))
+        === JSON.stringify(["a", "b", "n1"]));
     ok("a move of zero does nothing",
-      JSON.stringify(names(run(started, { type: "init", action: "move", id: "a", delta: 0 })))
-        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(run(started, { type: "init", action: "move", id: "a", delta: 0 })))
+        === JSON.stringify(["a", "b", "n1"]));
+  }
+
+  // --- 1.5: an adversary joins HIDDEN ---
+  {
+    const joined = run(fresh(),
+      { type: "init", action: "start" },
+      { type: "init", action: "add", id: "n9", name: "Reaver Pack Leader", kind: "npc" });
+    const row = init(joined).rows[0];
+    ok("an adversary joins hidden", row.hidden === true);
+    ok("and its name is dropped, not flagged", row.name === "");
+    // The assertion that actually matters. Room metadata is readable by every client,
+    // so a name that reaches the state is public whatever the interface draws. This is
+    // the same test the hide path has, and it is here because the ADD path is now a
+    // second way a name could have leaked.
+    ok("the adversary's name is nowhere in the published state",
+      !JSON.stringify(joined).includes("Reaver Pack Leader"));
+
+    // A forged add cannot publish one either: the rule is in the reducer, which runs on
+    // the GM's client, not in the sender that a player could skip.
+    const forged = run(fresh(),
+      { type: "init", action: "start" },
+      { type: "init", action: "add", id: "n8", name: "Ambusher", kind: "npc", hidden: false });
+    ok("a forged add cannot publish an adversary's name",
+      !JSON.stringify(forged).includes("Ambusher") && init(forged).rows[0].hidden === true);
+
+    // Characters are unaffected: the point is not to announce the OPPOSITION early.
+    const pc = run(fresh(),
+      { type: "init", action: "start" },
+      { type: "init", action: "add", id: "p1", name: "Kesh", kind: "pc" });
+    ok("a character still joins visible", init(pc).rows[0].hidden === false);
+    ok("and keeps its name", init(pc).rows[0].name === "Kesh");
+
+    // The GM can still reveal, which is the whole point of a default rather than a rule.
+    const shown = run(joined,
+      { type: "init", action: "hide", id: "n9", hidden: false, name: "Reaver Pack Leader" });
+    ok("the GM can reveal an adversary", init(shown).rows[0].hidden === false);
+    ok("and the name comes back", init(shown).rows[0].name === "Reaver Pack Leader");
   }
 
   // --- hiding, which is the part that has to be actually private ---
@@ -678,10 +718,10 @@ ok("a zero Threat delta is not a spend",
   // --- removing ---
   {
     const gone = run(started, { type: "init", action: "remove", id: "b" });
-    ok("removing takes the row out", JSON.stringify(names(gone)) === JSON.stringify(["Kesh", "Reaver"]));
+    ok("removing takes the row out", JSON.stringify(order(gone)) === JSON.stringify(["a", "n1"]));
     ok("removing something absent changes nothing",
-      JSON.stringify(names(run(started, { type: "init", action: "remove", id: "nope" })))
-        === JSON.stringify(["Kesh", "Orrin", "Reaver"]));
+      JSON.stringify(order(run(started, { type: "init", action: "remove", id: "nope" })))
+        === JSON.stringify(["a", "b", "n1"]));
   }
 
   // --- End Scene ends the fight; a rest during one must not ---

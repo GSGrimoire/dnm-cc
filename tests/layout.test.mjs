@@ -192,14 +192,14 @@ const rollerUrl = rollerSite.origin + "/index.html";
 
 // `running` drives both states from one harness: the quiet party list, and the same
 // list mid-fight carrying adversaries and every control.
-async function measureParty(width, running) {
+async function measureParty(width, running, hiddenNpc = true) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(rollerUrl);
   await page.waitForLoadState("domcontentloaded");
 
-  return { errors, ...(await page.evaluate((isRunning) => {
+  return { errors, ...(await page.evaluate(({ running: isRunning, hiddenNpc }) => {
     const panel = document.getElementById("party-panel");
     const list = document.getElementById("party-list");
     panel.hidden = false;
@@ -215,7 +215,7 @@ async function measureParty(width, running) {
     // Worst realistic case in every direction at once.
     const rows = [
       { name: "Kesh Ålvaran of the Long Road", marks: ["W", "S", "H", "D"], injuries: 12, acted: true, npc: false, hidden: false },
-      { name: "Reaver Pack Leader (Wounded)", marks: [], injuries: 0, acted: false, npc: true, hidden: true },
+      { name: "Reaver Pack Leader of the Broken Span (Wounded)", marks: [], injuries: 0, acted: false, npc: true, hidden: hiddenNpc },
       { name: "Vee", marks: ["W"], injuries: 1, acted: false, npc: false, hidden: false },
     ];
     for (const row of rows) {
@@ -235,11 +235,15 @@ async function measureParty(width, running) {
         head.append(moves);
       }
 
-      // The name is a BUTTON now, not a span — it is the link to the sheet.
+      // The name is a BUTTON now, not a span — it is the link to the sheet. Since 1.5
+      // it sits in .party-name-wrap with the hidden tag, sharing one flex slot.
+      const nameWrap = document.createElement("span");
+      nameWrap.className = "party-name-wrap";
       const name = document.createElement(row.npc ? "span" : "button");
       name.className = "party-name" + (row.npc ? " is-npc" : " is-link");
       name.textContent = row.name;
-      head.append(name);
+      nameWrap.append(name);
+      head.append(nameWrap);
 
       if (!row.npc) {
         const spirit = document.createElement("span");
@@ -269,7 +273,8 @@ async function measureParty(width, running) {
       }
       if (isRunning && row.hidden) {
         const mark = document.createElement("span");
-        mark.className = "init-hidden-mark"; mark.textContent = "hidden"; head.append(mark);
+        mark.className = "init-hidden-mark"; mark.textContent = "hidden";
+        nameWrap.classList.add("has-hidden-mark"); nameWrap.append(mark);
       }
 
       // Appended only when it HAS controls, matching appendInitControls(). An empty
@@ -292,12 +297,36 @@ async function measureParty(width, running) {
     const limit = document.documentElement.clientWidth;
     const past = [];
     let zeroWidth = 0, narrowestName = Infinity, marksSeen = 0, tinyButtons = 0;
+    const wrapped = [];
+    const linesByName = {};
     for (const li of list.children) {
       for (const child of li.querySelector(".party-head").children) {
         const r = child.getBoundingClientRect();
         if (r.right > limit + 1) past.push(child.className + "@" + Math.round(r.right));
         if (r.width < 1) zeroWidth++;
       }
+      // 1.5: how many LINES this head occupies. A wrapped row stays inside the panel,
+      // so `past` and `zeroWidth` above are both blind to it — which is why a hidden
+      // row silently became two rows at the table and no suite noticed.
+      //
+      // NOT measured by comparing tops: .party-head is align-items:baseline, so a 9px
+      // tag and a 13px name have different tops while sitting on the same line. The
+      // first draft of this did that and reported five lines for a row that was
+      // plainly one. A real wrap is a child whose TOP is at or below the BOTTOM of
+      // everything before it.
+      const boxes = [...li.querySelector(".party-head").children]
+        .map((c) => c.getBoundingClientRect())
+        .filter((r) => r.width > 0 || r.height > 0)
+        .sort((a, b) => a.top - b.top);
+      let lines = 1, floor = boxes.length ? boxes[0].bottom : 0;
+      for (const r of boxes.slice(1)) {
+        if (r.top >= floor - 0.5) { lines++; floor = r.bottom; }
+        else floor = Math.max(floor, r.bottom);
+      }
+      const rowName = li.querySelector(".party-name").textContent || "?";
+      linesByName[rowName] = lines;
+      if (lines > 1) wrapped.push(rowName + ":" + lines);
+
       const n = li.querySelector(".party-name").getBoundingClientRect().width;
       if (n < narrowestName) narrowestName = n;
       marksSeen += li.querySelectorAll(".party-mark").length;
@@ -320,7 +349,7 @@ async function measureParty(width, running) {
     const actedName = list.querySelector(".is-acted .party-name");
     const headBox = document.querySelector("#party-panel .gm-panel-head");
     return {
-      past, zeroWidth, narrowestName, marksSeen, tinyButtons,
+      past, zeroWidth, narrowestName, marksSeen, tinyButtons, wrapped, linesByName,
       warningMatches: markEl && hurtEl
         && getComputedStyle(markEl).color === asRgb(warning)
         && getComputedStyle(hurtEl).color === asRgb(warning),
@@ -332,7 +361,7 @@ async function measureParty(width, running) {
         ? document.getElementById("init-add").getBoundingClientRect().right > limit + 1
         : false,
     };
-  }, running)) };
+  }, { running, hiddenNpc })) };
 }
 
 // 260 is below anything Owlbear gives the drawer; it is here because the failure mode
@@ -347,12 +376,35 @@ for (const width of [260, 320, 400, 520]) {
     ok(`${label} ${width}px: nothing overflows the panel (${m.past.length})`, m.past.length === 0);
     if (m.past.length) console.log("      " + m.past.join(", "));
     ok(`${label} ${width}px: no row child collapses to nothing`, m.zeroWidth === 0);
+    // Holds at every width including the 260px stress floor. Since 1.5 the name shares
+    // its flex slot with the hidden tag and may shrink inside it, so this floor is the
+    // thing standing between "ellipsised" and "gone".
     ok(`${label} ${width}px: the name keeps a readable floor (${Math.round(m.narrowestName)}px)`,
        m.narrowestName >= 34);
     ok(`${label} ${width}px: every control is still pressable`, m.tinyButtons === 0);
     ok(`${label} ${width}px: the panel header fits`, m.headPast === false);
     // The whole point of 1.4B: three combatants, three names, not six.
     ok(`${label} ${width}px: each name appears exactly once (${m.nameCount})`, m.nameCount === 3);
+    // 1.5, from play: pressing Hide drew the "hidden" tag AND pushed the row onto a
+    // second line. Nothing overflowed and nothing collapsed, so every assertion above
+    // stayed green.
+    //
+    // The assertion is NOT "every row is one line". .party-head wraps on purpose —
+    // that is the 1.3 fix for a long name beside four marks and an injury count, and
+    // the worst-case row here is built to exercise it. What must not happen is HIDING
+    // a row costing it a line, so the measure is the same row with and without.
+    //
+    // Gated at 320px and up. 260 is the stress floor, below anything Owlbear gives the
+    // drawer, and there a name, a tag and three buttons genuinely do not fit on one
+    // line. Something must give, and the choice is deliberate: the 34px name floor is
+    // the older constraint and came out of play, so at 260 the row is allowed to wrap
+    // and keep the name readable. Above 260 the row must stay one line.
+    if (running && width >= 320) {
+      const shown = await measureParty(width, true, false);
+      const npc = "Reaver Pack Leader of the Broken Span (Wounded)";
+      const a = shown.linesByName[npc], b = m.linesByName[npc];
+      ok(`${label} ${width}px: hiding a row does not cost it a line (${a} -> ${b})`, b <= a);
+    }
     if (running) {
       ok(`${label} ${width}px: the add-adversary box fits`, m.addPast === false);
       // Dimmed, not invisible — the GM has to read a row to undo it.

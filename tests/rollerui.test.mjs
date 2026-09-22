@@ -167,6 +167,14 @@ const readPanel = (page) => page.evaluate(() => {
     hasBadge: !!li.querySelector(".party-status"),
     hasArrows: !!li.querySelector(".init-move"),
     hasHidden: !!li.querySelector(".init-hidden-mark"),
+    // 1.5: the tag must sit INSIDE the name's flex slot, not beside it. As a sibling
+    // it was an extra flex item, and on a narrow panel pressing Hide wrapped the whole
+    // row onto a second line. Asserted structurally because the wrap itself only
+    // reproduces below 260px in layout.test.mjs, well under any width Owlbear gives
+    // the drawer — so the layout suite cannot stand as this fix's regression test.
+    hiddenMarkInNameSlot: !!li.querySelector(".party-name-wrap .init-hidden-mark"),
+    hiddenMarkIsHeadChild: [...(li.querySelector(".party-head")?.children || [])]
+      .some((c) => c.classList.contains("init-hidden-mark")),
     buttons: [...li.querySelectorAll(".party-row-actions button")].map((b) => b.textContent),
   }));
   return {
@@ -247,6 +255,10 @@ const RUNNING = {
   ok("GM, round: ordered rows have arrows", p.rows.slice(0, 4).every((r) => r.hasArrows));
   ok("GM, round: the unordered row has none", p.rows[4].hasArrows === false);
   ok("GM, round: a hidden row is marked as such", p.rows[3].hasHidden === true);
+  ok("GM, round: the hidden tag sits in the name's flex slot",
+     p.rows[3].hiddenMarkInNameSlot === true);
+  ok("GM, round: the hidden tag is NOT a sibling flex item",
+     p.rows[3].hiddenMarkIsHeadChild === false);
   ok("GM, round: a hidden row reads Hidden without the GM's stored name",
     p.rows[3].name === "Hidden");
   ok("GM, round: the round number shows", p.round === "Round 3" && p.roundHidden === false);

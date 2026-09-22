@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3.F0.3 &middot; extension 1.4B.F0.3</h1>
+    <h1>Version v.2.3.F0.4 &middot; extension 1.5.F0.4</h1>
     <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
     <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
 
@@ -411,6 +411,22 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">2.3.F0.4</span>
+          <span class="version-title">Adversaries arrive unannounced</span>
+        </summary>
+        <ul>
+        <li><strong>An adversary now joins the order hidden.</strong> Adding one used to announce it to the table, which gave away that a fight was starting and who was in it before you had described anything. Now the players see a row appear and nothing else. Press <em>Show</em> when you want them to know.</li>
+        <li><strong>Their name is never sent to the room</strong>, not merely hidden from the display. Everything the room holds is readable by every player&apos;s browser, so a name that goes out is public however the panel draws it. The name stays on your machine until you reveal it.</li>
+        <li><strong>Characters are unaffected.</strong> A player joining the order still appears by name; the point is not to announce the opposition early.</li>
+        <li><strong>Fixed: pressing Hide could push a row onto two lines.</strong> The &ldquo;hidden&rdquo; tag was sitting beside the name rather than with it, so on a narrow panel it had nowhere to go. The name now shortens instead. On a very narrow panel the row still wraps, which keeps the name readable rather than squeezing it to nothing.</li>
+        <li>Requires extension 1.5.F0.4. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">2.3.F0.3</span>
           <span class="version-title">Groundwork: the dock and the pool counter</span>

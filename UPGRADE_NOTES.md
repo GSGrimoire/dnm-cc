@@ -2,6 +2,106 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.3.F0.4 — adversaries join hidden, and the row that became two
+
+Extension **1.4B.F0.3 → 1.5.F0.4**. Creator unchanged at **2.3.F0.4**. This is the first
+slice of the split that is not a no-op: it carries a deliberate behaviour change, so it
+takes a number on the extension rather than a letter.
+
+Both items came from play. Neither was found by any suite, and the reasons are worth
+recording.
+
+## An adversary joins hidden
+
+Adding one to the order announced it to the table, giving away that a fight was starting
+and who was in it before the GM had described anything.
+
+**The name is dropped, not flagged.** `hide` has always done this, and the reason applies
+identically here: room metadata is readable by every client, so a name that reaches the
+state is public whatever the interface draws. Putting `hidden: true` beside a published
+name would be the "hide a secret in CSS" mistake the party panel exists as a precedent
+against.
+
+**The rule is in the reducer, not the sender.** `addAdversary()` remembers the name
+locally and sends `name: ""`, but the reducer also drops the name for any `npc` add. A
+sender-side check is not a control — the sender can skip the function holding it — so a
+forged `add` carrying a name must not publish it either. There is a test for exactly
+that.
+
+Characters are unaffected. The point is not to announce the opposition early.
+
+## The row that became two
+
+Pressing Hide drew the tag and pushed the row onto a second line.
+
+**Cause:** `.party-head` is `display:flex; flex-wrap:wrap`, and the tag was a sibling of
+the name. On a narrow panel the sum of the children's minimum widths exceeded the panel
+and the row wrapped. The wrap is not a bug in itself — it is the 1.3 fix for a long name
+beside four marks and an injury count — but hiding a row should not cost it a line.
+
+**Fix:** the name and the tag now share one flex slot, `.party-name-wrap`. The tag is no
+longer a separate flex item, so the name ellipsises to make room instead. The slot's
+floor widens when it holds a tag (`has-hidden-mark`), so a panel too narrow for both
+wraps rather than squeezing the name to nothing.
+
+### Why no suite caught it, and what I could and could not prove
+
+`layout.test.mjs` already rendered a hidden adversary row. It asserts on **overflow** and
+on **zero-width children**. A wrapped row stays inside the panel and every child keeps its
+width, so both assertions were blind to it. Wrapping is a legitimate layout under
+`flex-wrap:wrap`, which is why it has to be asserted on directly.
+
+Two false starts, both worth recording:
+
+- **The first line-count measure compared children's `top` values.** `.party-head` is
+  `align-items: baseline`, so a 9px tag and a 13px name have different tops while sitting
+  on the same line. It reported five lines for a row that was plainly one. The assertion
+  was measuring something adjacent to the thing it cared about, again. A real wrap is a
+  child whose top is at or below the bottom of everything before it.
+- **The gated layout assertion does not prove this fix.** With the fix reverted, it still
+  passed at 320px and above — the wrap only reproduces at the 260px stress width, which is
+  gated out because there the name floor takes precedence. Lengthening the adversary name
+  to a realistic worst case did not change that. So the layout suite records the
+  trade-off; it is not this fix's regression test.
+
+**What is the regression test:** `rollerui.test.mjs`, which actually runs `roller.js`,
+asserts structurally that the tag sits inside `.party-name-wrap` and is **not** a child of
+`.party-head`. Reverting the fix fails both. That is a test of the mechanism rather than
+of the symptom, which is the honest thing to have when the symptom will not reproduce at
+the widths under test.
+
+**Still unproven:** the two-line row at the width it was actually seen. If it recurs,
+what is needed is the panel width and the adversary's name, because the harness could not
+make it happen above 260px.
+
+## Test fixtures that were measuring the wrong thing
+
+Nine assertions in `party.test.mjs` read row NAMES to check row ORDER. They always cared
+about order; names were a convenient proxy that stopped working the moment an adversary's
+name stopped being published. They read ids now, which is what they meant.
+
+## Two playtest instructions I got wrong
+
+Recorded so the next round of checks does not repeat them:
+
+- **"The header bar reads 2.3.F0.x" is not checkable in the docked sheet.** There is no
+  header bar there. `APP_VERSION` is stamped into a version link that the standalone
+  creator shows; the docked sheet does not. A version check has to be done in the
+  standalone creator, or by reading the extension's manifest.
+- **"Drag the sheet to each anchor" is wrong.** Moving is a press on the position pad;
+  dragging is resizing. There is no `setPosition` in the Owlbear API, so moving costs a
+  close and a reopen, which is exactly why it is a press and not a drag.
+
+## Live checks this slice needs
+
+- Add an adversary mid-scene. The players see a row appear with no name, and are not told
+  what it is.
+- Press Show on it. The name appears for everyone.
+- On a narrow panel, press Hide on a row with a long name. The row stays one line and the
+  name shortens.
+- An adversary added before this release still behaves: still named, still visible, still
+  hideable.
+
 # 2.3.F0.3 — the dock helpers and the pool batcher
 
 Creator **2.3.F0.2 → 2.3.F0.3**. Extension **1.4B.F0.2 → 1.4B.F0.3**. No behaviour
