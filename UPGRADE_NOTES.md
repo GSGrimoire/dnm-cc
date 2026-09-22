@@ -2,6 +2,101 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.3.F0.3 — the dock helpers and the pool batcher
+
+Creator **2.3.F0.2 → 2.3.F0.3**. Extension **1.4B.F0.2 → 1.4B.F0.3**. No behaviour
+change. All eight suites pass, `mps` runs 27 emitter tests.
+
+## The dock helpers
+
+`mps/src/dock.mjs` now holds them. Extracted from `dnm-obr/dnm.js` lines 43–306, and
+verified at extraction time by the only check worth trusting for a move like this: the
+extracted file with `export` stripped was **character-for-character equal** to the copy
+already sitting in `index.html`. Not equivalent, equal.
+
+After emitting, all nine dock functions were compared against `git HEAD` and are
+byte-identical: `clampDock` (1,613 chars), `dockSize`, `anchorParts`, `resizeEdges`,
+`dockSizeFor`, `withDockSize`, `readDock`, `writeDock`, `sheetPopover`.
+
+`dock.test.mjs` is the regression net here and it predates this repo — it already ran
+both copies over thousands of inputs and failed if they disagreed. It passes.
+
+### Four constants had to come out of the span
+
+`SHEET_POPOVER_ID`, `SHEET_MODAL_IDS` and `DOCK_KEY` sat inside the extracted lines, and
+`constants.mjs` is the authority for every key derived from the namespace. Having both
+modules declare them would be the duplication this repo exists to remove.
+
+So `dock.mjs` **imports** them, and the emitter strips that import on the way into the
+creator — which cannot import without becoming a page that needs the network. The
+creator's constants region, which `regions.mjs` lists first, declares them.
+
+`SHEET_MENU_ID` also sat in the span. It is about the token context menu rather than the
+dock and was never in the creator's copy, so it is not in `dock.mjs` at all.
+
+### A stripped import is a new way to fail, so it is guarded
+
+Dropping an import silently produces a `ReferenceError` at runtime, in the creator's
+module block, which no suite executes. That is the same shape of invisible failure as the
+v2.1 SyntaxError.
+
+`checkStrippedImportsResolve` refuses to strip an import whose names no region emitted
+earlier into that file declares. Proved by asking it to strip a `MISSING_THING`: it names
+the symbol and explains the consequence. A relative import between core modules is the
+only kind stripped; a bare specifier is left alone, because that would be a real
+dependency the creator cannot satisfy and should fail loudly.
+
+## The pool batcher, and the drift that was actually there
+
+`mps/src/poolBatcher.mjs`. The two copies **had drifted** — four places, every one of
+them a comment. Code identical, 45 lines each, line for line.
+
+What the creator's copy had lost:
+
+- that `pending` is `{ pool, label, delta }`
+- that `settle()` runs when the room's own value arrives, "which is the only real
+  confirmation there is — until then the display is showing a promise"
+- that a self-cancelling run "previously was two of each"
+- why the debounce has a ceiling: "someone leaning on + should still see the pool move
+  rather than nothing at all until they stop"
+
+`dnm.js` is taken as the source, so the creator gets them back.
+
+This is the first hard evidence that hand-kept copies drift. It drifted in the direction
+that loses reasoning rather than the one that breaks behaviour, which is why no suite
+noticed and why nobody found it in fifteen releases. Had it gone the other way it would
+have been a bug in one half only.
+
+## The regions now
+
+| Region | Source | dnm-cc | dnm-obr |
+|---|---|---|---|
+| constants | `src/constants.mjs` | emitted (7 names) | checked by value |
+| dock | `src/dock.mjs` | emitted | `dock.test.mjs` compares |
+| poolBatcher | `src/poolBatcher.mjs` | emitted | emitted |
+| codec | `src/codec.mjs` | emitted | emitted |
+
+`poolBatcher` is the first region with both repos as targets.
+
+## Deliberately not done
+
+- **`DM_DATA` and `computeStats()` have not moved.** 1,040 lines and 190 KB, and the part
+  a Foundry build actually wants. It is the next slice and it is much larger than these.
+- **`bondNameKey()`, `mayMarkRow()`, `initRowLabel()` and `isGmOnlyEvent()` have not
+  moved.** They are rules about who may see and do what. They belong in the core
+  eventually, but they are extension-only today and moving them buys nothing until a
+  Foundry build needs them.
+
+## Live checks this slice needs
+
+- Drag the sheet to each of the nine anchors and resize at two of them. Each anchor
+  should keep its own size.
+- A dock saved before this release should reopen where it was, at the size it was.
+- Press + on Momentum three times with a beat between each. One log line, reading the
+  total, not three.
+- Press + then − on the same pool. No log line at all.
+- Use Second Wind twice. Two log lines, not one merged spend.
+
 # 2.3.F0.2 — the shared keys, and a rename
 
 Creator **2.3.F0.1 → 2.3.F0.2**. Extension **1.4B.F0.1 → 1.4B.F0.2**. No behaviour
