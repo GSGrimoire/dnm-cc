@@ -2,6 +2,104 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.3.F0.2 — the shared keys, and a rename
+
+Creator **2.3.F0.1 → 2.3.F0.2**. Extension **1.4B.F0.1 → 1.4B.F0.2**. No behaviour
+change. All eight suites pass, and the new checks below pass.
+
+## The rename: `ID` → `EXT_ID`
+
+`dnm.js` called the namespace `ID` and the creator called it `EXT_ID`. Eleven sites, all
+of them building key strings by interpolation, so the rename changes identifiers and not
+a single emitted string. `\bID\b` cannot match inside `SHEET_POPOVER_ID` because the
+underscore is a word character, which is why a word-boundary substitution was safe here.
+
+Two imports went dead in the process and were removed: `roller.js` and `background.js`
+both imported `EXT_ID` only to build a key inline, and both now import the named constant
+instead.
+
+## Two keys existed only as inline strings
+
+`grep '\${EXT_ID}/'` turned up two that were never declared anywhere:
+
+- `background.js` wrote `` `${EXT_ID}/sheet` `` inline for the token context menu item.
+  This is the string `SHEET_POPOVER_ID` is documented as deliberately avoiding, and the
+  warning lived in the skill while the value lived unnamed in another file. It is now
+  `SHEET_MENU_ID`, declared beside `SHEET_POPOVER_ID` with the warning next to it.
+- `roller.js` wrote `` `${EXT_ID}/initnames/${room}` `` inline. Now `HIDDEN_NAMES_PREFIX`,
+  with `roller.js` appending the room id.
+
+So the rule is not "four constants are the contract". There are **ten** names derived
+from the namespace, and until this release two of them were invisible to any search for
+a constant.
+
+## Emitted into the creator, CHECKED in the extension
+
+The two halves are treated differently on purpose.
+
+`dnm-cc/index.html` holds its four contract constants in one contiguous block with a
+single header comment, so `mps` replaces that block outright.
+
+`dnm-obr/dnm.js` is **not** rewritten. Its keys are scattered through 1,600 lines, each
+sitting under several lines of comment explaining what it is for and what breaks if it
+changes. Gathering them into one emitted block would tear that documentation off the code
+it documents, and those comments are the most valuable thing in the file. Instead
+`npm run keys` imports `dnm.js` and compares the **resolved values**.
+
+Comparing values rather than text matters here. Two files can hold text that looks
+equivalent and resolve differently, and a key that differs by one character orphans every
+attached character without failing loudly.
+
+## Three new guards, each proved by making it fire
+
+- **A key value drifting in `dnm.js`.** Changed `CHAR_KEY` to `/chars`; the check named
+  the key, printed both values and exited 1.
+- **A key added to `dnm.js` that `mps` does not know about.** Appended a `SNEAKY_KEY`; the
+  reverse check caught it. Without this, `mps` would quietly stop being the authority as
+  soon as anyone added a key on the extension side.
+- **Two generated regions declaring the same top-level name.** This one is live rather
+  than theoretical: the creator's dock region already declares `SHEET_POPOVER_ID`,
+  `SHEET_MODAL_IDS` and `DOCK_KEY`, so emitting those from the constants region as well
+  would produce a duplicate top-level `const` — the v2.1 SyntaxError that stops the whole
+  module running while every suite stays green. The emitter now refuses before writing.
+  That is why this slice emits only the four contract constants and leaves the other
+  three to come across with the dock helpers.
+
+## What the suites could not see
+
+No test referenced `ID` or `EXT_ID`, so **all eight suites would have passed whether or
+not the rename was correct**. Their green is not evidence about this change. `keys.mjs`
+is what verifies it.
+
+Worse, `background.js` is loaded by no suite at all. `dock.test.mjs` reads it as a
+**string** and asserts two substrings against it; nothing imports or executes it. A broken
+import there fails at nothing until the extension runs in a real room — and a rename is
+exactly the change that breaks an import.
+
+So `keys.mjs` also resolves every named import from `dnm.js` in `roller.js` and
+`background.js` against `dnm.js`'s actual exports. 48 names. Proved by renaming an
+imported binding and watching it fail.
+
+This does not make `background.js` tested. It makes one class of failure in it
+impossible. The rest is a live check.
+
+## Deliberately not done
+
+- **`createPoolBatcher()` and the dock helpers have not moved.** Next slice. The dock
+  helpers bring `SHEET_POPOVER_ID`, `SHEET_MODAL_IDS` and `DOCK_KEY` with them, and the
+  duplicate-name guard is what will keep that from colliding with the constants region.
+- **`DM_DATA` and `computeStats()` have not moved.** Still the largest piece, and still
+  the part a Foundry build actually wants.
+
+## Live checks this slice needs
+
+- The token context menu still appears on a character token, and still says "Attach D&M
+  character" / opens the sheet. `SHEET_MENU_ID` replaced an inline string in
+  `background.js`, and no suite executes that file.
+- A character attached before this release is still found on its token.
+- The room's existing roll log is still there.
+- The GM's hidden initiative names still come back after a reload.
+
 # 2.3.F0.1 — the multi-platform split begins
 
 Creator **2.3 → 2.3.F0.1**. Extension **1.4B → 1.4B.F0.1**. No behaviour change in

@@ -303,7 +303,7 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3.F0.1 &middot; extension 1.4B.F0.1</h1>
+    <h1>Version v.2.3.F0.2 &middot; extension 1.4B.F0.2</h1>
     <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
     <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
 
@@ -411,6 +411,21 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">2.3.F0.2</span>
+          <span class="version-title">Groundwork: the shared keys</span>
+        </summary>
+        <ul>
+        <li><strong>Nothing has changed at the table.</strong> Same sheet, same roller, same party panel. Your characters, your attached tokens and your room&apos;s roll log all use the same keys they always have, and this release exists to make sure they keep doing so.</li>
+        <li><strong>What actually changed.</strong> The handful of identifiers the creator and the extension have to agree on &mdash; the ones that decide which token holds which character, and which room owns which log &mdash; were written out by hand in both halves. They are now written from one source, and a check compares what each half actually produces rather than what the code looks like.</li>
+        <li><strong>Why that matters even though you cannot see it.</strong> If those two lists ever disagreed by a single character, every attached character would quietly stop being found. Nothing would break loudly. That is the failure this removes.</li>
+        <li>Requires extension 1.4B.F0.2. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">2.3.F0.1</span>
           <span class="version-title">Groundwork: one source for shared code</span>
