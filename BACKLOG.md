@@ -14,6 +14,70 @@ ships, delete it and let `UPGRADE_NOTES.md` carry the record.
 
 ---
 
+## Open — a Foundry build, and the shared core under it
+
+**There is already a Dreams and Machines system for Foundry, and it is not ours to
+take.** Checked 2026-09-22. Two repos, one lineage:
+
+- `Mezryss/FVTT-Dreams-And-Machines` — the original. Latest release v1.1.2, manifest
+  version 1.2.0, and `compatibility` is `{minimum: 11, verified: 11, maximum: 11}`. A
+  hard cap at 11 means it will not install on a current Foundry without the user
+  overriding the check. No compendium packs at all.
+- `Muttley/foundryvtt-dreams-and-machines` — a fork, and the live one. Its `develop`
+  branch carries a v13 rewrite: `{minimum: 13, verified: 13}`, version reset to 1.0.0,
+  a gulp/rollup/sass build, jest, and five compendium packs — `character_options`,
+  `equipment`, `glifs_and_patterns`, `system_documentation`, `vehicles`. Last commit
+  2025-08-29. **No releases published**, and its manifest still points update checks at
+  the old repo, so nobody is installing the v13 work.
+
+So the state is: a good v13 rewrite with content, roughly a year cold and unreleased,
+while the package listing still serves a v11-capped version.
+
+**The licence, and why it constrains us.** The Foundry system is CC-BY-SA-4.0 and says
+it was "produced with the explicit consent of Modiphius Entertainment". Two things
+follow, and both were nearly got wrong:
+
+- That consent was granted to that project. It does not transfer to us by being nearby.
+- CC-BY-SA is a share-alike. Taking their code into a shared core would carry that
+  licence into whatever the core touches, which is both live repos. Neither `dnm-cc`
+  nor `dnm-obr` has a LICENSE file today, so this would be the decision that sets one.
+
+Separately, Modiphius run **2d20 World Builders** through DriveThruRPG for published
+content — Community Content Agreement, 50/30/20 split. That is the route for selling
+supplements, not for a VTT system, and it is not what governs the Foundry package.
+
+**Three routes, and what each costs.**
+
+1. *Contribute to Muttley's fork.* Cheapest by a long way, and it already has the
+   equipment pack we would otherwise rebuild. Our contributions become CC-BY-SA. We do
+   not control releases.
+2. *Our own system, from our own `DM_DATA`.* No licence entanglement with them, and it
+   keeps the core clean. But it duplicates a real community effort, and the Modiphius
+   consent question is ours to open rather than inherit.
+3. *An importer module only.* Reads DM1/DM2 codes into an Actor in whichever system is
+   installed. Small, useful whatever else happens, and it does not commit us.
+
+Not decided. Route 1 is the one to price first, and the question that decides it is
+whether we are willing to publish under CC-BY-SA.
+
+**What is unblocked regardless, and has started: `dnm-core`.** Whatever the Foundry
+answer, the same code should not be written twice. `DM_DATA` (1,040 lines, 190 KB) and
+`computeStats()` are the part a Foundry build actually wants, and they currently live
+in the middle of a 700 KB HTML file. The four constants, `createPoolBatcher()` and the
+codec were already duplicated by hand across the two repos.
+
+The codec's two copies each carried the word GENERATED and **nothing generated them**.
+They matched because `codec.test.mjs` compared them character for character and someone
+fixed it by hand each time. Same for the dock helpers. `dnm-core` makes the generator
+those comments already described real, with `npm run check` failing on drift.
+
+Measured while doing it: the two codec copies differed only in a four-line header
+comment and four `export` keywords, over 12,453 and 12,314 characters. The hand
+discipline had held — which is the argument for mechanising it while it still holds,
+not after it fails.
+
+---
+
 ## Open — the NPC roster and a bestiary
 
 **The problem, measured.** There is no adversary concept anywhere in either repo —
