@@ -17,7 +17,7 @@ description: >
 
 # Dreams & Machines VTT toolchain
 
-Two repos, one product. Get the version, the deploy order and the trust boundary right and
+Three repos, one product. Get the version, the deploy order and the trust boundary right and
 the rest is ordinary work.
 
 ## Where this file lives, and why
@@ -28,7 +28,7 @@ the versioning rule and the deploy order with it — both of which had already c
 each to learn. In the repo it is versioned, reviewable, and arrives with the code it
 describes.
 
-It covers both repos even though it sits in one. `dnm-obr` has no copy: two copies drift,
+It covers all three repos even though it sits in one. `dnm-obr` and `mps` have no copy: two copies drift,
 and the first drift would be in the part that matters. `dnm-obr/README.md` points here.
 
 **Update it in the same commit as the thing it describes.** A convention recorded a week
@@ -76,6 +76,88 @@ have to move together; a creator-only release leaves the extension where it is a
 so. **When the creator reaches 2.0 the extension goes to 1.0** — they are one product and
 a headline release should read that way on both halves.
 
+## mps: the shared source (from 2.3.F0.1)
+
+**Three repos now.** `GSGrimoire/mps` (private) holds code more than one build needs and
+WRITES it into the other two. `dnm-cc` and `dnm-obr` are unchanged in how they deploy.
+All three sit side by side; `mps/build/regions.mjs` assumes that.
+
+```sh
+cd mps
+npm run build     # write the generated regions into dnm-cc and dnm-obr
+npm run verify    # regions + versions + keys + both test suites; exits 1 on any drift
+npm run stamp     # write the version into all six places from versions.json
+```
+
+**Run `npm run verify` before any release.** It is what makes "change one, change both"
+a step that fails rather than a rule someone has to remember.
+
+### What is emitted, and what is only checked
+
+| Region | Source | dnm-cc | dnm-obr |
+|---|---|---|---|
+| constants | `src/constants.mjs` | emitted (7 names) | **checked by value** |
+| data | `src/data.mjs` | emitted (classic script) | not used |
+| dock | `src/dock.mjs` | emitted | `dock.test.mjs` compares |
+| poolBatcher | `src/poolBatcher.mjs` | emitted | emitted |
+| codec | `src/codec.mjs` | emitted | emitted |
+
+**`dnm.js` is CHECKED, not rewritten, and that is deliberate.** Its keys are scattered
+through the file, each under the comment explaining what breaks if it changes. Gathering
+them into one generated block would tear that documentation off the code it documents.
+`npm run keys` imports `dnm.js` and compares RESOLVED VALUES — two files can hold text
+that looks equivalent and resolve differently, and a key off by one character orphans
+every attached character without failing loudly.
+
+Edit `mps/src/`. Never edit inside a `// ==== BEGIN SHARED …` fence; `npm run check`
+fails if you do, and names the file.
+
+### The guards, and the failure each one is for
+
+Every one has been proved by making it fire. Do not weaken one without doing the same.
+
+- **No top-level name of one or two characters** in anything written into the creator's
+  module block. The v2.1 `const V` collision.
+- **A UTF-8 round trip before any write.** `index.html` holds a NUL byte.
+- **A begin marker may appear only once per file**, or a second fence is invisible to the
+  build and silently keeps whatever was hand-written in it.
+- **No two regions may declare the same top-level name** in one file. Live, not
+  theoretical: the dock region declares `SHEET_POPOVER_ID`, `SHEET_MODAL_IDS` and
+  `DOCK_KEY`, which is why the constants region emits only four of its seven.
+- **A stripped import must resolve.** `dock.mjs` imports from `constants.mjs` and that
+  import is stripped for the creator; dropping it silently would be a `ReferenceError` in
+  a module block no suite executes.
+- **Every named import from `dnm.js` in `roller.js` and `background.js` resolves.**
+  `background.js` is loaded by NO suite — `dock.test.mjs` reads it as a string — so a
+  broken import there fails at nothing until a real room.
+
+### The .F version suffix
+
+Slices of the split carry `.F0.x`, counting up independently of the base version.
+
+```
+creator    2.3  ->  2.3.F0.5
+extension  1.5  ->  1.5.F0.4
+```
+
+**The two halves may differ.** They were kept in step until F0.5, which moved `DM_DATA` —
+which the extension does not use — so the extension came out byte-identical. Bumping it
+would have announced a release where nothing changed and told the table to reload the
+room for it. `versions.json` carries a base and a slice per half; each reads as "the
+slice this one was last touched in".
+
+`npm run stamp` writes all six version locations. It does NOT write the CHANGELOG entry
+or the UPGRADE_NOTES section — it checks both exist and fails if not. The CHANGELOG check
+requires the version TWICE, because the banner carries it and the script just stamped the
+banner.
+
+### What it found
+
+The two `createPoolBatcher()` copies HAD drifted: four places, all comments, the
+creator's having lost explanations the extension kept. Code identical, 45 lines each.
+Fifteen releases, no suite the wiser — because it drifted in the direction that loses
+reasoning rather than the one that breaks behaviour.
+
 ## Where the version lives
 
 Change all of these together or the release is half-applied:
@@ -100,6 +182,8 @@ a developer reading cold and says why, including what was deliberately left out.
 
 GitHub Pages serves `main` on both repos. `main` is production. Work on a branch.
 
+0. **`cd mps && npm run verify`.** If a generated region has drifted, or a version is
+   half-applied, this is where it is caught. It exits 1 and names the file.
 1. **`dnm-obr` first.** A creator sending events an old extension ignores is harmless. A
    creator expecting something the extension never writes sits broken.
 2. **`dnm-cc/index.html`**
@@ -184,6 +268,15 @@ The drag-ghost that IS possible: inflate the panel to the full viewport with `se
 and `setHeight`, which is reload-free, draw the ghost inside it, and reopen at the target
 on release. Unproven in a room as of 2.1 — see UPGRADE_NOTES for the three checks.
 
+**Moving is a PRESS on the position pad. Resizing is the drag.** There is no
+`setPosition` anywhere in the API, so moving costs a close and a reopen. Do not write a
+check asking anyone to "drag the sheet to an anchor"; there is nothing to drag.
+
+**There is no header bar in the docked sheet, and no version on it.** `APP_VERSION` is
+stamped into a version link the STANDALONE creator shows. To confirm a deployed version,
+open the standalone creator or read `dnm-obr/manifest.json`. A check that says "the
+header bar reads x.y" is unanswerable and was written twice.
+
 Four details that each look like a bug when got wrong:
 
 - **`transformOrigin` pins the panel to its anchor.** One held by its RIGHT corner grows
@@ -207,9 +300,12 @@ resizes the rest. Defaults follow the anchor's shape: sides and centre are tall,
 bottom are broad, corners are a box. A 1.1 dock's single flat size seeds only the anchor
 it belonged to.
 
-**The creator's copy of the dock helpers is GENERATED from `dnm.js`**, not hand-copied.
-Regenerate it rather than editing it; that is what made a 3x3 rewrite of duplicated code
-safe to attempt. `dock.test.mjs` compares the two copies over thousands of inputs. The
+**The creator's copy of the dock helpers is GENERATED**, and since 2.3.F0.3 something
+actually generates it. Before that the word GENERATED sat in both files and nothing did;
+they matched because `dock.test.mjs` and `codec.test.mjs` compared them and somebody
+fixed it by hand each time. The source is `mps/src/dock.mjs`; run `npm run build`.
+`dock.test.mjs` still compares the two copies over thousands of inputs and remains the
+regression net for that region. The
 dock preference lives in `localStorage`, which is shared origin but **untrusted** — clamp
 it on the way OUT.
 
@@ -236,9 +332,20 @@ extension. It also carries a vendored copy of the Owlbear SDK inline.
 `dnm-obr` is the extension: `roller.js` (the popover), `background.js` (the room-lifetime
 page), `dnm.js` (shared helpers and the event reducer), `sdk.js` (vendored SDK).
 
-**Four constants are the contract** and appear in both repos. Change one, change both:
-`com.thuknights.dnm-obr` (`EXT_ID`), `…/char` (`CHAR_KEY`), `…/events` (`CHANNEL`), and
-`com.thuknights.dnm-rolls/state` (`ROOM_KEY`).
+**TEN names derive from the namespace, not four.** The old "four constants are the
+contract" rule silently covered the rest, and until 1.5 two of them were not declared
+anywhere — they were written inline at their call sites, invisible to any search for a
+constant. `mps/src/constants.mjs` is the authority for all ten and `npm run keys` checks
+them by resolved value.
+
+The four that cross the boundary: `com.thuknights.dnm-obr` (`EXT_ID`), `…/char`
+(`CHAR_KEY`), `…/events` (`CHANNEL`), and `com.thuknights.dnm-rolls/state` (`ROOM_KEY`).
+The rest: `SHEET_POPOVER_ID`, `SHEET_MODAL_IDS`, `DOCK_KEY`, `RECOVERY_PREFIX`, and the
+two that were inline — `SHEET_MENU_ID` (the token context menu, deliberately NOT the same
+string as `SHEET_POPOVER_ID`) and `HIDDEN_NAMES_PREFIX`.
+
+**`dnm.js` calls it `EXT_ID`, not `ID`.** Renamed in 1.5.F0.2; the creator always called
+it that.
 
 `thuknights` is the original host from before the move to GSGrimoire. It is a namespace
 string, never a URL, and nothing is fetched from it. It is load-bearing as a key: renaming it
@@ -277,6 +384,23 @@ answer them as one by accident.
 order — anyone who has not acted may go — so a turn pointer would be a rule the game does
 not have. Rows with an `acted` flag, and `initiativeAllActed()` lights Next Round. **It
 never fires itself**, and that is a decision, not an omission.
+
+**An adversary JOINS hidden (1.5).** Adding one used to announce it to the table, giving
+away that a fight was starting and who was in it before the GM had described anything.
+Characters are unaffected — the point is not to announce the OPPOSITION early.
+
+The name is dropped in the REDUCER, not by the sender. `addAdversary()` remembers it
+locally and sends an empty one, but `applyEvent` drops the name for any `npc` add as
+well, so a forged `add` carrying a name cannot publish it either. That is the trust
+boundary applied to a default: a sender-side check is not a control.
+
+**The name and the hidden tag share ONE flex slot** (`.party-name-wrap`, 1.5). As
+siblings in `.party-head` — which is `flex-wrap: wrap` — the tag was an extra flex item,
+and on a narrow panel pressing Hide pushed the whole row onto a second line. Inside the
+slot the name ellipsises instead. The slot's floor widens when it holds a tag
+(`.has-hidden-mark`), so a panel too narrow for both wraps rather than squeezing the name
+to nothing: at the 260px stress floor the name's 34px floor wins and the row wraps, which
+is the deliberate trade.
 
 **A hidden row's name is NOT PUBLISHED, not merely flagged.** Room metadata is readable
 by every client, so a name sent there is public whatever the interface draws. `hide` sets
@@ -334,10 +458,11 @@ one blob was measured and rejected.
 code parses without error and comes back as mojibake — no throw, no clue, a character
 quietly replaced by noise.
 
-The codec is a THIRD duplicated thing, alongside the four constants and
-`createPoolBatcher()`: canonical in `dnm.js`, copied into the creator's **classic script**
-(`buildCharacterCode()` lives there, not the module block). `codec.test.mjs` compares the
-two **character for character** between `// ==== BEGIN SHARED CODEC` markers. For a codec
+The codec lives in `mps/src/codec.mjs` and is emitted into both. In the creator it lands
+in the **classic script** (`buildCharacterCode()` lives there, not the module block).
+`codec.test.mjs` still compares the two copies **character for character** between the
+`// ==== BEGIN SHARED CODEC` markers, which is now a check on the build rather than on
+anyone's discipline. For a codec
 that is the right strictness — two implementations can agree on every input a test thinks
 of and differ on the one it does not.
 
@@ -456,9 +581,9 @@ Two rules the batching depends on:
 - **Manual + and − share one key** (`MANUAL_POOL_LABEL`) with the direction left out, or a
   press up and a press down cannot cancel and land as two entries for a change nobody made.
 
-`createPoolBatcher()` is duplicated: `dnm.js` for the roller, and a copy in the creator's
-module block, which cannot import without becoming a page that needs the network. Change
-one, change both — the same rule as the four shared constants.
+`createPoolBatcher()` lives in `mps/src/poolBatcher.mjs` and is emitted into both. The
+creator's copy cannot be an import, because that would make it a page that needs the
+network — the same property the vendored SDK protects.
 
 Coalescing is also what made the **Maverick drive** possible (v1.28): "spends 3 or more
 Threat at once" had nothing to read while a spend of 3 arrived as three spends of 1. It
@@ -494,12 +619,17 @@ gitignored scaffolding, not source — stage it before every run or you will tes
 release:
 
 ```sh
-cd dnm-cc
+cd mps && npm run verify                   # regions, versions, keys, and mps's own suites
+
+cd ../dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in codec creator embedded party dock security layout; do node tests/$t.test.mjs; done
+for t in codec creator embedded party dock security rollerui layout; do node tests/$t.test.mjs; done
 ```
+
+`mps` first: if a generated region has drifted, every suite below is testing something
+nobody wrote.
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
 and playwright in ONE command or the next run dies on a missing module.
@@ -514,7 +644,9 @@ and playwright in ONE command or the next run dies on a missing module.
 - `layout.test.mjs` — Chromium through Playwright, at the panel widths the sheet is
   actually read at. The only suite that can see layout at all; skips if Playwright is
   missing. Since 2.3 it also loads the ROLLER page and measures party rows — the party
-  panel is extension code and no suite could reach it at all before that
+  panel is extension code and no suite could reach it at all before that. **Since 1.5 it
+  counts LINES**, because it asserted only on overflow and zero-width children and a
+  wrapped row is neither
 - `codec.test.mjs` — the DM2 payload codec, fuzzed against zlib in both directions, plus
   a character-for-character comparison of the two vendored copies
 - `rollerui.test.mjs` — the only suite that RUNS `roller.js`. Chromium, with the
@@ -631,6 +763,32 @@ because a deflate match may overlap its own output. That bug corrupts a characte
 and passes every test written by reading the code.
 
 Do it against `out/`, not the source — mutate the staged copy, run, restage.
+
+**A wrapped row is not an overflow, and nothing was watching for it.** `layout.test.mjs`
+rendered a hidden adversary row for two releases and asserted on overflow and on
+zero-width children. A row that wraps stays inside the panel and every child keeps its
+width, so both were blind to it while the row was visibly two lines at the table.
+
+**Two false starts on measuring it, both worth knowing.** Comparing children's `top`
+values measures BASELINE OFFSET, not wrapping: `.party-head` is `align-items: baseline`,
+so a 9px tag and a 13px name have different tops on the same line. It reported five lines
+for a row that was plainly one. A real wrap is a child whose top is at or below the bottom
+of everything before it. And the resulting assertion, gated to 320px and up, does NOT
+prove the fix — reverting the fix still passed there, because the wrap only reproduces at
+the 260px stress floor. The regression test that works is STRUCTURAL, in
+`rollerui.test.mjs`: the tag must sit inside `.party-name-wrap` and not be a child of
+`.party-head`. When a symptom will not reproduce at the widths under test, test the
+mechanism instead and say so.
+
+**`background.js` is executed by NO suite.** `dock.test.mjs` reads it as a STRING and
+asserts two substrings. Nothing imports or runs it, so a broken import there fails at
+nothing until a real room. `mps`'s `npm run keys` resolves its named imports statically,
+which closes that one class of failure and no other.
+
+**A test fixture that uses a convenient proxy will break when the proxy stops holding.**
+Nine assertions in `party.test.mjs` read row NAMES to check row ORDER. They always cared
+about order. The moment an adversary's name stopped being published they all failed, and
+the fix was to read ids — which is what they had meant all along.
 
 **Assert through the DOM, not a regex over rendered HTML.** A regex encodes a guess about
 how the markup was written; the parser decides what it actually IS. An escaping assertion
