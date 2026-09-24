@@ -240,6 +240,12 @@ page), `dnm.js` (shared helpers and the event reducer), `sdk.js` (vendored SDK).
 `com.thuknights.dnm-obr` (`EXT_ID`), `…/char` (`CHAR_KEY`), `…/events` (`CHANNEL`), and
 `com.thuknights.dnm-rolls/state` (`ROOM_KEY`).
 
+**A third repo reads `ROOM_KEY`: GSGrimoire/obr-radio.** Its soundscape compares
+successive readings of `threat`, `momentum`, `initiative.round` and the six `epochs`
+counters to play a sound or switch playlist. It never writes the record. Renaming or
+reshaping any of those fields silences it without an error, so check `diffDnm()` in
+`obr-radio/radio.js` when they change.
+
 `thuknights` is the original host from before the move to GSGrimoire. It is a namespace
 string, never a URL, and nothing is fetched from it. It is load-bearing as a key: renaming it
 orphans every attached character and every room's log, so it needs a migration, not a
