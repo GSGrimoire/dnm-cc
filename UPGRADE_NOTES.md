@@ -2,6 +2,47 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 1.4C — adversaries start hidden
+
+Extension only. `dnm-obr` **1.4B → 1.4C**. No schema change, no creator change.
+
+A letter: a bug found in play on the release that shipped. Adversaries added to the
+order should have been hidden by default and were not — every one went in with its
+name published, and the GM had to press Hide on each.
+
+## What changed
+
+- `applyInitiativeAction()` `add` takes a `hidden` flag. A row added hidden is written
+  with `name: ""` **whatever the event carried**, the same rule `hide` follows, so a
+  careless or forged sender cannot publish a name by setting both.
+- `addAdversary()` in `roller.js` calls `rememberHiddenName()` BEFORE sending, then
+  sends `{ kind: "npc", hidden: true, name: "" }`. The name never enters a broadcast
+  or room metadata. Adding visible and hiding a moment later was rejected: that
+  publishes the name for the moment in between, and room metadata is readable by
+  every client.
+- Characters (`kind: "pc"`) still go in visible, from Start Initiative and from
+  + Order. Only the add-an-adversary box changed.
+
+The GM reveals a row with the existing Show button, which already reads the name back
+out of the GM's `localStorage`. The accepted consequence from 1.4 still holds: in a
+different browser the GM's own hidden rows read "Hidden".
+
+## Tests
+
+- `party.test.mjs`: a row can be added hidden, and a hidden add publishes no name even
+  when the event carries one.
+- `rollerui.test.mjs`: the stub SDK now RECORDS broadcasts (`__stub.sent`). A GM types
+  an adversary and presses Enter; the test asserts one `add`, `kind: "npc"`,
+  `hidden: true`, the name absent from everything sent, and present in the GM's
+  `localStorage`. Both fail with the fix reverted in `out/`.
+
+## Live checks
+
+- The GM adds an adversary: it shows with the "hidden" mark for the GM, and players
+  see nothing for it (hidden rows are not drawn for players at all).
+- Show reveals it to the players with the right name.
+- Reload the ROOM, not the tab.
+
 # 1.4B — one list, not two
 
 Extension only. `dnm-obr` **1.4 → 1.4B**. No schema change, no creator change.

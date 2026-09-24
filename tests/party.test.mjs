@@ -709,6 +709,16 @@ ok("a zero Threat delta is not a spend",
     ok("a row with no id is refused",
       init(run(started, { type: "init", action: "add", id: "", name: "Nameless", kind: "pc" })).rows.length === 3);
 
+    // 1.4C. An adversary is added already hidden, and a hidden add publishes no name
+    // even when the event carried one — a forged or careless sender cannot leak it.
+    const hiddenAdd = run(started,
+      { type: "init", action: "add", id: "n2", name: "Glass Warden", kind: "npc", hidden: true });
+    ok("a row can be added already hidden", init(hiddenAdd).rows[3].hidden === true);
+    ok("a hidden add publishes no name, whatever the event carried",
+      !JSON.stringify(hiddenAdd).includes("Glass Warden"));
+    ok("an add without the flag is still visible",
+      init(started).rows.every((r) => r.hidden === false));
+
     const long = run(started, { type: "init", action: "add", id: "long", name: "x".repeat(500), kind: "npc" });
     ok(`a long name is clamped to ${INITIATIVE_NAME_MAX}`,
       init(long).rows[3].name.length <= INITIATIVE_NAME_MAX);

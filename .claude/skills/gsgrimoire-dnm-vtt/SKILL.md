@@ -285,6 +285,11 @@ the concealed-roll log lives there. The test that matters is
 `!JSON.stringify(state).includes(theName)`. If you ever find yourself publishing a secret
 and hiding it in CSS, this is the precedent that says don't.
 
+**An adversary is ADDED hidden (1.4C)**, not added and then hidden: `addAdversary()`
+stores the name locally first and sends the row with `hidden: true` and no name, and the
+reducer blanks the name of any row added hidden. Hiding a moment later would publish the
+name for that moment. Characters still go in visible.
+
 Consequences, both accepted: the GM's hidden names do not follow them to another browser
 (the row reads "Hidden" rather than inventing a name), and ending initiative deletes them
 so the next fight cannot inherit the last one's.

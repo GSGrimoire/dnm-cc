@@ -53,6 +53,7 @@ fs.writeFileSync(path.join(stageDir, "sdk.js"), `
 // Stub SDK. Only the surface roller.js actually touches.
 const subs = { player: [], party: [], items: [], ready: [], meta: [], msg: [] };
 const state = { role: "GM", items: [], meta: {}, selection: [] };
+const sent = [];   // every broadcast, so a test can check what actually left the tab
 const on = (list) => (cb) => { list.push(cb); return () => { const i = list.indexOf(cb); if (i >= 0) list.splice(i, 1); }; };
 const OBR = {
   isAvailable: true,
@@ -80,12 +81,13 @@ const OBR = {
     setMetadata: async (m) => { Object.assign(state.meta, m); },
     onMetadataChange: on(subs.meta),
   },
-  broadcast: { onMessage: on(subs.msg), sendMessage: async () => {} },
+  broadcast: { onMessage: on(subs.msg), sendMessage: async (channel, ev) => { sent.push(ev); } },
   action: { setHeight: async () => {} },
 };
 // The handles the test drives it through.
 window.__stub = {
   state,
+  sent,
   setRole(role) { state.role = role; subs.player.forEach((cb) => cb({ role, name: "Tester" })); },
   setItems(items) { state.items = items; subs.items.forEach((cb) => cb(items)); },
   setMeta(meta) { state.meta = meta; subs.meta.forEach((cb) => cb(meta)); },
@@ -323,6 +325,28 @@ const RUNNING = {
   const p = await readPanel(page);
   ok("player, shared, no round: the panel is visible", p.hidden === false);
   ok("player, shared, no round: with stats", p.rows.every((r) => r.hasSpirit));
+  await page.close();
+}
+
+// -------------------------------------------------------------
+// 6. 1.4C. An adversary the GM adds goes in HIDDEN. The test is on what was
+//    BROADCAST, because that is what reaches room metadata and so every client:
+//    a name that went out and was hidden a moment later was public for that moment.
+// -------------------------------------------------------------
+{
+  const { page, errors } = await boot({ role: "GM", initiative: RUNNING });
+  await page.fill("#init-add", "Glass Warden");
+  await page.press("#init-add", "Enter");
+  await page.waitForTimeout(100);
+  const sent = await page.evaluate(() => JSON.parse(JSON.stringify(window.__stub.sent)));
+  const adds = sent.filter((ev) => ev.type === "init" && ev.action === "add");
+  ok("GM add: nothing throws", errors.length === 0);
+  ok(`GM add: exactly one row was sent (${adds.length})`, adds.length === 1);
+  ok("GM add: it is an adversary", adds[0]?.kind === "npc");
+  ok("GM add: it arrives hidden", adds[0]?.hidden === true);
+  ok("GM add: its name never left the tab", !JSON.stringify(sent).includes("Glass Warden"));
+  const kept = await page.evaluate(() => JSON.stringify(localStorage));
+  ok("GM add: the GM's browser kept the name", kept.includes("Glass Warden"));
   await page.close();
 }
 
