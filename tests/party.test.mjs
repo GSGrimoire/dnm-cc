@@ -8,7 +8,10 @@ import { epochStatus, readAppliedEpochs, readEpochs, EPOCH_KEYS, emptyEpochs, EP
   visibleRecovery, recoveryKeyFor, MAX_RECOVERY_ENTRIES, RECOVERY_TTL_MS,
   readInitiative, applyInitiativeAction, emptyInitiative, initiativeAllActed,
   INITIATIVE_ACTIONS, MAX_INITIATIVE_ROWS, INITIATIVE_NAME_MAX,
-  mayMarkRow, initRowLabel, initRowIdForCharacter } from "../out/dnm-obr/dnm.js";
+  mayMarkRow, initRowLabel, initRowIdForCharacter, gmPopover, readGmDock, writeGmDock, GM_POPOVER_ID,
+  SHEET_POPOVER_ID, readDock, DOCK_KEY, applyReroll, rerollProblem, rerollOptions, rerollLines,
+  REROLL_LABELS, rerollHintLikely } from "../out/dnm-obr/dnm.js";
+import * as gmr from "../out/dnm-obr/gmrules.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log("  FAIL:", name); } };
@@ -870,6 +873,194 @@ ok("a zero Threat delta is not a spend",
     ok("a v4 room keeps its Complication level", readCompAt(seen) === 18);
     ok("a v4 room simply has no initiative running", readInitiative(seen) === null);
   }
+}
+
+// -------------------------------------------------------------
+// Extension 1.5: the GM tools' numbers are the book's
+// -------------------------------------------------------------
+// Each of these is a number printed in the Gamemaster's Guide, Chapter 4. A cost that
+// drifts in a refactor is a rule the table plays wrong without knowing it.
+{
+  const spend = (id, inp) => gmr.spendCost(gmr.SPEND_RULES.find((r) => r.id === id), inp);
+  ok("a Complication costs 2 (p.113)", spend("complication") === 2);
+  ok("buying off an adversary's complication costs 2 (p.113)", spend("adversaryComplication") === 2);
+  ok("a Reveal costs 4 (p.115)", spend("reveal") === 4);
+  ok("one Normal NPC as reinforcement costs 1 (p.113)", spend("reinforcements", { count: 1, group: false }) === 1);
+  ok("five individually cost 5", spend("reinforcements", { count: 5, group: false }) === 5);
+  ok("a group of five costs half, rounded up: 3", spend("reinforcements", { count: 5, group: true }) === 3);
+  ok("a group of four costs 2", spend("reinforcements", { count: 4, group: true }) === 2);
+  ok("a group of one is still 1", spend("reinforcements", { count: 1, group: true }) === 1);
+  ok("an Incidental Effect costs 1, plus 1 per extra character (p.114)", spend("incidental", { count: 1 }) === 1 && spend("incidental", { count: 3 }) === 3);
+  ok("each Truth changed, added or removed costs 2 (p.114)", spend("changeCircumstances", { count: 1 }) === 2 && spend("changeCircumstances", { count: 3 }) === 6);
+  ok("Divide the Group costs the size of the larger part (p.115)", spend("divide", { count: 3 }) === 3);
+  ok("a Reversal costs 2 per character present (p.115)", gmr.reversalCost(4) === 8);
+  ok("rushing costs 2 (p.101)", gmr.RUSH_RULE.cost === 2);
+  ok("simple starred actions cost 1, serious 2 (p.120)", gmr.GM_ACTIONS.simple.cost === 1 && gmr.GM_ACTIONS.serious.cost === 2);
+  ok("three starred actions of each kind", gmr.GM_ACTIONS.simple.starred.length === 3 && gmr.GM_ACTIONS.serious.starred.length === 3);
+
+  const gain = (id) => gmr.GAIN_RULES.find((r) => r.id === id);
+  ok("Escalation adds 1 (p.112)", gain("escalation").amount === 1);
+  ok("Dithering adds 2 (p.110)", gain("dithering").amount === 2);
+  ok("a bought-off complication adds 2 (p.112)", gain("buyoff").amount === 2);
+  ok("threatening circumstances add one or two (p.112)", gain("threatening").min === 1 && gain("threatening").max === 2);
+  ok("resting too long: Break 2, Bed 4 (p.121)", gain("restBreak").amount === 2 && gain("restBed").amount === 4);
+
+  ok("starting Threat: low 1, standard 2, high 3, catastrophic 4 per character (p.111)",
+    gmr.startingThreat("low", 4) === 4 && gmr.startingThreat("standard", 4) === 8 &&
+    gmr.startingThreat("high", 4) === 12 && gmr.startingThreat("catastrophic", 4) === 16);
+  ok("an unknown stakes reads as standard", gmr.startingThreat("nonsense", 3) === 6);
+
+  // The hazard table (p.117), from the p.116 baseline: damage 2 for 1 Threat, avoid at D2.
+  const base = gmr.hazardCost({});
+  ok("the baseline hazard is damage 2, 1 Threat, Difficulty 2 (p.116)", base.damage === 2 && base.cost === 1 && base.difficulty === 2);
+  ok("+1 damage costs 1 each", gmr.hazardCost({ damage: 3 }).cost === 4 && gmr.hazardCost({ damage: 3 }).damage === 5);
+  ok("Breaker costs 1", gmr.hazardCost({ breaker: true }).cost === 2);
+  ok("Non-Lethal saves 1", gmr.hazardCost({ nonLethal: true, damage: 1 }).cost === 1);
+  ok("an extra target costs 1 each", gmr.hazardCost({ targets: 2 }).cost === 3);
+  ok("Blast costs 2", gmr.hazardCost({ blast: true }).cost === 3);
+  ok("Blast makes extra targets moot", gmr.hazardCost({ blast: true, targets: 3 }).cost === 3);
+  ok("Harder to Avoid costs 2 and is Difficulty 3", gmr.hazardCost({ harder: true }).cost === 3 && gmr.hazardCost({ harder: true }).difficulty === 3);
+  ok("Easier to Avoid saves 2 and is Difficulty 1", gmr.hazardCost({ easier: true, damage: 2 }).cost === 1 && gmr.hazardCost({ easier: true }).difficulty === 1);
+  ok("\"This can reduce the cost to 0\" — and not below", gmr.hazardCost({ easier: true, nonLethal: true }).cost === 0);
+  ok("Easier and Harder at once read as Harder", gmr.hazardCost({ easier: true, harder: true }).difficulty === 3);
+  ok("the summary reads back what was built",
+    gmr.hazardSummary(gmr.hazardCost({ damage: 2, breaker: true, blast: true }), "Burning") === "Burning 4, Breaker, Blast, avoid at D2");
+
+  // Every rule the panel shows has the book's words and a page in Chapter 4.
+  const all = [...gmr.GAIN_RULES, ...gmr.SPEND_RULES, gmr.RUSH_RULE, gmr.REVERSAL_RULE, gmr.TICKER_RULE,
+    gmr.LINGERING_RULE, gmr.GROWTH_RULE, gmr.PERSONAL_THREAT_RULE, gmr.MENACING_RULE, ...gmr.STAKES,
+    gmr.HAZARD_BASE, ...gmr.HAZARD_OPTIONS, ...gmr.REFERENCE, gmr.GM_ACTIONS.simple, gmr.GM_ACTIONS.serious];
+  const missing = all.filter((r) => !(typeof r.quote === "string" && r.quote.length > 40) || !(r.page >= 93 && r.page <= 125));
+  ok(`every rule carries a quote and a Chapter 4 page (${all.length} rules${missing.length ? "; missing: " + missing.map((r) => r.id || r.title).join(", ") : ""})`, missing.length === 0);
+  ok("pages cite as GM Guide p.N", gmr.cite(112) === "GM Guide p.112");
+}
+
+// Tickers: Threat each round.
+{
+  const list = [
+    { id: "a", name: "Fire spreading", amount: 2, on: true, visible: true },
+    { id: "b", name: "Reinforcements closing in", amount: 1, on: true },
+    { id: "c", name: "Off", amount: 3, on: false },
+    { id: "d", name: "Zero", amount: 0, on: true, pinned: true },
+  ];
+  ok("the round total counts only tickers that are on", gmr.tickerTotal(list) === 3);
+  const lines = gmr.tickLines(list, 4);
+  ok("one line per ticker that contributes", lines.length === 2);
+  ok("a public ticker is named in the table's log", lines[0].publicLabel === "Fire spreading" && lines[0].publicDetail === "Round 4 ended: +2 Threat");
+  ok("a hidden one reads only \"Threat rises\"", lines[1].publicLabel === "Threat rises" && !JSON.stringify([lines[1].publicLabel, lines[1].publicDetail]).includes("Reinforcements"));
+  ok("the GM's own line names it", lines[1].privateLabel === "Reinforcements closing in");
+  ok("End Scene keeps only pinned tickers", gmr.tickersAfterScene(list).map((t) => t.id).join() === "d");
+  ok("a fresh ticker is on, hidden and scene-long", (() => { const t = gmr.normalizeTickers([{ name: "x", amount: 1 }])[0]; return t.on && !t.visible && !t.pinned; })());
+}
+
+// NPCs: the shape, and what the roller is handed.
+{
+  const normal = gmr.SAMPLE_NPCS.find((n) => n.kind === "normal");
+  const major = gmr.SAMPLE_NPCS.find((n) => n.kind === "major");
+  ok("every sample is marked as one", gmr.SAMPLE_NPCS.every((n) => n.sample && /not from the book/i.test(n.source)));
+  ok("a Normal NPC rolls its Truth pair", JSON.stringify(gmr.npcRollValues(normal, { mode: "truth" })) === JSON.stringify({ attr: normal.main.attr, skill: normal.main.skill }));
+  ok("or its Default pair", JSON.stringify(gmr.npcRollValues(normal, { mode: "default" })) === JSON.stringify({ attr: normal.fallback.attr, skill: normal.fallback.skill }));
+  ok("a Major NPC rolls by attribute and skill, like a character",
+    gmr.npcRollValues(major, { attr: "might", skill: "fight" }).attr === major.attrs.might &&
+    gmr.npcRollValues(major, { attr: "might", skill: "fight" }).skill === major.skills.fight);
+  const round = gmr.rosterFromText(gmr.rosterToText([...gmr.SAMPLE_NPCS, { id: "mine", name: "Bog lurker", menacing: 2 }]));
+  ok("an export leaves the samples out", round.npcs.length === 1 && round.npcs[0].name === "Bog lurker");
+  ok("and survives the round trip", round.npcs[0].menacing === 2 && round.npcs[0].id === "mine");
+  ok("ids are unique after normalising", gmr.normalizeRoster([{ id: "x" }, { id: "x" }]).length === 1);
+}
+
+// The GM panel's own popover: the sheet's geometry, its own id and its own dock.
+{
+  const store = new Map();
+  const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) };
+  ok("the GM panel docks LEFT by default", readGmDock(storage).anchor === "left");
+  ok("the sheet still docks right by default", readDock(storage).anchor === "right");
+  writeGmDock(storage, { anchor: "top-right" });
+  ok("moving the GM panel does not move the sheet", readDock(storage).anchor === "right" && !store.has(DOCK_KEY));
+  const p = gmPopover({ url: "u", dock: readGmDock(storage), viewport: { width: 1600, height: 900 } });
+  ok("it opens under its own id, not the sheet's", p.id === GM_POPOVER_ID && p.id !== SHEET_POPOVER_ID);
+  ok("with the sheet's rules: no click-away, flush to the edge", p.disableClickAway === true && p.marginThreshold === 0);
+  ok("pinned by its top-right corner at top-right", p.transformOrigin.horizontal === "RIGHT" && p.transformOrigin.vertical === "TOP");
+}
+
+// -------------------------------------------------------------
+// Extension 1.5: rerolls
+// -------------------------------------------------------------
+{
+  const roll = (extra = {}) => ({
+    id: "r1", t: 1000, who: "Kesh", by: "p1", an: "Quickness", av: 10, sn: "Fight", sv: 2, diff: 2, compAt: 20,
+    detail: [{ d: 17, kind: "fail" }, { d: 15, kind: "fail" }, { d: 9, kind: "success" }],
+    succ: 1, comp: 0, pass: false, gain: 0, src: "pc", ...extra,
+  });
+  const ev = (how, dice, extra = {}) => ({ type: "reroll", id: "r1", how, dice, g: "g" + Math.random(), t: 2000, ...extra });
+
+  const a = applyReroll(roll(), ev("spirit", [{ i: 0, to: 1 }]));
+  ok("a reroll replaces the die", a.detail[0].d === 1 && a.detail[0].kind === "crit");
+  ok("and re-judges the roll: 1 crit + 1 success = 3, passed, +1 Momentum", a.succ === 3 && a.pass === true && a.gain === 1);
+  ok("the roll as first written is kept", JSON.stringify(a.o) === JSON.stringify({ d: [17, 15, 9], succ: 1, comp: 0, pass: false, gain: 0 }));
+  ok("and the reroll recorded: which die, from what, to what, paid how", a.rr.length === 1 && a.rr[0].i === 0 && a.rr[0].from === 17 && a.rr[0].to === 1 && a.rr[0].how === "spirit");
+  ok("the log line reads \"Reroll 17 → 1 (1 Spirit)\"", rerollLines(a)[0].text === "Reroll 17 → 1 (1 Spirit)");
+
+  ok("ONE paid reroll per roll", rerollProblem(a, ev("spirit", [{ i: 1, to: 5 }])) !== null);
+  ok("including Threat after Spirit", rerollProblem(a, ev("threat", [{ i: 1, to: 5 }])) !== null);
+  ok("a free one still works after it", rerollProblem(a, ev("tacticalLens", [{ i: 1, to: 5 }])) === null);
+  const b = applyReroll(a, ev("tacticalLens", [{ i: 1, to: 2 }]));
+  ok("the original stays the FIRST roll, not the one before this reroll", b.o.d.join() === "17,15,9");
+  ok("each free reroll once per roll", rerollProblem(b, ev("tacticalLens", [{ i: 2, to: 2 }])) !== null);
+  ok("two reroll lines, in order", rerollLines(b).map((l) => l.text).join("|") === "Reroll 17 → 1 (1 Spirit)|Reroll 15 → 2 (Tactical Lens, free)");
+
+  ok("claimed Momentum locks the dice", rerollProblem(roll({ claimed: true }), ev("spirit", [{ i: 0, to: 1 }])) !== null);
+  ok("one die per paid reroll", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }])) !== null);
+  ok("Mobile: two dice for one Spirit on a Move test", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }], { mobile: true })) === null);
+  ok("but not on any other test", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }], { mobile: true })) !== null);
+  ok("and never three", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }, { i: 2, to: 1 }], { mobile: true })) !== null);
+  ok("Tool Rig: none on a two-dice roll", rerollProblem(roll({ detail: [{ d: 20, kind: "complication" }, { d: 20, kind: "complication" }] }), ev("toolRig", [{ i: 0, to: 1 }])) !== null);
+  let four = roll({ detail: [17, 16, 15, 14].map((d) => ({ d, kind: "fail" })) });
+  four = applyReroll(four, ev("toolRig", [{ i: 0, to: 1 }]));
+  four = applyReroll(four, ev("toolRig", [{ i: 1, to: 1 }]));
+  ok("Tool Rig: one per die bought beyond two", four.rr.length === 2 && rerollProblem(four, ev("toolRig", [{ i: 2, to: 1 }])) !== null);
+  ok("a die that does not exist is refused", rerollProblem(roll(), ev("spirit", [{ i: 7, to: 1 }])) !== null);
+  ok("a value that is not a d20 is refused", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 21 }])) !== null);
+  ok("the same die twice in one reroll is refused", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 0, to: 2 }], { mobile: true })) !== null);
+  ok("an action entry is not a roll", rerollProblem({ kind: "action", id: "x" }, ev("spirit", [{ i: 0, to: 1 }])) !== null);
+  // The threshold the roll was MADE under, not today's.
+  const lowered = applyReroll(roll({ compAt: 16 }), ev("spirit", [{ i: 2, to: 17 }]));
+  ok("a reroll is judged against the roll's own Complication threshold (16: both 17s complicate)", lowered.detail[2].kind === "complication" && lowered.comp === 2);
+
+  // What the person who rolled is offered.
+  const pc = { kind: "pc", spirit: 2, sources: [
+    { id: "tacticalLens", attrs: ["quickness", "insight"], skills: ["fight"], when: "aiming" },
+    { id: "mobile", attrs: ["quickness"], skills: ["move"] },
+    { id: "evade", attrs: [], skills: [] },
+  ] };
+  const hows = (e, who) => rerollOptions(e, who).map((o) => o.how);
+  ok("a character is offered Spirit and the free rerolls that fit the test", hows(roll(), pc).join() === "spirit,tacticalLens,evade");
+  ok("a free reroll carries its condition", rerollOptions(roll(), pc).find((o) => o.how === "tacticalLens").when === "aiming");
+  ok("gear that does not fit the test is not offered", hows(roll({ an: "Might" }), pc).join() === "spirit,evade");
+  ok("Mobile is not a reroll of its own: it widens Spirit on Move", rerollOptions(roll({ sn: "Move" }), pc).find((o) => o.how === "spirit").max === 2 && !hows(roll({ sn: "Move" }), pc).includes("mobile"));
+  ok("no Spirit, no paid reroll", !hows(roll(), { ...pc, spirit: 0 }).includes("spirit"));
+  ok("Inspire only on the first roll after it", hows(roll(), { ...pc, inspireAt: 500, firstAfterInspire: "r1" }).includes("inspire")
+    && !hows(roll(), { ...pc, inspireAt: 500, firstAfterInspire: "other" }).includes("inspire"));
+  ok("the GM's roll: Personal Threat if the NPC has some, and Threat", hows(roll({ src: "npc" }), { kind: "gm", personalThreat: 2 }).join() === "personalThreat,threat");
+  ok("without Personal Threat, just Threat", hows(roll({ src: "gm" }), { kind: "gm", personalThreat: 0 }).join() === "threat");
+  ok("nothing to pay with, nothing offered", hows(roll(), { kind: "none" }).length === 0);
+  ok("a claimed roll offers nothing", hows(roll({ claimed: true }), pc).length === 0);
+  ok("every reroll kind has a label", ["spirit", "threat", "personalThreat", "tacticalLens", "supplyAndDemand", "evade", "extraEffort", "toolRig", "inspire"].every((k) => REROLL_LABELS[k]));
+
+  // When the yellow reminder is drawn (the reroll itself is always offered).
+  const allGood = roll({ detail: [{ d: 3, kind: "success" }, { d: 1, kind: "crit" }] });
+  ok("no hint when every die already succeeded", rerollHintLikely(allGood, null) === false);
+  ok("a hint when a die failed", rerollHintLikely(roll(), null) === true);
+  ok("hintSkills narrows it", rerollHintLikely(roll(), { hintSkills: ["talk"] }) === false && rerollHintLikely(roll({ sn: "Talk" }), { hintSkills: ["talk"] }) === true);
+  ok("hintMinDice narrows it", rerollHintLikely(roll({ detail: [{ d: 20, kind: "complication" }, { d: 19, kind: "fail" }] }), { hintMinDice: 3 }) === false && rerollHintLikely(roll(), { hintMinDice: 3 }) === true);
+  ok("options carry the verdict", rerollOptions(allGood, pc).find((o) => o.how === "tacticalLens").likely === false && rerollOptions(roll(), pc).find((o) => o.how === "tacticalLens").likely === true);
+
+  // Through the reducer, as the GM's background page runs it.
+  let st = applyEvent({ ...EMPTY_STATE, log: [roll()] }, ev("spirit", [{ i: 0, to: 1 }]), { sender: "p1" });
+  ok("the reducer applies your own reroll", st.log[0].rr && st.log[0].succ === 3);
+  st = applyEvent(st, { type: "claim", id: "r1" });
+  ok("and the claim that follows takes the NEW Momentum and locks it", st.log[0].claimed && st.log[0].gain === 1
+    && !applyEvent(st, ev("tacticalLens", [{ i: 1, to: 1 }]), { sender: "p1" }).log[0].rr.some((r) => r.how === "tacticalLens"));
 }
 
 console.log(`\nparty: ${pass} passed, ${fail} failed`);

@@ -671,8 +671,11 @@ ok("roller.js opens the sheet as a popover", rollerSrc.includes("openSheetPopove
 // Versions moved together
 // -------------------------------------------------------------
 const manifest = JSON.parse(fs.readFileSync(new URL("../out/dnm-obr/manifest.json", import.meta.url), "utf8"));
-ok("the manifest is at 1.4C", manifest.version === "1.4C");
+ok("the manifest is at 1.5", manifest.version === "1.5");
 ok("EXT_VERSION matches the manifest", ext.EXT_VERSION === manifest.version);
+// Owlbear refuses to install a manifest whose description is over 128 characters. 1.5
+// shipped one at 140 to the beta and the install failed; the live release would have too.
+ok(`the manifest description fits Owlbear's 128 (${manifest.description.length})`, manifest.description.length <= 128);
 
 console.log(`\ndock: ${pass} passed, ${fail} failed`);
 console.log(`

@@ -2,6 +2,243 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.4 / 1.5 — GM tools
+
+`dnm-obr` **1.4C → 1.5**, creator **2.3 → 2.4**. Room state schema **v5 → v6** (one
+new key, `rushed`). Two new GM-only bond kinds. A number on both halves: new panels,
+new rules automated, and a behaviour the sheet did not have.
+
+Asked for at the table after reading the Gamemaster's Guide, Chapter 4: "a cheat sheet
+for the GM to remember all the stuff they can do", with buttons, confirmations on every
+one, the book's exact words in the tooltips, Threat that arrives each round, and NPC
+stat blocks that can sit on tokens.
+
+## Rerolls (added to this release before it went live)
+
+"Spend Spirit to … reroll one d20 after rolling" — the creator's own Spirit text, never
+implemented until now. Decided with the table: **your own rolls only** (GM and players
+alike), **one paid reroll per roll**, **dice locked once the Momentum is claimed**, and
+**all the free rerolls** in the rules data, plus a yellow reminder on a roll that has one.
+
+- **The rules live in `dnm.js`**: `rerollProblem()`, `applyReroll()`, `rerollOptions()`,
+  `rerollLines()`. The reducer applies a `reroll` event through them. The creator mirrors
+  them for its own rolls (`sheetRerollOptions()`, `applySheetReroll()`).
+- **The original is never rewritten.** `o` keeps the dice and verdict as first written; `rr`
+  records each die (`i`, `from`, `to`, `how`, `pay`, `g` for the press). Both are drawn: the
+  first row with the replaced die struck through, a line per reroll, then the new result.
+  The claim button and the summary use the new numbers.
+- **Own rolls, enforced.** `background.js` now maps each connection to its player id and
+  passes `{ sender }` into `applyEvent()`; a reroll is applied only when `sender` equals the
+  roll's `by`. A roll with no `by` (pre-0.9.4) cannot be rerolled. The roller's own check
+  only decides whether to draw the buttons.
+- **Who pays.** Roll entries carry `src`: `pc` (a character's Spirit), `npc` (with `nid`, the
+  GM's roster id) or `gm`. A player with no character selected has nothing to pay with and
+  gets no buttons. The GM pays 1 Threat, or 1 Personal Threat for an NPC in the fight that
+  has some.
+- **Spirit for a roller reroll is taken by the SHEET.** The roller never edits a character;
+  it sends `pay: "room"`, and `reconcileRerolls()` in the creator takes 1 Spirit per press
+  when it sees it — open now or next time — tracking `appliedRerolls` so it is paid once.
+  First contact adopts the log without paying, as the bond queue does. A reroll made on the
+  sheet takes the Spirit there and says `pay: "sheet"`.
+- **Free rerolls.** The creator writes `rerolls` into the snapshot (`getRerollSources()`):
+  equipped items with a `rerollModifier` effect (Tactical Lens, Mobile) and the talents
+  Supply and Demand, Tool Rig, Evade and Extra Effort, each with its attribute/skill filter
+  and the condition the sheet cannot check. The roller reads that list, so it has no copy of
+  DM_DATA. Evade's attack type and Extra Effort's skill are not stored anywhere, so those two
+  are confirm-the-condition. Tool Rig: once per die beyond the base two. Mobile is not a
+  reroll of its own: it lets the Spirit reroll take two dice on Move.
+- **The hint is narrower than the option** (after the first playtest). `rerollHintLikely()`
+  in `dnm.js` (mirrored as `rerollHintLikelyCC()`): only when the roll has a failed or
+  complicated die, and only where a source's `hintSkills` / `hintMinDice` allow — Supply
+  and Demand on Talk, Evade on Fight or Move, Extra Effort and Tool Rig on 3+ dice. The
+  reroll itself is still offered on any roll when a die is picked.
+- **No separate log line for the Spirit.** The roll's own "Reroll 18 → 11 (1 Spirit)" is the
+  record; the sheet's extra "Reroll / paid 1 Spirit…" entry was dropped after the playtest.
+- **Inspire** rides on the Second Wind grant (`inspire: true`); the ally's sheet stores
+  `inspireAt` (the grant's time) and offers the free reroll on the first roll after it.
+  Used up on use, in the sheet or (via `reconcileRerolls`) in the roller.
+- **Sheet rolls now post `compAt`**, so a reroll in the room is judged against the threshold
+  the roll was made under.
+- Recent Rolls entries gained `own`, `cl`, `rr`, `o`, all clamped on the way out of storage.
+  Every handler on the sheet takes the list index and a die index — never a string from the
+  roll — because a recent roll arrives in a character code.
+
+Tests: `party.test` (the rules, the reducer), `security.test` (forged rerolls, hostile
+records), `creator.test` (sheet options, Spirit, Lens hint, Mobile, Tool Rig, Inspire, a
+hostile code), `embedded.test` (paid once, first contact, Mobile one Spirit for two dice,
+Inspire used up, the posted fields), `gmtools.test` (the roller in Chromium: buttons only on
+your own roll, the hint, confirm, the log lines, one paid per roll, the GM's Threat, claim
+locks). Proved by breaking the owner check, the hint and the one-paid rule in `out/`.
+
+Live checks: a player rerolls in the roller and their sheet loses 1 Spirit (open, and
+closed-then-opened); the yellow hint appears for a character wearing a Tactical Lens on a
+Quickness/Insight + Fight roll; another player sees the reroll lines but no buttons.
+
+## The files
+
+| file | what it is |
+|---|---|
+| `dnm-obr/gmrules.js` | NEW. The rules as data, SDK-free: every gain and spend with its quote and page, the hazard table, starting Threat, ticker and NPC normalisers, sample stat blocks. All the costs are here and nowhere else. |
+| `dnm-obr/gmpanel.js` | NEW. One module that draws the GM tools in the roller AND in the pop-out, plus the table actions (`gmThreat`, `pushEpochVia`, `rushScene`, `reversal`, `addNpcToFight`, …). Written against a small `host` so both frames run the same code. |
+| `dnm-obr/gm.html`, `gm.js` | NEW. The pop-out page: a host built from the SDK, and the dock controls (pad, zoom, edge resize) for its own popover. |
+| `dnm-obr/dnm.js` | `rushed` in the reducer and `readRushed()`; `adversity` and `reversal` bond kinds; `GM_POPOVER_ID`, `readGmDock`/`writeGmDock`, `gmPopover()`, `openGmPopover()`; `NPC_KEY`. |
+| `dnm-obr/roller.js` | Mounts the panel; GM log merged into the feed; Next Round ticks; rests greyed while rushed; NPC tokens fill the roller. `pushEpoch()` and `startInitiative()` now call the shared `pushEpochVia()` / `startInitiativeVia()`. |
+| `dnm-cc/index.html` | Sheet honours a rush; drains `reversal` and `adversity`; the sheet's own GM spend of 3+ also sends adversity. |
+
+## Decisions, and why
+
+**Quotes are verbatim, with the PRINTED page.** Requested explicitly. The chapter's own
+cross-references point two pages before its printed footers ("page 105" for Threat,
+printed 107); the footers are what a reader with the PDF open sees, so they win. Every
+quote was checked against the source text word for word (the dump interleaves two
+columns, so the check was "these words, in this order, with small gaps"). One printed
+slip is corrected and says so in `gmrules.js`: "stat blockstatblock". The source text
+itself is not in the repo.
+
+**What reaches the table.** Room metadata is public whatever the UI draws (the 1.4C
+precedent). Gains are logged by name — the book says to announce them. Spends are logged
+as "Threat spent", and the reason is written to the GM's `localStorage`
+(`…/gmlog/<room>`). The private entry carries `shadows: <public id>`, and the roller
+drops the shadowed public line when it merges the two, so the GM reads one line per press.
+Tickers are hidden unless marked public; a hidden one logs "Threat rises".
+
+**Confirmation.** Every button that changes Threat or reaches the table uses the
+two-press arm (same 4-second lapse, same one-armed-at-a-time rule as Table Controls).
+Steppers, toggles, ticker setup and roster editing do not: they change nothing until a
+button that does is pressed. Next Round asks only when it would add Threat, and says how
+much.
+
+**Tickers fire from the GM's press, not the reducer.** The reducer runs on every client;
+a tick there adds once per client. One log line per ticker, for the round that ENDED.
+End Scene drops unpinned tickers (they belong to a scene). 0–6 each, at most 8.
+
+**Rushed stores a scene number, not a flag.** `rushed: { scene }` is stamped by the
+reducer with the room's scene AFTER the End Scene the rush rides on, and
+`readRushed()` is true while the room is still in that scene. The next End Scene lifts it
+with nothing to clear, and `trimState()` drops a lapsed record. Every clearing rule tried
+for a plain flag was wrong for one order of presses. It blocks Breather, Break and Bed —
+decided with the table: no time for five minutes means no time for a night's sleep. The
+reducer ignores any scene the event carries, so a forged rush cannot be planted ahead.
+
+It is a reminder, not a lock: each sheet greys its own buttons. A GM-PUSHED rest is not
+blocked — the catch-up applies it — because the GM pushing one has decided there is time.
+The sheet's buttons are dimmed rather than `disabled`, because a disabled button gets no
+hover in some browsers and the hover is the explanation.
+
+**Reversal and adversity ride the bond queue**, for the reason the Maverick drive does:
+they pay out on sheets that are shut. Both carry `targets` — the names of characters on
+tokens in the scene at the press — matched with `bondNamesEqual()`. No targets means
+everyone; that is what the creator's own sender sends, because a sheet cannot read the
+scene. Reversal carries no amount: only the sheet knows its maximum (half, rounded down).
+Adversity is +1 Growth through `growthPool`, capped at the unspent maximum, spent history
+untouched. Both GM-only in `isGmOnlyEvent()`. Reversal is once per adventure, tracked in
+the GM's `localStorage` against the adventure epoch, and marked used BEFORE sending so a
+double press cannot spend two.
+
+Adversity Growth has a GM switch (on by default — it is the rule; the book says "this is
+up to the GM"). The creator reads the same switch from `…/gm-settings`, same origin.
+
+**NPC tokens hold an opaque id.** `metadata[NPC_KEY] = { v: 1, id }` and nothing else.
+Token metadata is readable by every client, hidden tokens included. The roster turning the
+id into a stat block lives in the GM's browser, so a player selecting the token gets
+nothing. A token carrying a character is never given an NPC (checked in the mutator, the
+`attachToSelected()` rule), and "Attach D&M character" is not offered on an NPC token.
+
+**The roster** is `localStorage` (`…/roster`, per browser, not per room) with export and
+import as plain JSON under a header line. Every entry passes `normalizeNpc()` on the way
+out of storage AND in from an import — it arrives in files people send each other and is
+rendered in loops. Everything is drawn with `textContent`; the fuzz in `gmtools.test.mjs`
+imports a name of `<img onerror>`.
+
+**The stat block shape** follows the community Foundry VTT system for D&M (made with
+Modiphius's consent): Normal = a Truth, a Truth attribute/skill pair and a default pair;
+Major = 4 attributes, 7 skills, Truths, Injuries to defeat, Personal Threat, actions with a
+roll range. Menacing is a number used only as "Threat when it turns up" — Chapter 4 says
+no more, and Chapter 5 was not available. It is added once per ROW on reveal, group or not;
+that is the reading that cannot overcharge, and it says so in the tooltip.
+
+**The samples are placeholders.** The book's adversaries (Chapter 5, and the free
+Quickstart PDF) are not on the open web in a copyable form, and the Foundry system ships
+none. Four generic opponents built in the book's shape, marked "Sample — not from the
+book" in the data and in the UI, and left out of exports.
+
+**The fight list** (`…/fight/<room>`) is the NPCs from the roster currently in the order.
+It is NOT pruned on render: a render can run before the room echoes back the row this
+browser just added, and pruning against that stale order deleted the NPC it had just put
+in. Caught by `gmtools.test.mjs`. It is cleared where the fight ends — End Scene
+(`pushEpochVia`) and the party panel's End. Hidden names go with it.
+
+**The pop-out** reuses `sheetPopover()` whole with the id swapped (`gmPopover()`), its own
+storage key, defaulting LEFT. Not inside the block the creator copies. The roller learns it
+is popped out from a heartbeat timestamp (`…/gm-popped`, every 2 s, stale after 6 s), not
+a flag — a room reload closes every popover, and a flag would leave the roller pointing at
+a panel that is gone. The two frames stay level through `storage` events.
+
+**Shared moves.** `pushEpoch()` and `startInitiative()` bodies moved into `gmpanel.js`
+unchanged, so "End Scene, rushed" and Reversal end a scene exactly as Table Controls does,
+including the group's 1 Momentum.
+
+## Also fixed
+
+- `.char-banner { display: flex }` beat the UA's `[hidden]`, so an empty teal bar sat over
+  the roller whenever nothing was selected — since the banner existed.
+- `.gm-panel-head` wraps. "Next Round (+3)" pushed Back up off a 420px panel.
+
+## Not done
+
+- Chapter 5 rules: Menacing beyond "Threat on arrival", NPC tiers beyond Normal/Major, the
+  real stat blocks. Revive is probably there too.
+- A Major NPC's action table is shown, not rolled.
+- Lingering hazards build Threat through a ticker; their per-round damage is the GM's to
+  narrate.
+- The roster does not follow the GM to another browser except by export/import.
+
+## Tests
+
+- `gmtools.test.mjs` — NEW, 114 assertions, Chromium with a stub SDK and the real reducer
+  playing the GM's background page. Confirm-before-send, gains named, spend reasons absent
+  from everything sent, book costs, the drive and adversity on 3+, tickers on Next Round,
+  rush greying and lifting, Reversal once per adventure, starting Threat, hazards, NPCs into
+  the fight hidden with no name sent, Reveal/Arrives costs, token writes holding only an id,
+  roller fill for Normal and Major and nothing for a player, the editor, a hostile import,
+  pop out / bring back, the pop-out page and its pad, and no overflow at 320 and 420px.
+- `party.test.mjs` — every cost against the book, the hazard table, tickers, NPC roll
+  values, export round trip, the GM dock's independence from the sheet's.
+- `security.test.mjs` — rush and both bond kinds GM-only, targets clamped, a forged rush
+  cannot choose its scene, hostile `rushed` shapes, a hostile roster capped and clamped,
+  token references hold only an id, tickers clamped.
+- `creator.test.mjs` — Reversal half Spirit, targeting, adversity Growth and its cap,
+  combined labels, the rushed play view, a manual rest refused and a pushed one applied.
+- `embedded.test.mjs` — a sheet GM spend of 3 sends adversity (and not with the switch
+  off); the room's rush reaches the sheet and lapses.
+- Proved by breaking it: public spend reasons, `readRushed()` ignoring the scene, the
+  sheet ignoring the rush, and the header wrap each fail their tests in `out/`.
+
+## Testing it before it is live
+
+Staged as a BETA with `tools/stage-beta.mjs` (new): `beta/` on `main` in both repos,
+namespaces suffixed `-beta`, live files untouched. Install
+`https://gsgrimoire.github.io/dnm-obr/beta/manifest.json` in a test room. See the skill's
+deploy section.
+
+## Live checks
+
+- Reload the ROOM. Then as GM: GM Tools appears under Table Controls; as a player it does
+  not.
+- Pop out: the panel docks left; the pad moves it; edges resize it live; Close and Bring
+  back both return it to the roller. Reload the room with it popped out: within a few
+  seconds the roller shows the tools again.
+- A spend: the players' log reads "Threat spent", the GM's shows the reason marked
+  Only you. A Maverick and the characters in the scene get Spirit and Growth on 3+.
+- Tickers: Next Round shows "(+N)", asks, adds, one line each.
+- Rushed: every player's Breather/Break/Bed dims with the tooltip; the next End Scene
+  restores them.
+- Reversal: everyone on a token gets half their maximum Spirit when their sheet next opens.
+- NPC token: attach, select as GM (roller fills), select as a player (nothing). Check the
+  token's metadata in devtools holds only `{ v, id }`.
+- Is the pop-out's popover shown on top of the sheet's when both are open at the same
+  anchor? Not testable without Owlbear.
+
 # 1.4C — adversaries start hidden
 
 Extension only. `dnm-obr` **1.4B → 1.4C**. No schema change, no creator change.

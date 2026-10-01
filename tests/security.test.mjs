@@ -16,7 +16,9 @@ import {
   applyEvent, trimState, sanitizeEntry, EMPTY_STATE,
   MAX_STATE_BYTES, MAX_LOG_ENTRIES, FIELD_LIMITS, canRevealConcealed,
   sanitizeBondEffect, readBondQueue, MAX_BOND_EFFECTS,
+  isGmOnlyEvent, readRushed, MAX_EFFECT_TARGETS, NPC_KEY,
 } from "../out/dnm-obr/dnm.js";
+import * as gmr from "../out/dnm-obr/gmrules.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) pass++; else { fail++; console.log("  FAIL:", name); } };
@@ -571,6 +573,110 @@ const rollEv = (entry) => ({ type: "roll", entry });
     })()`);
     ok(`computeStats returns null for an unresolved ${what} instead of throwing`, r === "null");
   }
+}
+
+// -------------------------------------------------------------
+// Extension 1.5: the GM tools' new events, forged
+// -------------------------------------------------------------
+{
+  // Rushing the table reaches every sheet, so it is the GM's. So are the two new GM
+  // payouts: a forged Reversal is half a Spirit track for everyone, a forged adversity
+  // is Growth for everyone.
+  ok("a rush is GM-only", isGmOnlyEvent({ type: "rush", value: true }));
+  ok("lifting a rush is GM-only too", isGmOnlyEvent({ type: "rush", value: false }));
+  ok("a Reversal payout is GM-only", isGmOnlyEvent({ type: "bond", effect: { kind: "reversal" } }));
+  ok("an adversity payout is GM-only", isGmOnlyEvent({ type: "bond", effect: { kind: "adversity" } }));
+  ok("a rivalry still is not (it can only pay a bond already held)", !isGmOnlyEvent({ type: "bond", effect: { kind: "rivalry" } }));
+
+  // Targets are names from the scene and are rendered nowhere, but they ride in room
+  // metadata, so they are clamped like any other field.
+  const fx = sanitizeBondEffect({
+    id: "a1", t: Date.now(), kind: "adversity", amount: 1e9,
+    targets: Array.from({ length: 50 }, (_, i) => "N".repeat(500) + i).concat([null, "", "   ", { x: 1 }]),
+  });
+  ok(`targets are capped at ${MAX_EFFECT_TARGETS}`, fx.targets.length <= MAX_EFFECT_TARGETS);
+  ok("each target is clamped", fx.targets.every((t) => t.length <= FIELD_LIMITS.who));
+  ok("the amount is clamped", fx.amount === 999);
+  const empty = sanitizeBondEffect({ id: "a2", t: Date.now(), kind: "reversal", targets: "everyone" });
+  ok("targets that are not a list become none", Array.isArray(empty.targets) && empty.targets.length === 0);
+
+  // A forged rush cannot carry a scene of its own choosing: the reducer stamps the
+  // room's current scene, so a rush cannot be planted to land in a later scene.
+  let st = fresh();
+  st.epochs = { ...st.epochs, scene: 7 };
+  st = applyEvent(st, { type: "rush", value: true, scene: 99, rushed: { scene: 99 } });
+  ok("the reducer stamps the room's own scene", st.rushed && st.rushed.scene === 7);
+  ok("and the room reads as rushed", readRushed(st) === true);
+  st = trimState(applyEvent(st, { type: "epoch", boundary: "scene" }));
+  ok("the next scene lifts it, and trimming drops the lapsed record", readRushed(st) === false && st.rushed === null);
+  // Hostile shapes in metadata read as not rushed rather than throwing.
+  for (const bad of [{ scene: "x" }, "yes", 1, [], { scene: Infinity }]) {
+    ok(`a rushed value of ${JSON.stringify(bad)} reads as not rushed`, readRushed({ ...fresh(), rushed: bad }) === false);
+  }
+}
+
+// The roster is imported from files people send each other, and rendered in loops.
+{
+  // Past every cap by a wide margin, but still small enough to serialise: a file too big
+  // for JSON.stringify could never have been exported in the first place.
+  const huge = "X".repeat(3000);
+  const many = Array.from({ length: 300 }, (_, i) => ({ id: "n" + i, name: huge, truth: huge,
+    weapons: Array.from({ length: 40 }, () => ({ name: huge, damage: huge })),
+    actions: Array.from({ length: 40 }, () => ({ name: huge, text: huge })),
+    attrs: { might: 1e9, quickness: -50, insight: "NaN" }, menacing: 1e6, personalThreat: -3 }));
+  const r = gmr.rosterFromText("roster\n" + JSON.stringify(many));
+  ok(`an imported roster is capped (${r.npcs.length})`, r.npcs.length === gmr.MAX_ROSTER);
+  const n = r.npcs[0];
+  ok("names and Truths are clamped", n.name.length <= 32 && n.truth.length <= 60);
+  ok("lists are capped", n.weapons.length <= 12 && n.actions.length <= 12);
+  ok("action text is clamped", n.actions.every((a) => a.text.length <= 400));
+  ok("attributes are clamped", n.attrs.might === 20 && n.attrs.quickness === 8 && n.attrs.insight === 8);
+  ok("Menacing is clamped to the range Threat steps in", n.menacing === 6 && n.personalThreat === 0);
+  ok("a damaged file is refused, not thrown", !!gmr.rosterFromText("roster [ {").error);
+  ok("a file that is not a list is refused", !!gmr.rosterFromText('{"a":1}').error);
+  ok("an imported entry cannot pass itself off as a sample", gmr.rosterFromText('[{"name":"x","sample":true}]').npcs[0].sample === false);
+
+  // What goes on a token is an id and nothing else, whatever the NPC holds.
+  const ref = gmr.npcTokenRef({ id: "abc", name: "Secret villain", truths: ["The mayor"] });
+  ok("a token reference carries only an id", Object.keys(ref).sort().join(",") === "id,v" && !JSON.stringify(ref).includes("Secret"));
+  ok("a token's NPC key is namespaced to the extension", NPC_KEY === "com.thuknights.dnm-obr/npc");
+  ok("a mangled token reference reads as none", gmr.readNpcTokenRef({ id: "" }) === null && gmr.readNpcTokenRef("x") === null);
+
+  // Tickers come out of storage and are rendered in a loop.
+  const t = gmr.normalizeTickers(Array.from({ length: 100 }, () => ({ name: huge, amount: 1e9 })));
+  ok("tickers are capped", t.length === gmr.MAX_TICKERS);
+  ok("a ticker's amount is clamped to 0–6", t.every((x) => x.amount === 6));
+  ok("a ticker's name is clamped", t.every((x) => x.name.length <= 32));
+  ok("tickers are hidden from the table unless the GM says otherwise", gmr.normalizeTickers([{ name: "x" }])[0].visible === false);
+}
+
+// -------------------------------------------------------------
+// Extension 1.5: rerolls, forged
+// -------------------------------------------------------------
+// You reroll your own rolls. The background page passes the sender's player id into the
+// reducer, and the reducer checks it against the roll's `by`.
+{
+  const roll = { id: "r1", t: 1, who: "Kesh", by: "alice", an: "Might", av: 10, sn: "Fight", sv: 2, diff: 2,
+    detail: [{ d: 20, kind: "complication" }, { d: 19, kind: "fail" }], succ: 0, comp: 1, pass: false, gain: 0 };
+  const ev = { type: "reroll", id: "r1", how: "spirit", dice: [{ i: 0, to: 1 }] };
+  const base = { ...fresh(), log: [roll] };
+  ok("someone else's reroll of your roll is refused", !applyEvent(base, ev, { sender: "mallory" }).log[0].rr);
+  ok("an unknown sender is refused", !applyEvent(base, ev, { sender: null }).log[0].rr);
+  ok("a roll with no owner cannot be rerolled through the relay", !applyEvent({ ...fresh(), log: [{ ...roll, by: null }] }, ev, { sender: null }).log[0].rr);
+  ok("the owner's reroll goes through", applyEvent(base, ev, { sender: "alice" }).log[0].rr.length === 1);
+  ok("rerolls are not GM-only: players reroll their own", !isGmOnlyEvent(ev));
+  // Hostile reroll records arriving in an entry (a forged roll, or old metadata).
+  const hostile = sanitizeEntry({ ...roll, rr: Array.from({ length: 200 }, () => ({ i: 1e6, from: -9, to: 1e9, how: "spirit", g: "x".repeat(500), pay: "everyone" })).concat([{ how: "<script>" }]),
+    o: { d: Array.from({ length: 500 }, () => 1e9), succ: 1e12 } });
+  ok("reroll records are capped", hostile.rr.length <= 10);
+  ok("and clamped", hostile.rr.every((r) => r.i < FIELD_LIMITS.dice && r.from >= 1 && r.to <= 20 && r.g.length <= 20 && r.pay === "room"));
+  ok("an unknown reroll kind is dropped", !hostile.rr.some((r) => r.how === "<script>"));
+  ok("the original dice are capped and clamped", hostile.o.d.length <= FIELD_LIMITS.dice && hostile.o.d.every((d) => d <= 20) && hostile.o.succ === 999);
+  ok("a forged reroll cannot set a die past 20", !applyEvent(base, { ...ev, dice: [{ i: 0, to: 99 }] }, { sender: "alice" }).log[0].rr);
+  ok("nor reach a die the roll does not have", !applyEvent(base, { ...ev, dice: [{ i: 5, to: 1 }] }, { sender: "alice" }).log[0].rr);
+  // A grant's Inspire flag is a boolean and nothing else.
+  const g = sanitizeBondEffect({ id: "g1", t: 1, kind: "grant", target: "Kesh", amount: 2, source: "Second Wind", inspire: "<img src=x>" });
+  ok("Inspire on a grant is carried as true, not as text", g.inspire === true);
 }
 
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);

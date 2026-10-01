@@ -333,6 +333,25 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   await wait(1100);
   ok("two separate spends of 2 are not one spend of 4", drives().length === 0);
 
+  // v2.4. The same spend is adversity (GM Guide p.125): one Growth to every character.
+  // The sheet cannot read the scene, so it names nobody, and an effect naming nobody
+  // reaches every sheet.
+  const adversity = () => sent.filter((e) => e.type === "bond" && e.effect.kind === "adversity");
+  sent.length = 0;
+  g("addThreat(-3,'manual adjustment');");
+  await wait(1100);
+  ok("a GM spend of 3 from a sheet also announces adversity", adversity().length === 1);
+  ok("naming nobody, so it reaches every sheet", adversity()[0] && adversity()[0].effect.targets.length === 0);
+  ok("and how much was spent", adversity()[0] && adversity()[0].effect.amount === 3);
+  // The GM tools' switch turns it off here too: same origin, same localStorage.
+  w.localStorage.setItem("com.thuknights.dnm-obr/gm-settings", JSON.stringify({ awardGrowth: false }));
+  sent.length = 0;
+  g("addThreat(-3,'manual adjustment');");
+  await wait(1100);
+  ok("with the GM's Growth switch off, no adversity", adversity().length === 0);
+  ok("but the drive still fires", drives().length === 1);
+  w.localStorage.removeItem("com.thuknights.dnm-obr/gm-settings");
+
   // ADDING Threat is a player action several abilities require. It is not a spend.
   sent.length = 0;
   g("addThreat(6,'Adrenaline Rush');");
@@ -347,6 +366,92 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   await wait(1100);
   ok("a player's client does not announce a drive", drives().length === 0);
   g("obrRole = 'GM';");
+}
+
+
+// -------------------------------------------------------------
+// v2.4: rerolls between the sheet and the room
+// -------------------------------------------------------------
+// A reroll made on the sheet goes to the room marked paid. A reroll made in the ROLLER
+// of this character's roll is paid here, once, when the sheet sees it.
+{
+  // A character loaded the way a token loads one, so `ready` is set.
+  const err = g(`(function(){
+    var c = state.character;
+    c.name = 'Rerolla'; c.finalized = true; c.currentSpirit = 3;
+    delete c.appliedRerolls;
+    return loadIntoCreator(buildCharacterCode()) || '';
+  })()`);
+  ok("a character loads for the reroll checks", !err);
+  g("state.character.currentSpirit = 3; delete state.character.appliedRerolls;");
+  const room = (log) => ({ log, bonds: [], epochs: { scene: 0, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 } });
+  const rolled = (id, rr, extra = {}) => ({ id, t: Date.now(), who: "Rerolla", by: "x", an: "Might", av: 10, sn: "Fight", sv: 2, diff: 1,
+    detail: [{ d: 3, kind: "success" }, { d: 1, kind: "crit" }], succ: 3, comp: 0, pass: true, gain: 2, rr, ...extra });
+  const spirit = () => g("getEffectiveResource('spirit')");
+
+  // First contact adopts what is already in the log, without paying for it.
+  const old = room([rolled("old", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g0", t: 1 }])]);
+  g(`reconcileRerolls(${JSON.stringify(old)})`);
+  ok("a character meeting the room does not pay for old rerolls", spirit() === 3);
+
+  const fresh = room([
+    rolled("old", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g0", t: 1 }]),
+    rolled("new", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g1", t: 2 }]),
+    rolled("mine", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "sheet", g: "g2", t: 3 }]),
+    rolled("free", [{ i: 0, from: 20, to: 3, how: "tacticalLens", pay: "room", g: "g3", t: 4 }]),
+    { ...rolled("theirs", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g4", t: 5 }]), who: "Someone else" },
+  ]);
+  sent.length = 0;
+  g(`reconcileRerolls(${JSON.stringify(fresh)})`);
+  ok("a Spirit reroll made in the roller costs this character 1 Spirit", spirit() === 2);
+  ok("and no separate log line: the roll's own reroll line is the record", !sent.some((e) => e.type === "action"));
+  g(`reconcileRerolls(${JSON.stringify(fresh)})`);
+  ok("and only once, however often the room is read", spirit() === 2);
+  ok("a reroll paid on the sheet, a free one, and someone else's cost nothing here", spirit() === 2);
+
+  // Mobile: one press, two dice, one Spirit.
+  const mobile = room([rolled("mob", [
+    { i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g5", t: 6 },
+    { i: 1, from: 19, to: 4, how: "spirit", pay: "room", g: "g5", t: 6 }])]);
+  g(`reconcileRerolls(${JSON.stringify(mobile)})`);
+  ok("Mobile's two dice from one press cost one Spirit", spirit() === 1);
+
+  // Inspire used in the roller clears it here.
+  g("state.character.inspireAt = Date.now() - 5000");
+  g(`reconcileRerolls(${JSON.stringify(room([rolled("ins", [{ i: 0, from: 20, to: 3, how: "inspire", pay: "room", g: "g6", t: 7 }])]))})`);
+  ok("Inspire used in the roller is used up on the sheet", g("!state.character.inspireAt"));
+
+  // A reroll made on the sheet reaches the room under the same id.
+  sent.length = 0;
+  g("window.postReroll({ type: 'reroll', id: 'abc', how: 'spirit', pay: 'sheet', dice: [{ i: 0, to: 4 }] })");
+  ok("the sheet sends its reroll to the room", sent.some((e) => e.type === "reroll" && e.id === "abc" && e.pay === "sheet"));
+
+  // The roll the sheet posts says what it was made under and what pays for a reroll.
+  sent.length = 0;
+  g("diceUI.attr = 'might'; diceUI.skill = 'fight'; doRoll();");
+  const posted = sent.find((e) => e.type === "roll");
+  ok("a sheet roll carries its Complication threshold", posted && posted.entry.compAt === 20);
+  ok("and says a reroll of it is paid in Spirit", posted && posted.entry.src === "pc");
+
+  // An Inspire grant carries its flag.
+  sent.length = 0;
+  g("grantSpiritToAlly({ target: 'Kestrel', amount: 2, source: 'Second Wind', inspire: true })");
+  ok("a Second Wind from a character with Inspire says so", sent.some((e) => e.type === "bond" && e.effect.kind === "grant" && e.effect.inspire === true));
+}
+
+// -------------------------------------------------------------
+// v2.4: the room's rush reaches the sheet
+// -------------------------------------------------------------
+{
+  const room = (scene, rushed) => JSON.stringify({ "com.thuknights.dnm-rolls/state": {
+    momentum: 0, threat: 0, log: [], bonds: [],
+    epochs: { scene, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 }, rushed } });
+  g(`adoptRoom(${room(4, { scene: 4 })})`);
+  ok("a rush in the room's metadata reaches the sheet", g("roomRushed") === true);
+  g(`adoptRoom(${room(5, { scene: 4 })})`);
+  ok("and the next End Scene lifts it", g("roomRushed") === false);
+  g(`adoptRoom(${room(5, null)})`);
+  ok("a room from before 1.5 is not rushed", g("roomRushed") === false);
 }
 
 // -------------------------------------------------------------
