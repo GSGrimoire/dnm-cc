@@ -2007,6 +2007,19 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
   from { transform: scaleX(1); }
   to   { transform: scaleX(0); }
 }
+/* v2.4. Rerolls. Your own roll's dice are buttons; a picked die is ringed, a die a
+   reroll replaced is struck through in the row as first written, and the reroll line and
+   the new result sit beneath it. The yellow note is the free-reroll reminder. */
+button.die { cursor: pointer; padding: 0; font: inherit; }
+.die.die-pick:hover { border-color: var(--border-bright); }
+.die.is-picked { outline: 2px solid var(--warning); outline-offset: 1px; }
+.die.is-replaced { opacity: .45; text-decoration: line-through; }
+.roll-reroll-line { font-family: var(--font-mono); font-size: .62rem; color: var(--warning); margin-top: 4px; }
+.roll-reroll-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin-top: 6px; }
+.reroll-hint { font-size: .7rem; line-height: 1.4; color: var(--warning); margin-top: 6px; padding: 4px 8px; border-left: 2px solid var(--warning); background: rgba(255, 209, 102, 0.08); }
+.reroll-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--warning); border-radius: 3px; }
+.reroll-head { font-family: var(--font-mono); font-size: .62rem; color: var(--warning); flex: 1 0 100%; }
+.reroll-opt.is-free { color: var(--teal); border-color: var(--teal-dim); }
 /* v2.4. A rest the GM has rushed away. Dimmed rather than disabled, so the tooltip that
    says why still opens on hover. */
 .confirm-btn.rest-rushed { opacity: .45; border-style: dashed; cursor: not-allowed; }
@@ -5735,6 +5748,9 @@ function buildOwlbearSnapshot() {
     growthMax: maxes.growth,
     momentumMax: maxes.momentum,
     resourceBreakdown: snapshotResourceBreakdown(),
+    // v2.4. The rerolls this character has beyond plain Spirit, for the extension's
+    // roller. See getRerollSources().
+    rerolls: getRerollSources(),
     talents,
     items,
     truths: c.truths || [],
@@ -8112,6 +8128,12 @@ function applyPendingBondEffects(queue) {
       if (!bondNamesEqual(fx.target, state.character.name)) return;
       amount = Math.max(0, Math.round(Number(fx.amount) || 0));
       why = `${fx.source || 'Spirit'} from ${fx.from || 'an ally'}`;
+      // v2.4. Inspire: a free reroll on this character's next Skill Test, from the time
+      // the ally helped, not the time this sheet happened to open.
+      if (fx.inspire) {
+        state.character.inspireAt = Number.isFinite(Number(fx.t)) ? Number(fx.t) : Date.now();
+        why += ' (Inspire: a free reroll on your next Skill Test)';
+      }
     } else if (fx.kind === 'drive') {
       // v1.28. The Maverick drive: "When the GM spends 3 or more Threat at once,
       // regain 1 Spirit." No self-guard here, unlike the two bonds — the sender is the
@@ -8336,7 +8358,9 @@ function useSecondWind(points, target, targetName) {
     state.character.currentMomentum -= cost;
     // The ally's own sheet applies this, because it is the only thing that can: their
     // Spirit maximum, their injuries and their own catch-up all live there.
-    grantSpiritToAlly({ target: name, amount: total, source: 'Second Wind' });
+    // v2.4. Inspire rides on the grant: "that ally may re-roll 1d20 on their next Skill
+    // Test for free". The ally's sheet remembers it when the grant lands.
+    grantSpiritToAlly({ target: name, amount: total, source: 'Second Wind', inspire: characterHasTalent('inspire') });
     const inspire = characterHasTalent('inspire')
       ? ` Inspire: ${name} may re-roll 1d20 for free on their next Skill Test.` : '';
     toast = `Spent ${cost} Momentum. ${name} regains ${total} Spirit.${bond ? ' Supportive Bond added +1.' : ''}${inspire}`;
@@ -9686,6 +9710,9 @@ function recordRecentRoll(res) {
     pa: !!res.passed,
     gn: clampNumber(res.momentumGained, 0, 99),
     at: getCompAt(),
+    // v2.4. Made on THIS sheet, so this sheet may reroll it. A roll picked up from the
+    // room (made in the roller) is rerolled in the roller instead.
+    own: true,
   };
   const list = normalizeRecentRolls();
   state.character.recentRolls = [entry, ...list].slice(0, MAX_RECENT_ROLLS);
@@ -9718,7 +9745,42 @@ function normalizeRecentRolls() {
     pa: !!e.pa,
     gn: clampNumber(e.gn, 0, 99),
     at: clampNumber(e.at, 15, 20) || 20,
+    // v2.4. Rerolls. All of it arrives in a character code, so all of it is clamped:
+    // `rr` and `o` are rendered, and `rr` is looped over.
+    own: e.own === true,
+    cl: e.cl === true,
+    ...normalizeRerollFields(e),
   }));
+}
+
+// v2.4. The reroll half of a recent roll: `o` is the roll as first written, `rr` each die
+// rerolled since. Shared by the sheet's own rolls and the ones picked up from the room.
+const MAX_REROLL_RECORDS_CC = 10;
+const REROLL_HOWS_CC = ['spirit', 'threat', 'personalThreat', 'tacticalLens', 'supplyAndDemand', 'evade', 'extraEffort', 'toolRig', 'inspire'];
+function normalizeRerollFields(e) {
+  const out = {};
+  if (Array.isArray(e.rr) && e.rr.length) {
+    out.rr = e.rr.slice(0, MAX_REROLL_RECORDS_CC).filter(r => r && REROLL_HOWS_CC.includes(r.how)).map(r => ({
+      i: clampNumber(r.i, 0, RECENT_ROLL_MAX_DICE - 1),
+      from: clampNumber(r.from, 1, 20),
+      to: clampNumber(r.to, 1, 20),
+      how: r.how,
+      pay: r.pay === 'sheet' ? 'sheet' : 'room',
+      g: String(r.g == null ? '' : r.g).slice(0, 20),
+      t: Number.isFinite(Number(r.t)) ? Number(r.t) : 0,
+    }));
+  }
+  const o = e.o;
+  if (o && typeof o === 'object' && Array.isArray(o.d) && o.d.length) {
+    out.o = {
+      d: o.d.slice(0, RECENT_ROLL_MAX_DICE).map(n => clampNumber(n, 1, 20)),
+      su: clampNumber(o.su ?? o.succ, 0, 99),
+      co: clampNumber(o.co ?? o.comp, 0, 99),
+      pa: !!(o.pa ?? o.pass),
+      gn: clampNumber(o.gn ?? o.gain, 0, 99),
+    };
+  }
+  return out;
 }
 
 // v2.0B. The same rule normalizeRecentRolls() follows, applied to the one list that
@@ -9756,15 +9818,10 @@ function normalizeGrowthPurchases() {
 function renderRecentRolls() {
   const list = normalizeRecentRolls();
   if (!list.length) return '';
-  const rows = list.map(e => {
-    const dice = e.d.map(n => `<div class="die small ${classifyDie(n, e.av, e.sv, e.at)}">${n}</div>`).join('');
-    const bits = [`${e.su} success${e.su === 1 ? '' : 'es'} vs D${e.df}`, e.pa ? 'passed' : 'failed'];
-    if (e.gn > 0) bits.push(`+${e.gn} Momentum`);
-    if (e.co > 0) bits.push(`${e.co} complication${e.co === 1 ? '' : 's'}`);
+  const rows = list.map((e, idx) => {
     return `<div class="recent-roll">
       <div class="recent-roll-head">${escHtml(e.an)} ${e.av} (${escHtml(e.sn)} ${e.sv})<span class="recent-roll-when">${formatRollAge(e.t)}</span></div>
-      <div class="dice-faces">${dice}</div>
-      <div class="recent-roll-sum ${e.pa ? 'pass' : 'fail'}">${bits.join(' · ')}</div>
+      ${renderRerollableDice(e, idx, true)}
     </div>`;
   }).join('');
   return `<details class="sheet-collapse recent-rolls" open>
@@ -9792,6 +9849,15 @@ function updateDiceLabels() {
 }
 
 function renderDiceResult(res) {
+  // v2.4. The roll as it now stands, rerolls included, comes from its Recent Rolls
+  // entry — the one record both views draw from, so they cannot disagree.
+  const list = normalizeRecentRolls();
+  const idx = list.findIndex(e => e.rid && e.rid === String(res.rollId || ''));
+  if (idx >= 0) {
+    const e = list[idx];
+    res.successes = e.su; res.complications = e.co; res.passed = e.pa; res.momentumGained = e.gn;
+    if (e.cl) res.momentumClaimed = true;
+  }
   const dice = res.dice.map(d => {
     const cls = classifyDie(d, res.attrValue, res.skillValue);
     return `<div class="die ${cls}">${d}</div>`;
@@ -9816,13 +9882,240 @@ function renderDiceResult(res) {
         <button class="mini-btn claim-momentum no-print"${res.momentumClaimed ? ' disabled' : ''} onclick="claimRollMomentum()">${res.momentumClaimed ? 'Added' : `Add ${res.momentumGained} Momentum`}</button>
       </div>`
     : '';
+  const body = idx >= 0
+    ? renderRerollableDice(list[idx], idx, false)
+    : `<div class="dice-faces">${dice}</div>
+    <div class="dice-summary"><span class="succ">${res.successes} success${res.successes===1?'':'es'}</span>${compTxt}${verdict ? ' · ' + verdict : ''}</div>`;
   return `<div class="dice-result">
     <div class="dice-result-target">${res.attrName} ${res.attrValue} (${res.skillName} ${res.skillValue}) — ${res.d20count}d20${hasDiff ? ` vs D${res.difficulty}` : ''}</div>
-    <div class="dice-faces">${dice}</div>
-    <div class="dice-summary"><span class="succ">${res.successes} success${res.successes===1?'':'es'}</span>${compTxt}${verdict ? ' · ' + verdict : ''}</div>
+    ${body}
     ${gained}
   </div>`;
 }
+
+// ============================================================
+// REROLLS (v2.4)
+// ============================================================
+// "Spend Spirit to … reroll one d20 after rolling." Decided with the table:
+//
+//   * You reroll your own rolls — here, the ones made on this sheet. A roll made in the
+//     roller is rerolled in the roller, and its Spirit comes off here when the sheet
+//     sees it (reconcileRerolls in the module block).
+//   * ONE paid reroll per roll, 1 Spirit. Mobile makes that one Spirit reroll two dice
+//     on a Move test.
+//   * Free rerolls from talents and gear on top, each once per roll (Tool Rig once per
+//     die bought beyond two). Conditions the sheet cannot see ("when aiming") are shown
+//     and the player confirms them.
+//   * Once the roll's Momentum is claimed its dice are locked.
+//
+// The roll as first written is never rewritten: `o` keeps it, and the reroll lines and
+// the new result are drawn beneath it. The rules mirror rerollProblem() and
+// rerollOptions() in the extension's dnm.js, which the room's reducer enforces.
+const REROLL_LABELS_CC = {
+  spirit: '1 Spirit', threat: '1 Threat', personalThreat: '1 Personal Threat',
+  tacticalLens: 'Tactical Lens', supplyAndDemand: 'Supply and Demand', evade: 'Evade',
+  extraEffort: 'Extra Effort', toolRig: 'Tool Rig', inspire: 'Inspire', mobile: 'Mobile',
+};
+const REROLL_PAID_CC = ['spirit', 'threat', 'personalThreat'];
+// The parts of each rule the sheet cannot check, said plainly so the player can.
+const REROLL_WHEN = {
+  tacticalLens: 'it is a ranged attack made while aiming, or the target has a Truth representing a weak spot',
+  supplyAndDemand: 'this is a Skill Test to trade resources or valuables',
+  evade: 'you are defending against your chosen attack type, rolling to set the Difficulty in a contest',
+  extraEffort: 'this test uses your chosen skill and you spent Spirit to buy extra dice',
+  toolRig: 'you used a toolkit, a Supply Points device or an item on your rig, and bought dice with Spirit (one reroll per die bought)',
+};
+const REROLL_TALENTS = ['supplyAndDemand', 'toolRig', 'evade', 'extraEffort'];
+
+function rerollTalentText(key) {
+  if (DM_DATA.generalTalents && DM_DATA.generalTalents[key]) return DM_DATA.generalTalents[key].description || '';
+  for (const group of [DM_DATA.archetypes || {}, DM_DATA.advancedArchetypes || {}]) {
+    for (const a of Object.values(group)) {
+      if (a && a.talents && a.talents[key]) return a.talents[key].description || '';
+    }
+  }
+  return '';
+}
+
+// Every reroll this character has beyond plain Spirit, with what it applies to. Written
+// into the snapshot too, so the extension's roller can offer the same ones on rolls made
+// there — it has no copy of DM_DATA and should not need one.
+function getRerollSources() {
+  const out = [];
+  getEquippedItemEntries().forEach(({ item }) => {
+    getItemSituationalEffects(item).forEach(effect => {
+      if (!effect || effect.type !== 'rerollModifier' || effect.appliesWhen !== 'equipped') return;
+      const id = /mobile/.test(effect.id || '') ? 'mobile' : /tactical-lens/.test(effect.id || '') ? 'tacticalLens' : null;
+      if (!id || out.some(x => x.id === id)) return;
+      out.push({
+        id, label: REROLL_LABELS_CC[id], text: effect.rulesText || '', when: REROLL_WHEN[id] || '',
+        attrs: Array.isArray(effect.attributeKeys) ? effect.attributeKeys.slice(0, 4) : [],
+        skills: Array.isArray(effect.skillKeys) ? effect.skillKeys.slice(0, 7) : [],
+        from: item.name || '',
+      });
+    });
+  });
+  REROLL_TALENTS.forEach(key => {
+    if (hasTalent(key)) out.push({ id: key, label: REROLL_LABELS_CC[key], text: rerollTalentText(key), when: REROLL_WHEN[key], attrs: [], skills: [], from: 'talent' });
+  });
+  return out.slice(0, 12);
+}
+
+// The first roll this character made after an Inspire landed: "their next Skill Test".
+function firstRollAfterInspire() {
+  const at = Number(state.character && state.character.inspireAt) || 0;
+  if (!at) return null;
+  const after = normalizeRecentRolls().filter(e => e.t > at).sort((a, b) => a.t - b.t);
+  return after.length ? after[0].rid : null;
+}
+
+function sheetRerollOptions(e) {
+  if (!e || !e.own || e.cl || !e.d.length) return [];
+  const attr = String(e.an || '').toLowerCase();
+  const skill = String(e.sn || '').toLowerCase();
+  const rr = e.rr || [];
+  const fits = src => (!src.attrs.length || src.attrs.includes(attr)) && (!src.skills.length || src.skills.includes(skill));
+  const sources = getRerollSources();
+  const out = [];
+  if (rr.length >= MAX_REROLL_RECORDS_CC) return out;
+  const mobile = sources.find(x => x.id === 'mobile' && fits(x));
+  if (getEffectiveResource('spirit') >= 1 && !rr.some(r => REROLL_PAID_CC.includes(r.how))) {
+    out.push({ how: 'spirit', label: '1 Spirit', cost: '1 Spirit', max: mobile ? 2 : 1,
+      note: mobile ? `Mobile (${mobile.from}): this Spirit rerolls two dice on a Move test.` : '' });
+  }
+  sources.forEach(src => {
+    if (src.id === 'mobile' || !fits(src)) return;
+    if (src.id === 'toolRig') {
+      if (rr.filter(r => r.how === 'toolRig').length >= Math.max(0, e.d.length - 2)) return;
+    } else if (rr.some(r => r.how === src.id)) return;
+    out.push({ how: src.id, label: src.label, cost: 'free', max: 1, when: src.when, text: src.text });
+  });
+  if (firstRollAfterInspire() === e.rid && !rr.some(r => r.how === 'inspire')) {
+    out.push({ how: 'inspire', label: 'Inspire', cost: 'free', max: 1, when: '',
+      text: 'An ally with Inspire restored your Spirit: re-roll 1d20 on your next Skill Test for free.' });
+  }
+  return out;
+}
+
+// One roll at a time: which recent roll (by its index in the list) and which dice.
+const sheetRerollPick = { idx: -1, dice: [] };
+
+function toggleSheetPick(idx, die) {
+  if (sheetRerollPick.idx !== idx) { sheetRerollPick.idx = idx; sheetRerollPick.dice = []; }
+  const at = sheetRerollPick.dice.indexOf(die);
+  if (at >= 0) sheetRerollPick.dice.splice(at, 1); else sheetRerollPick.dice.push(die);
+  if (!sheetRerollPick.dice.length) sheetRerollPick.idx = -1;
+  renderAll();
+}
+
+function clearSheetPick() {
+  sheetRerollPick.idx = -1;
+  sheetRerollPick.dice = [];
+  renderAll();
+}
+
+function rerollSummaryBits(su, co, pa, gn, df) {
+  const bits = [`${su} success${su === 1 ? '' : 'es'} vs D${df}`, pa ? 'passed' : 'failed'];
+  if (pa && gn > 0) bits.push(`+${gn} Momentum`);
+  if (co > 0) bits.push(`${co} complication${co === 1 ? '' : 's'}`);
+  return bits.join(' · ');
+}
+
+function rerollLinesCC(e) {
+  const groups = [];
+  (e.rr || []).forEach(r => {
+    const last = groups[groups.length - 1];
+    if (last && last.g === r.g) last.dice.push(r); else groups.push({ g: r.g, how: r.how, dice: [r] });
+  });
+  return groups.map(grp => `Reroll ${grp.dice.map(d => `${d.from} → ${d.to}`).join(', ')} (${REROLL_LABELS_CC[grp.how] || grp.how}${REROLL_PAID_CC.includes(grp.how) ? '' : ', free'})`);
+}
+
+// The dice of a recent roll, as first written and then as they stand, with the reroll
+// controls when this sheet may reroll it. Every handler is passed numbers only — the
+// list index and a die index — never a string from the roll, because a recent roll can
+// arrive in a character code and its id is not to be trusted inside an onclick.
+function renderRerollableDice(e, idx, small) {
+  const opts = sheetRerollOptions(e);
+  const mine = opts.length > 0;
+  const size = small ? ' small' : '';
+  const replaced = new Set((e.rr || []).map(r => r.i));
+  let html = '';
+  if (e.o && e.rr && e.rr.length) {
+    html += `<div class="dice-faces">${e.o.d.map((n, i) => `<div class="die${size} ${classifyDie(n, e.av, e.sv, e.at)}${replaced.has(i) ? ' is-replaced' : ''}">${n}</div>`).join('')}</div>`;
+    html += `<div class="recent-roll-sum ${e.o.pa ? 'pass' : 'fail'}">${rerollSummaryBits(e.o.su, e.o.co, e.o.pa, e.o.gn, e.df)}</div>`;
+    html += rerollLinesCC(e).map(t => `<div class="roll-reroll-line">${escHtml(t)}</div>`).join('');
+    html += `<div class="roll-reroll-label">New result</div>`;
+  }
+  const picking = sheetRerollPick.idx === idx;
+  html += `<div class="dice-faces">${e.d.map((n, i) => {
+    const cls = classifyDie(n, e.av, e.sv, e.at);
+    if (!mine) return `<div class="die${size} ${cls}">${n}</div>`;
+    const picked = picking && sheetRerollPick.dice.includes(i);
+    return `<button type="button" class="die${size} ${cls} die-pick${picked ? ' is-picked' : ''}" aria-pressed="${picked}" title="${picked ? 'Picked to reroll. Press again to put it back.' : 'Press to pick this die to reroll.'}" onclick="toggleSheetPick(${idx}, ${i})">${n}</button>`;
+  }).join('')}</div>`;
+  html += `<div class="recent-roll-sum ${e.pa ? 'pass' : 'fail'}">${rerollSummaryBits(e.su, e.co, e.pa, e.gn, e.df)}</div>`;
+  // The free-reroll reminder, asked for at the table: the yellow note under a roll that a
+  // talent or a piece of gear lets you reroll for nothing.
+  const free = opts.filter(o => o.cost === 'free');
+  if (free.length) {
+    html += `<div class="reroll-hint dm-tip" tabindex="0">Free reroll: ${free.map(o => escHtml(o.label) + (o.when ? ` (only if ${escHtml(o.when)})` : '')).join('; ')}. Press a die to use it.<span class="dm-tip-body"><span class="dm-tip-title">Free rerolls on this roll</span><span class="dm-tip-desc">${free.map(o => `${escHtml(o.label)}: ${escHtml(o.text || '')}`).join(' ')}</span></span></div>`;
+  }
+  if (picking && mine) {
+    const n = sheetRerollPick.dice.length;
+    html += `<div class="reroll-panel no-print"><div class="reroll-head">Reroll ${n} ${n === 1 ? 'die' : 'dice'}:</div>${opts.map(o => {
+      const tooMany = n > o.max;
+      const tipText = [o.text, o.when ? `Only if ${o.when}.` : '', o.note, tooMany ? `This rerolls ${o.max === 1 ? 'one die' : 'two dice'}: pick ${o.max === 1 ? 'one' : 'fewer'}.` : ''].filter(Boolean).join(' ');
+      return `<button type="button" class="confirm-btn reroll-opt${o.cost === 'free' ? ' is-free' : ''}"${tooMany ? ' disabled' : ''} title="${escHtml(tipText)}" onclick="confirmClick(this, () => applySheetReroll(${idx}, '${o.how}'), 'Confirm: ${o.cost}?')">${escHtml(o.label)}${o.cost === 'free' ? ' (free)' : ''}</button>`;
+    }).join('')}<button type="button" class="mini-btn" onclick="clearSheetPick()">Cancel</button></div>`;
+  }
+  return html;
+}
+
+function applySheetReroll(idx, how) {
+  const list = normalizeRecentRolls();
+  const e = list[idx];
+  if (!e) return;
+  const option = sheetRerollOptions(e).find(o => o.how === how);
+  const picks = sheetRerollPick.idx === idx ? sheetRerollPick.dice.slice().sort((a, b) => a - b) : [];
+  if (!option || !picks.length || picks.length > option.max) return;
+  if (picks.some(i => i < 0 || i >= e.d.length)) return;
+  const values = e.d.slice();
+  if (!e.o) e.o = { d: values.slice(), su: e.su, co: e.co, pa: e.pa, gn: e.gn };
+  const t = Date.now();
+  const g = t.toString(36) + Math.random().toString(36).slice(2, 5);
+  const dice = picks.map(i => ({ i, to: rollDie() }));
+  e.rr = e.rr || [];
+  dice.forEach(x => { e.rr.push({ i: x.i, from: values[x.i], to: x.to, how, pay: 'sheet', g, t }); values[x.i] = x.to; });
+  e.d = values;
+  let su = 0, co = 0;
+  values.forEach(v => { const k = classifyDie(v, e.av, e.sv, e.at); if (k === 'crit') su += 2; else if (k === 'success') su += 1; else if (k === 'complication') co += 1; });
+  e.su = su; e.co = co; e.pa = su >= e.df; e.gn = Math.max(0, su - e.df);
+  const shown = dice.map(x => `${e.rr.find(r => r.g === g && r.i === x.i).from} → ${x.to}`).join(', ');
+  state.character.recentRolls = list;
+  if (how === 'spirit') {
+    // Taken here, because the sheet owns the character. The room is told the reroll
+    // was paid on the sheet, so nothing collects it a second time.
+    logAction('Reroll', `spent 1 Spirit: ${shown}`);
+    state.character.currentSpirit = Math.max(0, getEffectiveResource('spirit') - 1);
+    logActionNow();
+  }
+  if (how === 'inspire') delete state.character.inspireAt;
+  // Keep the open result in step, so the claim button offers the new Momentum.
+  const res = diceUI.lastResult;
+  if (res && String(res.rollId || '') === e.rid) {
+    res.dice = values.slice(); res.successes = e.su; res.complications = e.co; res.passed = e.pa; res.momentumGained = e.gn;
+  }
+  sheetRerollPick.idx = -1;
+  sheetRerollPick.dice = [];
+  saveCharacterLocal(true);
+  renderAll();
+  showToast(`Rerolled ${shown} (${REROLL_LABELS_CC[how]}). ${rerollSummaryBits(e.su, e.co, e.pa, e.gn, e.df)}.`, 'success');
+  postReroll({ type: 'reroll', id: e.rid, how, mobile: dice.length === 2, pay: 'sheet', g, t, dice });
+}
+
+// Standalone this does nothing; installRollBridge() replaces it in Owlbear so the
+// reroll reaches the shared log under the same roll id.
+function postReroll(ev) {}
 
 // v1.25. Adds the roll's surplus successes to the group Momentum pool.
 //
@@ -9838,6 +10131,10 @@ function claimRollMomentum() {
   const after = clampNumber(before + res.momentumGained, 0, maxMomentum);
   const added = after - before;
   res.momentumClaimed = true;
+  // v2.4. Claimed Momentum locks the roll's dice: no more rerolls.
+  const recent = normalizeRecentRolls();
+  const own = recent.find(e => e.rid && e.rid === String(res.rollId || ''));
+  if (own) { own.cl = true; state.character.recentRolls = recent; }
 
   if (added <= 0) {
     // The pool was already at its cap. Say so rather than greying the button with no
@@ -10704,8 +11001,18 @@ function installRollBridge() {
       // `by` matches nobody. So a player rolling from their own sheet — which is how
       // this table plays — watched the GM claim their Momentum for them.
       by: obrPlayerId,
+      // v2.4. The threshold the roll was made under, so a reroll in the room is judged
+      // against it; and that a reroll of it is paid in this character's Spirit.
+      compAt: getCompAt(),
+      src: "pc",
     };
     bridge.broadcast({ type: "roll", entry });
+  };
+  // v2.4. A reroll made on this sheet, under the same roll id. Paid here already
+  // (`pay: "sheet"`), so reconcileRerolls() never collects it a second time.
+  window.postReroll = function postRerollToOwlbear(ev) {
+    poolBatch.flush();
+    bridge.broadcast(ev);
   };
 }
 
@@ -10933,8 +11240,8 @@ function installBondBridge() {
   window.announceRivalryTrigger = function announceRivalryToRoom() {
     sendBondEffect({ kind: "rivalry" });
   };
-  window.grantSpiritToAlly = function grantSpiritToRoom({ target, amount, source }) {
-    sendBondEffect({ kind: "grant", target, amount, source });
+  window.grantSpiritToAlly = function grantSpiritToRoom({ target, amount, source, inspire }) {
+    sendBondEffect({ kind: "grant", target, amount, source, ...(inspire ? { inspire: true } : {}) });
   };
 }
 
@@ -11013,6 +11320,26 @@ function reconcileRolls(found) {
   const existing = normalizeRecentRolls();
   const have = new Set(existing.map((r) => r.rid).filter(Boolean));
 
+  // v2.4. A roll already listed can have changed in the room since: rerolled in the
+  // roller, or its Momentum claimed there. Taken from the room only when the room knows
+  // MORE rerolls than this sheet does, so a reroll made here a moment ago is never undone
+  // by a log that has not caught up with it yet.
+  let refreshed = 0;
+  const byId = new Map(log.filter((e) => e && e.id).map((e) => [String(e.id).slice(0, 40), e]));
+  for (const r of existing) {
+    const e = r.rid && byId.get(r.rid);
+    if (!e || e.conceal || !Array.isArray(e.detail)) continue;
+    const roomRr = Array.isArray(e.rr) ? e.rr.length : 0;
+    if (roomRr > (r.rr ? r.rr.length : 0)) {
+      Object.assign(r, normalizeRerollFields(e));
+      r.d = e.detail.slice(0, RECENT_ROLL_MAX_DICE).map((x) => clampNumber(x && x.d, 1, 20));
+      r.su = clampNumber(e.succ, 0, 99); r.co = clampNumber(e.comp, 0, 99);
+      r.pa = !!e.pass; r.gn = clampNumber(e.gain, 0, 99);
+      refreshed++;
+    }
+    if (e.claimed && !r.cl) { r.cl = true; refreshed++; }
+  }
+
   const found_ = [];
   for (const e of log) {
     if (!e || typeof e !== "object") continue;
@@ -11042,9 +11369,11 @@ function reconcileRolls(found) {
       // Each roll keeps the threshold it was made under, the same rule the sheet's own
       // rolls follow — redrawing an old roll under a new threshold rewrites history.
       at: clampNumber(e.compAt, 15, 20) || 20,
+      cl: !!e.claimed,
+      ...normalizeRerollFields(e),
     });
   }
-  if (!found_.length) return null;
+  if (!found_.length && !refreshed) return null;
 
   // Newest first, which is the order the list is drawn in and the order slice() trims
   // from. A roll from the log can be OLDER than one already held, so this sorts rather
@@ -11055,6 +11384,55 @@ function reconcileRolls(found) {
   state.character.recentRolls = merged;
   queueSave();
   return found_.length;
+}
+
+// v2.4. Collects what this character owes for rerolls made in the ROLLER: 1 Spirit for
+// a Spirit reroll, and the Inspire it used up. The roller cannot touch the character —
+// the sheet owns it — so it puts `pay: "room"` on the reroll and this sheet takes the
+// Spirit when it sees it, open now or next time. A reroll made on this sheet says
+// `pay: "sheet"` and is skipped: it was paid when it was made.
+//
+// Matched on the character's name, as the roll merge is. Each reroll is collected once:
+// its roll id and press id go into `appliedRerolls`, which rides in the character code.
+// A character meeting this room for the first time adopts what is already in the log
+// without paying for it, as the bond queue does.
+const MAX_APPLIED_REROLLS = 30;
+function reconcileRerolls(found) {
+  if (!ready || !state.character) return null;
+  const me = bondNameKey(state.character.name);
+  if (!me) return null;
+  const log = Array.isArray(found && found.log) ? found.log : [];
+  const owed = [];
+  for (const e of log) {
+    if (!e || e.kind === "action" || !Array.isArray(e.rr) || bondNameKey(e.who) !== me) continue;
+    const seen = new Set();
+    for (const r of e.rr) {
+      if (!r || r.pay !== "room" || seen.has(r.g)) continue;
+      seen.add(r.g);
+      owed.push({ key: `${String(e.id).slice(0, 40)}:${String(r.g).slice(0, 20)}`, how: r.how, text: `${e.an} ${e.av} (${e.sn} ${e.sv})` });
+    }
+  }
+  const stored = state.character.appliedRerolls;
+  if (!Array.isArray(stored)) {
+    state.character.appliedRerolls = owed.map((o) => o.key).slice(-MAX_APPLIED_REROLLS);
+    return owed.length ? { adopted: owed.length } : null;
+  }
+  const done = new Set(stored.map(String));
+  const fresh = owed.filter((o) => !done.has(o.key));
+  if (!fresh.length) return null;
+  let spirit = 0;
+  for (const o of fresh) {
+    if (o.how === "spirit") spirit += 1;
+    if (o.how === "inspire") delete state.character.inspireAt;
+  }
+  if (spirit) {
+    const before = getEffectiveResource("spirit");
+    state.character.currentSpirit = Math.max(0, before - spirit);
+    sendAction({ label: "Reroll", detail: `paid ${spirit} Spirit for ${spirit === 1 ? "a reroll" : spirit + " rerolls"} in the roller` });
+  }
+  state.character.appliedRerolls = [...stored.map(String), ...fresh.map((o) => o.key)].slice(-MAX_APPLIED_REROLLS);
+  saveCharacterLocal(true);
+  return { paid: spirit };
 }
 
 function adoptRoom(meta) {
@@ -11093,6 +11471,9 @@ function adoptRoom(meta) {
     caughtUp = reconcileEpochs(found);
     bonded = reconcileBonds(found);
     rolled = reconcileRolls(found);
+    // v2.4. After the rolls, so a roller reroll of this character's roll is listed by
+    // the time its Spirit comes off.
+    if (reconcileRerolls(found)) rolled = rolled || 1;
   }
 
   if (!changed && !caughtUp && !bonded && !rolled) return;
@@ -11162,7 +11543,10 @@ function reconcileOnOpen() {
   if (!ready || !lastRoomState) return;
   const result = reconcileEpochs(lastRoomState);
   const bonded = reconcileBonds(lastRoomState);
-  if (result || bonded) renderAll();
+  // v2.4. Rerolls made in the roller while this sheet was shut are paid now.
+  const rolled = reconcileRolls(lastRoomState);
+  const paid = reconcileRerolls(lastRoomState);
+  if (result || bonded || rolled || paid) renderAll();
 }
 
 // -------------------------------------------------------------

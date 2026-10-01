@@ -115,7 +115,7 @@ const url = site.origin + "/index.html";
 
 // Real codes from the real creator, as rollerui.test.mjs builds them.
 const { JSDOM } = await import("jsdom");
-async function makeCodes(names) {
+async function makeCodes(names, items = {}) {
   const raw = fs.readFileSync("out/dnm-cc/index.html", "utf8");
   const s = raw.indexOf('<script type="module">'), e = raw.indexOf("</script>", s);
   const dom = new JSDOM(raw.slice(0, s) + raw.slice(e + 9),
@@ -133,14 +133,16 @@ async function makeCodes(names) {
       c.temperament = Object.keys(DM_DATA.temperaments)[0];
       var a = DM_DATA.archetypes[arch];
       if (!a.forcedTalent) { var t = Object.keys(a.talents || {}); if (t.length) c.talent = t[0]; }
+      c.items = ${JSON.stringify(items[name] || [])};
       c.finalized = true; normalizeEditableLists(); normalizeCurrentValues();
       if (!computeStats()) throw new Error('fixture does not compute');
+      c.currentSpirit = 2;
       return buildCharacterCode();
     })()`);
   }
   return out;
 }
-const codes = await makeCodes(["Kesh", "Orrin", "Vee"]);
+const codes = await makeCodes(["Kesh", "Orrin", "Vee", "Lens"], { Lens: [{ id: "tactical-lens", qty: 1, equipped: true }] });
 const token = (id, name) => ({ id, metadata: { [CHAR_KEY]: { v: 1, code: codes[name] } } });
 const SCENE = [token("t1", "Vee"), token("t2", "Kesh"), token("t3", "Orrin"), { id: "e1", metadata: {} }, { id: "e2", metadata: {} }];
 
@@ -754,6 +756,114 @@ async function press(page, startsWith, times = 2) {
   await page.waitForTimeout(200);
   const moves = await page.evaluate(() => window.__stub.popovers.slice(-2).map((p) => p.op + ":" + (p.transformOrigin ? p.transformOrigin.horizontal + "/" + p.transformOrigin.vertical : "")));
   ok(`moving reopens it at the new anchor (${moves.join(" ")})`, moves[0].startsWith("close") && moves[1] === "open:RIGHT/TOP");
+  await page.close();
+}
+
+// -------------------------------------------------------------
+// 12. Rerolls in the roller (1.5)
+// -------------------------------------------------------------
+{
+  const { page, errors } = await boot({ role: "PLAYER" });
+  // A character wearing a Tactical Lens, selected, rolling Quickness + Fight.
+  await page.evaluate((code) => {
+    const items = [...window.__stub.state.items, { id: "lens", metadata: { "com.thuknights.dnm-obr/char": { v: 1, code } } }];
+    window.__stub.setItems(items);
+    window.__stub.setSelection(["lens"]);
+  }, codes.Lens);
+  await page.waitForTimeout(250);
+  await page.selectOption("#attr-key", "quickness");
+  await page.selectOption("#skill-key", "fight");
+  await page.click("#roll-btn");
+  await settle(page);
+  const first = await page.evaluate(() => {
+    const li = document.querySelector("#log .entry");
+    return { buttons: li.querySelectorAll("button.die").length, hint: (li.querySelector(".reroll-hint") || {}).textContent || "" };
+  });
+  ok("your own roll's dice are buttons", first.buttons === 2);
+  ok(`a character with a Tactical Lens gets the yellow free-reroll hint on a Fight roll (${first.hint.slice(0, 32)}…)`, /Free reroll: Tactical Lens/.test(first.hint) && /aiming/.test(first.hint));
+
+  await page.click("#log .entry button.die >> nth=0");
+  await page.waitForTimeout(80);
+  const panel = await page.evaluate(() => [...document.querySelectorAll("#log .reroll-panel .reroll-opt")].map((b) => b.textContent));
+  ok(`picking a die offers Spirit and the free Lens reroll (${panel.join(", ")})`, panel.join("|") === "1 Spirit|Tactical Lens (free)");
+  const before = await sentCount(page);
+  await page.click("#log .reroll-panel .reroll-opt >> nth=0");
+  await page.waitForTimeout(60);
+  ok("the first press only asks", (await sentCount(page)) === before
+    && /Confirm: 1 Spirit\?/.test(await page.evaluate(() => document.querySelector("#log .reroll-panel .reroll-opt").textContent)));
+  await page.click("#log .reroll-panel .reroll-opt >> nth=0");
+  await page.waitForTimeout(150);
+  const out = await sentSince(page, before);
+  const rr = out.find((e) => e.type === "reroll");
+  ok("the second sends the reroll", rr && rr.how === "spirit" && rr.dice.length === 1 && rr.dice[0].i === 0);
+  ok("marked for the character's sheet to pay", rr && rr.pay === "room");
+  ok("and the roller moves no pool for a character's Spirit", !out.some((e) => e.type === "pool"));
+  await settle(page);
+  const after = await page.evaluate(() => {
+    const li = document.querySelector("#log .entry");
+    return {
+      line: (li.querySelector(".entry-reroll") || {}).textContent || "",
+      label: !!li.querySelector(".entry-reroll-label"),
+      struck: li.querySelectorAll(".die.is-replaced").length,
+      sums: li.querySelectorAll(".entry-sum").length,
+      hint: !!li.querySelector(".reroll-hint"),
+    };
+  });
+  ok(`the log adds "Reroll X → Y" under the result (${after.line})`, /^Reroll \d+ → \d+ \(1 Spirit\)$/.test(after.line));
+  ok("the original result stays, with the replaced die struck", after.struck === 1 && after.sums === 2 && after.label);
+  ok("the free Lens reroll is still on offer after the paid one", after.hint);
+  await page.click("#log .entry button.die >> nth=1");
+  await page.waitForTimeout(80);
+  const left = await page.evaluate(() => [...document.querySelectorAll("#log .reroll-panel .reroll-opt")].map((b) => b.textContent));
+  ok("one paid reroll per roll: only the free one is left", left.join("|") === "Tactical Lens (free)");
+  await page.evaluate(() => [...document.querySelectorAll("#log .reroll-panel button")].find((b) => b.textContent === "Cancel").click());
+
+  // Somebody else's roll is never yours to reroll.
+  await page.evaluate((key) => {
+    const st = window.__stub.state.meta[key];
+    st.log.unshift({ id: "theirs", t: Date.now() + 5, who: "Orrin", by: "player-2", an: "Might", av: 10, sn: "Fight", sv: 2, diff: 1,
+      detail: [{ d: 20, kind: "complication" }, { d: 19, kind: "fail" }], succ: 0, comp: 1, pass: false, gain: 0, src: "pc" });
+    window.__stub.setMeta({ ...window.__stub.state.meta, [key]: st });
+  }, ROOM_KEY);
+  await page.waitForTimeout(150);
+  ok("another player's roll has no reroll buttons", await page.evaluate(() => document.querySelector("#log .entry").querySelectorAll("button.die").length === 0));
+  ok("no errors through rerolling", errors.length === 0);
+  if (errors.length) console.log("      " + errors.join("\n      "));
+  await page.close();
+}
+
+// The GM's own roll: 1 Threat, paid by the GM's roller. And claimed Momentum locks it.
+{
+  const { page } = await boot({ role: "GM" });
+  await page.evaluate(() => { document.getElementById("attr-val").value = "20"; document.getElementById("skill-val").value = "0"; });
+  await page.click("#roll-btn");
+  await settle(page);
+  await page.click("#log .entry button.die >> nth=0");
+  await page.waitForTimeout(80);
+  const panel = await page.evaluate(() => [...document.querySelectorAll("#log .reroll-panel .reroll-opt")].map((b) => b.textContent));
+  ok(`the GM's roll is rerolled for Threat (${panel.join(", ")})`, panel.join("|") === "1 Threat");
+  const before = await sentCount(page);
+  await page.click("#log .reroll-panel .reroll-opt >> nth=0");
+  await page.click("#log .reroll-panel .reroll-opt >> nth=0");
+  await page.waitForTimeout(200);
+  const out = await sentSince(page, before);
+  ok("a GM reroll spends 1 Threat", out.some((e) => e.type === "pool" && e.pool === "threat" && e.delta === -1));
+  ok("and sends the reroll", out.some((e) => e.type === "reroll" && e.how === "threat"));
+  await settle(page);
+  // Every die succeeds at attribute 20, so the roll has surplus Momentum to claim.
+  const claim = await page.evaluate(() => { const b = document.querySelector("#log .entry .claim-momentum"); if (b && !b.disabled) { b.click(); return true; } return false; });
+  await page.waitForTimeout(100);
+  await settle(page);
+  ok("claiming the Momentum locks the dice", claim && await page.evaluate(() => document.querySelector("#log .entry").querySelectorAll("button.die").length === 0));
+  await page.close();
+}
+
+// A player with no character selected has nothing to pay a reroll with.
+{
+  const { page } = await boot({ role: "PLAYER" });
+  await page.click("#roll-btn");
+  await settle(page);
+  ok("a player's roll with no character has no reroll buttons", await page.evaluate(() => document.querySelector("#log .entry").querySelectorAll("button.die").length === 0));
   await page.close();
 }
 

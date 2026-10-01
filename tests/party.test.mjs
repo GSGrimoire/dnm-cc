@@ -9,7 +9,8 @@ import { epochStatus, readAppliedEpochs, readEpochs, EPOCH_KEYS, emptyEpochs, EP
   readInitiative, applyInitiativeAction, emptyInitiative, initiativeAllActed,
   INITIATIVE_ACTIONS, MAX_INITIATIVE_ROWS, INITIATIVE_NAME_MAX,
   mayMarkRow, initRowLabel, initRowIdForCharacter, gmPopover, readGmDock, writeGmDock, GM_POPOVER_ID,
-  SHEET_POPOVER_ID, readDock, DOCK_KEY } from "../out/dnm-obr/dnm.js";
+  SHEET_POPOVER_ID, readDock, DOCK_KEY, applyReroll, rerollProblem, rerollOptions, rerollLines,
+  REROLL_LABELS } from "../out/dnm-obr/dnm.js";
 import * as gmr from "../out/dnm-obr/gmrules.js";
 
 let pass = 0, fail = 0;
@@ -980,6 +981,78 @@ ok("a zero Threat delta is not a spend",
   ok("it opens under its own id, not the sheet's", p.id === GM_POPOVER_ID && p.id !== SHEET_POPOVER_ID);
   ok("with the sheet's rules: no click-away, flush to the edge", p.disableClickAway === true && p.marginThreshold === 0);
   ok("pinned by its top-right corner at top-right", p.transformOrigin.horizontal === "RIGHT" && p.transformOrigin.vertical === "TOP");
+}
+
+// -------------------------------------------------------------
+// Extension 1.5: rerolls
+// -------------------------------------------------------------
+{
+  const roll = (extra = {}) => ({
+    id: "r1", t: 1000, who: "Kesh", by: "p1", an: "Quickness", av: 10, sn: "Fight", sv: 2, diff: 2, compAt: 20,
+    detail: [{ d: 17, kind: "fail" }, { d: 15, kind: "fail" }, { d: 9, kind: "success" }],
+    succ: 1, comp: 0, pass: false, gain: 0, src: "pc", ...extra,
+  });
+  const ev = (how, dice, extra = {}) => ({ type: "reroll", id: "r1", how, dice, g: "g" + Math.random(), t: 2000, ...extra });
+
+  const a = applyReroll(roll(), ev("spirit", [{ i: 0, to: 1 }]));
+  ok("a reroll replaces the die", a.detail[0].d === 1 && a.detail[0].kind === "crit");
+  ok("and re-judges the roll: 1 crit + 1 success = 3, passed, +1 Momentum", a.succ === 3 && a.pass === true && a.gain === 1);
+  ok("the roll as first written is kept", JSON.stringify(a.o) === JSON.stringify({ d: [17, 15, 9], succ: 1, comp: 0, pass: false, gain: 0 }));
+  ok("and the reroll recorded: which die, from what, to what, paid how", a.rr.length === 1 && a.rr[0].i === 0 && a.rr[0].from === 17 && a.rr[0].to === 1 && a.rr[0].how === "spirit");
+  ok("the log line reads \"Reroll 17 → 1 (1 Spirit)\"", rerollLines(a)[0].text === "Reroll 17 → 1 (1 Spirit)");
+
+  ok("ONE paid reroll per roll", rerollProblem(a, ev("spirit", [{ i: 1, to: 5 }])) !== null);
+  ok("including Threat after Spirit", rerollProblem(a, ev("threat", [{ i: 1, to: 5 }])) !== null);
+  ok("a free one still works after it", rerollProblem(a, ev("tacticalLens", [{ i: 1, to: 5 }])) === null);
+  const b = applyReroll(a, ev("tacticalLens", [{ i: 1, to: 2 }]));
+  ok("the original stays the FIRST roll, not the one before this reroll", b.o.d.join() === "17,15,9");
+  ok("each free reroll once per roll", rerollProblem(b, ev("tacticalLens", [{ i: 2, to: 2 }])) !== null);
+  ok("two reroll lines, in order", rerollLines(b).map((l) => l.text).join("|") === "Reroll 17 → 1 (1 Spirit)|Reroll 15 → 2 (Tactical Lens, free)");
+
+  ok("claimed Momentum locks the dice", rerollProblem(roll({ claimed: true }), ev("spirit", [{ i: 0, to: 1 }])) !== null);
+  ok("one die per paid reroll", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }])) !== null);
+  ok("Mobile: two dice for one Spirit on a Move test", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }], { mobile: true })) === null);
+  ok("but not on any other test", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }], { mobile: true })) !== null);
+  ok("and never three", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 1, to: 1 }, { i: 2, to: 1 }], { mobile: true })) !== null);
+  ok("Tool Rig: none on a two-dice roll", rerollProblem(roll({ detail: [{ d: 20, kind: "complication" }, { d: 20, kind: "complication" }] }), ev("toolRig", [{ i: 0, to: 1 }])) !== null);
+  let four = roll({ detail: [17, 16, 15, 14].map((d) => ({ d, kind: "fail" })) });
+  four = applyReroll(four, ev("toolRig", [{ i: 0, to: 1 }]));
+  four = applyReroll(four, ev("toolRig", [{ i: 1, to: 1 }]));
+  ok("Tool Rig: one per die bought beyond two", four.rr.length === 2 && rerollProblem(four, ev("toolRig", [{ i: 2, to: 1 }])) !== null);
+  ok("a die that does not exist is refused", rerollProblem(roll(), ev("spirit", [{ i: 7, to: 1 }])) !== null);
+  ok("a value that is not a d20 is refused", rerollProblem(roll(), ev("spirit", [{ i: 0, to: 21 }])) !== null);
+  ok("the same die twice in one reroll is refused", rerollProblem(roll({ sn: "Move" }), ev("spirit", [{ i: 0, to: 1 }, { i: 0, to: 2 }], { mobile: true })) !== null);
+  ok("an action entry is not a roll", rerollProblem({ kind: "action", id: "x" }, ev("spirit", [{ i: 0, to: 1 }])) !== null);
+  // The threshold the roll was MADE under, not today's.
+  const lowered = applyReroll(roll({ compAt: 16 }), ev("spirit", [{ i: 2, to: 17 }]));
+  ok("a reroll is judged against the roll's own Complication threshold (16: both 17s complicate)", lowered.detail[2].kind === "complication" && lowered.comp === 2);
+
+  // What the person who rolled is offered.
+  const pc = { kind: "pc", spirit: 2, sources: [
+    { id: "tacticalLens", attrs: ["quickness", "insight"], skills: ["fight"], when: "aiming" },
+    { id: "mobile", attrs: ["quickness"], skills: ["move"] },
+    { id: "evade", attrs: [], skills: [] },
+  ] };
+  const hows = (e, who) => rerollOptions(e, who).map((o) => o.how);
+  ok("a character is offered Spirit and the free rerolls that fit the test", hows(roll(), pc).join() === "spirit,tacticalLens,evade");
+  ok("a free reroll carries its condition", rerollOptions(roll(), pc).find((o) => o.how === "tacticalLens").when === "aiming");
+  ok("gear that does not fit the test is not offered", hows(roll({ an: "Might" }), pc).join() === "spirit,evade");
+  ok("Mobile is not a reroll of its own: it widens Spirit on Move", rerollOptions(roll({ sn: "Move" }), pc).find((o) => o.how === "spirit").max === 2 && !hows(roll({ sn: "Move" }), pc).includes("mobile"));
+  ok("no Spirit, no paid reroll", !hows(roll(), { ...pc, spirit: 0 }).includes("spirit"));
+  ok("Inspire only on the first roll after it", hows(roll(), { ...pc, inspireAt: 500, firstAfterInspire: "r1" }).includes("inspire")
+    && !hows(roll(), { ...pc, inspireAt: 500, firstAfterInspire: "other" }).includes("inspire"));
+  ok("the GM's roll: Personal Threat if the NPC has some, and Threat", hows(roll({ src: "npc" }), { kind: "gm", personalThreat: 2 }).join() === "personalThreat,threat");
+  ok("without Personal Threat, just Threat", hows(roll({ src: "gm" }), { kind: "gm", personalThreat: 0 }).join() === "threat");
+  ok("nothing to pay with, nothing offered", hows(roll(), { kind: "none" }).length === 0);
+  ok("a claimed roll offers nothing", hows(roll({ claimed: true }), pc).length === 0);
+  ok("every reroll kind has a label", ["spirit", "threat", "personalThreat", "tacticalLens", "supplyAndDemand", "evade", "extraEffort", "toolRig", "inspire"].every((k) => REROLL_LABELS[k]));
+
+  // Through the reducer, as the GM's background page runs it.
+  let st = applyEvent({ ...EMPTY_STATE, log: [roll()] }, ev("spirit", [{ i: 0, to: 1 }]), { sender: "p1" });
+  ok("the reducer applies your own reroll", st.log[0].rr && st.log[0].succ === 3);
+  st = applyEvent(st, { type: "claim", id: "r1" });
+  ok("and the claim that follows takes the NEW Momentum and locks it", st.log[0].claimed && st.log[0].gain === 1
+    && !applyEvent(st, ev("tacticalLens", [{ i: 1, to: 1 }]), { sender: "p1" }).log[0].rr.some((r) => r.how === "tacticalLens"));
 }
 
 console.log(`\nparty: ${pass} passed, ${fail} failed`);

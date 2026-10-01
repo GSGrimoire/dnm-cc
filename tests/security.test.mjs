@@ -650,6 +650,35 @@ const rollEv = (entry) => ({ type: "roll", entry });
   ok("tickers are hidden from the table unless the GM says otherwise", gmr.normalizeTickers([{ name: "x" }])[0].visible === false);
 }
 
+// -------------------------------------------------------------
+// Extension 1.5: rerolls, forged
+// -------------------------------------------------------------
+// You reroll your own rolls. The background page passes the sender's player id into the
+// reducer, and the reducer checks it against the roll's `by`.
+{
+  const roll = { id: "r1", t: 1, who: "Kesh", by: "alice", an: "Might", av: 10, sn: "Fight", sv: 2, diff: 2,
+    detail: [{ d: 20, kind: "complication" }, { d: 19, kind: "fail" }], succ: 0, comp: 1, pass: false, gain: 0 };
+  const ev = { type: "reroll", id: "r1", how: "spirit", dice: [{ i: 0, to: 1 }] };
+  const base = { ...fresh(), log: [roll] };
+  ok("someone else's reroll of your roll is refused", !applyEvent(base, ev, { sender: "mallory" }).log[0].rr);
+  ok("an unknown sender is refused", !applyEvent(base, ev, { sender: null }).log[0].rr);
+  ok("a roll with no owner cannot be rerolled through the relay", !applyEvent({ ...fresh(), log: [{ ...roll, by: null }] }, ev, { sender: null }).log[0].rr);
+  ok("the owner's reroll goes through", applyEvent(base, ev, { sender: "alice" }).log[0].rr.length === 1);
+  ok("rerolls are not GM-only: players reroll their own", !isGmOnlyEvent(ev));
+  // Hostile reroll records arriving in an entry (a forged roll, or old metadata).
+  const hostile = sanitizeEntry({ ...roll, rr: Array.from({ length: 200 }, () => ({ i: 1e6, from: -9, to: 1e9, how: "spirit", g: "x".repeat(500), pay: "everyone" })).concat([{ how: "<script>" }]),
+    o: { d: Array.from({ length: 500 }, () => 1e9), succ: 1e12 } });
+  ok("reroll records are capped", hostile.rr.length <= 10);
+  ok("and clamped", hostile.rr.every((r) => r.i < FIELD_LIMITS.dice && r.from >= 1 && r.to <= 20 && r.g.length <= 20 && r.pay === "room"));
+  ok("an unknown reroll kind is dropped", !hostile.rr.some((r) => r.how === "<script>"));
+  ok("the original dice are capped and clamped", hostile.o.d.length <= FIELD_LIMITS.dice && hostile.o.d.every((d) => d <= 20) && hostile.o.succ === 999);
+  ok("a forged reroll cannot set a die past 20", !applyEvent(base, { ...ev, dice: [{ i: 0, to: 99 }] }, { sender: "alice" }).log[0].rr);
+  ok("nor reach a die the roll does not have", !applyEvent(base, { ...ev, dice: [{ i: 5, to: 1 }] }, { sender: "alice" }).log[0].rr);
+  // A grant's Inspire flag is a boolean and nothing else.
+  const g = sanitizeBondEffect({ id: "g1", t: 1, kind: "grant", target: "Kesh", amount: 2, source: "Second Wind", inspire: "<img src=x>" });
+  ok("Inspire on a grant is carried as true, not as text", g.inspire === true);
+}
+
 console.log(`\nsecurity: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — needs a live room:

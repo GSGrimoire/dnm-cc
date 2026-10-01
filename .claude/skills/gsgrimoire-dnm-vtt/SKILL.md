@@ -441,6 +441,20 @@ changing it. The rules that have to hold:
 - `adversity` and `reversal` are GM-only bond kinds carrying `targets`; no targets means
   everyone.
 
+## Rerolls (1.5 / 2.4)
+
+- **Your own rolls only.** Enforced in the reducer against the roll's `by`, with the sender
+  `background.js` passes in (`applyEvent(state, ev, { sender })`). Never loosen that to a
+  check in the sender's tab.
+- **One paid reroll per roll; claimed Momentum locks the dice; free rerolls on top**, each
+  once (Tool Rig once per bought die). The rules are `rerollProblem()` / `applyReroll()` in
+  `dnm.js`, mirrored by the creator for its own rolls — change both.
+- **The original is never rewritten**: `o` + `rr`, drawn as written, then the reroll lines.
+- **The roller never takes Spirit.** It sends `pay: "room"` and the sheet collects it in
+  `reconcileRerolls()`, once, tracked in `appliedRerolls`.
+- **Free reroll sources come from the snapshot** (`rerolls`, built by the creator). Do not
+  give the extension a copy of DM_DATA to work them out.
+
 ## The trust boundary
 
 Owlbear's broadcast channel is open to every client in the room. **A check that runs in the

@@ -1209,6 +1209,155 @@ const DM1_EXPECTED = {
   g("setRoomRushed(false)");
 }
 
+// -------------------------------------------------------------
+// v2.4 (with extension 1.5): rerolls on the sheet
+// -------------------------------------------------------------
+// One paid reroll (1 Spirit) per roll, your own rolls only, locked once the Momentum is
+// claimed, free rerolls from talents and gear on top. The room-side rules are tested in
+// party.test.mjs; this is the sheet's half: the options it offers, the Spirit it takes,
+// and what it draws.
+{
+  const build = (items) => g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    var arch = Object.keys(DM_DATA.archetypes)[0];
+    c.name = 'Rerolla';
+    c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = arch;
+    c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    var a = DM_DATA.archetypes[arch];
+    if (!a.forcedTalent) { var t = Object.keys(a.talents || {}); if (t.length) c.talent = t[0]; }
+    c.items = ${JSON.stringify(items || [])};
+    c.finalized = true;
+    normalizeEditableLists(); normalizeCurrentValues();
+    if (!computeStats()) throw new Error('fixture does not compute');
+    state.currentStep = STEPS.indexOf('summary');
+    c.currentSpirit = 3;
+    c.recentRolls = [];
+    diceUI.lastResult = null;
+  })()`);
+  // A roll with known dice, recorded the way doRoll() records one.
+  const seed = (attr, skill, dice, diff = 2) => g(`(function(){
+    diceUI.attr = ${JSON.stringify(attr)}; diceUI.skill = ${JSON.stringify(skill)}; diceUI.difficulty = ${diff};
+    var stats = computeStats();
+    var res = { rollId: 'r' + Math.random().toString(36).slice(2,8), attr: ${JSON.stringify(attr)}, skill: ${JSON.stringify(skill)},
+      attrName: DM_DATA.attributeInfo[${JSON.stringify(attr)}].name, skillName: DM_DATA.skillInfo[${JSON.stringify(skill)}].name,
+      attrValue: stats.attrs[${JSON.stringify(attr)}], skillValue: stats.skills[${JSON.stringify(skill)}], d20count: ${dice.length},
+      dice: ${JSON.stringify(dice)}, difficulty: ${diff} };
+    var su = 0, co = 0; res.dice.forEach(function(d){ var k = classifyDie(d, res.attrValue, res.skillValue); if (k==='crit') su+=2; else if (k==='success') su+=1; else if (k==='complication') co+=1; });
+    res.successes = su; res.complications = co; res.passed = su >= ${diff}; res.momentumGained = Math.max(0, su - ${diff});
+    diceUI.lastResult = res; recordRecentRoll(res); renderAll();
+    return res.rollId;
+  })()`);
+  const recent = () => JSON.parse(g("JSON.stringify(normalizeRecentRolls())"));
+  const opts = (i = 0) => JSON.parse(g(`JSON.stringify(sheetRerollOptions(normalizeRecentRolls()[${i}]))`)).map((o) => o.how);
+  const pick = (i, die) => g(`toggleSheetPick(${i}, ${die})`);
+
+  build();
+  const sent = [];
+  w.postReroll = (ev) => { sent.push(ev); };
+  seed("might", "fight", [20, 19]);
+  ok("a fresh roll on the sheet can be rerolled for 1 Spirit", JSON.stringify(opts()) === JSON.stringify(["spirit"]));
+  ok("no free reroll without the gear or talent", !opts().some((h) => h !== "spirit"));
+  ok("its dice are buttons", g("document.querySelectorAll('#recentRollsArea button.die').length") === 2);
+  pick(0, 0);
+  ok("picking a die opens the reroll choices", g("!!document.querySelector('#recentRollsArea .reroll-panel')"));
+  const spiritBefore = g("getEffectiveResource('spirit')");
+  g("applySheetReroll(0, 'spirit')");
+  const r = recent()[0];
+  ok("the reroll takes 1 Spirit", g("getEffectiveResource('spirit')") === spiritBefore - 1);
+  ok("the first die was replaced, and the original kept", r.rr.length === 1 && r.rr[0].from === 20 && r.o.d[0] === 20 && r.d[0] === r.rr[0].to);
+  const judged = r.d.reduce((n, d) => n + (d >= 20 ? 0 : d <= r.sv ? 2 : d <= r.av ? 1 : 0), 0);
+  ok(`the result is re-judged from the new dice (${r.su})`, r.su === judged && r.gn === Math.max(0, judged - r.df));
+  ok("the room is told, marked as paid on the sheet", sent.length === 1 && sent[0].type === "reroll" && sent[0].pay === "sheet" && sent[0].how === "spirit" && sent[0].id === r.rid);
+  ok("one paid reroll per roll: it is not offered again", !opts().includes("spirit"));
+  const lines = g("[...document.querySelectorAll('#recentRollsArea .roll-reroll-line')].map(x => x.textContent).join('|')");
+  ok(`the reroll line is drawn under the original (${lines})`, /^Reroll 20 → \d+ \(1 Spirit\)$/.test(lines));
+  ok("the replaced die is struck through in the original row", g("document.querySelectorAll('#recentRollsArea .die.is-replaced').length") === 1);
+  ok("and the new result is labelled", g("!!document.querySelector('#recentRollsArea .roll-reroll-label')"));
+
+  // No Spirit, no paid reroll.
+  seed("might", "fight", [20, 19]);
+  g("state.character.currentSpirit = 0");
+  ok("with no Spirit there is no paid reroll", !opts().includes("spirit"));
+  g("state.character.currentSpirit = 3");
+
+  // Claimed Momentum locks the dice.
+  seed("might", "fight", [1, 1], 0);
+  g("claimRollMomentum()");
+  ok("once its Momentum is claimed, a roll offers no reroll", opts().length === 0);
+  ok("and its dice are no longer buttons", g("document.querySelectorAll('#diceResultArea button.die').length") === 0);
+
+  // A roll picked up from the room (made in the roller) is not this sheet's to reroll.
+  g(`state.character.recentRolls = [{ rid: 'room1', t: Date.now(), an: 'Might', av: 10, sn: 'Fight', sv: 2, d: [20, 20], df: 1, su: 0, co: 2, pa: false, gn: 0, at: 20 }]; renderAll();`);
+  ok("a roll from the roller is rerolled there, not here", opts().length === 0);
+
+  // Tactical Lens: a free reroll on a Fight test with Quickness or Insight, and a hint.
+  build([{ id: "tactical-lens", qty: 1, equipped: true }]);
+  const sources = JSON.parse(g("JSON.stringify(getRerollSources())"));
+  ok("an equipped Tactical Lens is a reroll source", sources.some((x) => x.id === "tacticalLens" && x.skills.includes("fight")));
+  ok("and it is written into the snapshot for the roller", JSON.parse(g("JSON.stringify(buildOwlbearSnapshot().rerolls)")).some((x) => x.id === "tacticalLens"));
+  seed("quickness", "fight", [20, 18]);
+  ok("on a Quickness + Fight roll it is offered free, beside Spirit", JSON.stringify(opts()) === JSON.stringify(["spirit", "tacticalLens"]));
+  const hint = g("(document.querySelector('#recentRollsArea .reroll-hint') || {}).textContent || ''");
+  ok(`the roll carries the yellow free-reroll hint (${hint.slice(0, 40)}…)`, /Free reroll: Tactical Lens/.test(hint) && /aiming/.test(hint));
+  seed("might", "move", [20, 18]);
+  ok("on a Move roll the Lens does not apply, and no hint is drawn", !opts().includes("tacticalLens") && g("document.querySelectorAll('#recentRollsArea .recent-roll')[0].querySelector('.reroll-hint')") === null);
+  seed("quickness", "fight", [20, 18]);
+  const sp = g("getEffectiveResource('spirit')");
+  pick(0, 1);
+  g("applySheetReroll(0, 'tacticalLens')");
+  ok("a free reroll takes no Spirit", g("getEffectiveResource('spirit')") === sp);
+  ok("and is used up on this roll", !opts().includes("tacticalLens"));
+  ok("while the paid one is still there", opts().includes("spirit"));
+  pick(0, 0);
+  g("applySheetReroll(0, 'spirit')");
+  ok("free and paid on the same roll: two reroll lines", g("document.querySelectorAll('#recentRollsArea .recent-roll')[0].querySelectorAll('.roll-reroll-line').length") === 2);
+
+  // Mobile: the one Spirit reroll covers two dice on a Move test.
+  build([{ id: "protective-clothing-tl2", qty: 1, equipped: true }]);
+  seed("quickness", "move", [20, 19, 18]);
+  const mob = JSON.parse(g("JSON.stringify(sheetRerollOptions(normalizeRecentRolls()[0]))")).find((o) => o.how === "spirit");
+  ok("Mobile lets the Spirit reroll take two dice on Move", mob && mob.max === 2);
+  pick(0, 0); pick(0, 1);
+  g("applySheetReroll(0, 'spirit')");
+  ok("both dice are rerolled for the one Spirit", recent()[0].rr.length === 2 && g("getEffectiveResource('spirit')") === 2);
+  seed("quickness", "fight", [20, 19]);
+  ok("on a Fight test Mobile does nothing", JSON.parse(g("JSON.stringify(sheetRerollOptions(normalizeRecentRolls()[0]))")).find((o) => o.how === "spirit").max === 1);
+  pick(0, 0); pick(0, 1);
+  g("applySheetReroll(0, 'spirit')");
+  ok("and two dice are refused for one Spirit", !recent()[0].rr);
+  g("clearSheetPick()");
+
+  // Talents: each once per roll; Tool Rig once per die bought beyond two.
+  build();
+  g("state.character.growthExtraTalents = ['evade', 'toolRig']");
+  seed("might", "fight", [20, 19, 18, 17]);
+  ok("Evade and Tool Rig are offered", opts().includes("evade") && opts().includes("toolRig"));
+  for (let i = 0; i < 3; i++) { pick(0, i); g(`applySheetReroll(0, 'toolRig')`); }
+  ok("Tool Rig rerolls once per die bought beyond two (two here)", recent()[0].rr.filter((x) => x.how === "toolRig").length === 2);
+  g("clearSheetPick()");
+
+  // Inspire: a grant from an ally with Inspire gives a free reroll on the NEXT roll only.
+  build();
+  g(`state.character.appliedBondEffects = []`);
+  g(`applyPendingBondEffects([{ id: 'ins1', t: Date.now() - 1000, kind: 'grant', from: 'Kestrel', target: 'Rerolla', amount: 2, source: 'Second Wind', inspire: true }])`);
+  ok("a Second Wind from an ally with Inspire is remembered", g("!!state.character.inspireAt"));
+  seed("might", "fight", [20, 19]);
+  ok("the next roll offers Inspire free", opts().includes("inspire"));
+  seed("might", "fight", [20, 19]);
+  ok("the one after does not", !opts(0).includes("inspire") && opts(1).includes("inspire"));
+  pick(1, 0);
+  g("applySheetReroll(1, 'inspire')");
+  ok("using it clears it", g("!state.character.inspireAt") && !opts(1).includes("inspire"));
+
+  // Hostile recent rolls in a character code: clamped, and handlers take numbers only.
+  g(`state.character.recentRolls = [{ rid: "x'); alert(1); ('", own: true, t: 1, an: '<b>A</b>', av: 10, sn: 'Fight', sv: 2, d: [20, 20], df: 1, su: 0, co: 2, pa: false, gn: 0, at: 20,
+      rr: Array.from({ length: 500 }, () => ({ i: 99, from: 999, to: -4, how: 'spirit', g: '<img>' })), o: { d: [999], su: 1e9 } }]; renderAll();`);
+  const hostile = recent()[0];
+  ok("a code's reroll records are capped and clamped", hostile.rr.length <= 10 && hostile.rr.every((x) => x.from <= 20 && x.to >= 1 && x.i < 5));
+  ok("no roll id reaches an onclick", !g("[...document.querySelectorAll('#recentRollsArea [onclick]')].some(b => b.getAttribute('onclick').includes('alert'))"));
+}
+
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — OBR.isAvailable is false, so the module block never ran.
