@@ -13,6 +13,60 @@ for the GM to remember all the stuff they can do", with buttons, confirmations o
 one, the book's exact words in the tooltips, Threat that arrives each round, and NPC
 stat blocks that can sit on tokens.
 
+## Rerolls (added to this release before it went live)
+
+"Spend Spirit to … reroll one d20 after rolling" — the creator's own Spirit text, never
+implemented until now. Decided with the table: **your own rolls only** (GM and players
+alike), **one paid reroll per roll**, **dice locked once the Momentum is claimed**, and
+**all the free rerolls** in the rules data, plus a yellow reminder on a roll that has one.
+
+- **The rules live in `dnm.js`**: `rerollProblem()`, `applyReroll()`, `rerollOptions()`,
+  `rerollLines()`. The reducer applies a `reroll` event through them. The creator mirrors
+  them for its own rolls (`sheetRerollOptions()`, `applySheetReroll()`).
+- **The original is never rewritten.** `o` keeps the dice and verdict as first written; `rr`
+  records each die (`i`, `from`, `to`, `how`, `pay`, `g` for the press). Both are drawn: the
+  first row with the replaced die struck through, a line per reroll, then the new result.
+  The claim button and the summary use the new numbers.
+- **Own rolls, enforced.** `background.js` now maps each connection to its player id and
+  passes `{ sender }` into `applyEvent()`; a reroll is applied only when `sender` equals the
+  roll's `by`. A roll with no `by` (pre-0.9.4) cannot be rerolled. The roller's own check
+  only decides whether to draw the buttons.
+- **Who pays.** Roll entries carry `src`: `pc` (a character's Spirit), `npc` (with `nid`, the
+  GM's roster id) or `gm`. A player with no character selected has nothing to pay with and
+  gets no buttons. The GM pays 1 Threat, or 1 Personal Threat for an NPC in the fight that
+  has some.
+- **Spirit for a roller reroll is taken by the SHEET.** The roller never edits a character;
+  it sends `pay: "room"`, and `reconcileRerolls()` in the creator takes 1 Spirit per press
+  when it sees it — open now or next time — tracking `appliedRerolls` so it is paid once.
+  First contact adopts the log without paying, as the bond queue does. A reroll made on the
+  sheet takes the Spirit there and says `pay: "sheet"`.
+- **Free rerolls.** The creator writes `rerolls` into the snapshot (`getRerollSources()`):
+  equipped items with a `rerollModifier` effect (Tactical Lens, Mobile) and the talents
+  Supply and Demand, Tool Rig, Evade and Extra Effort, each with its attribute/skill filter
+  and the condition the sheet cannot check. The roller reads that list, so it has no copy of
+  DM_DATA. Evade's attack type and Extra Effort's skill are not stored anywhere, so those two
+  are confirm-the-condition. Tool Rig: once per die beyond the base two. Mobile is not a
+  reroll of its own: it lets the Spirit reroll take two dice on Move.
+- **Inspire** rides on the Second Wind grant (`inspire: true`); the ally's sheet stores
+  `inspireAt` (the grant's time) and offers the free reroll on the first roll after it.
+  Used up on use, in the sheet or (via `reconcileRerolls`) in the roller.
+- **Sheet rolls now post `compAt`**, so a reroll in the room is judged against the threshold
+  the roll was made under.
+- Recent Rolls entries gained `own`, `cl`, `rr`, `o`, all clamped on the way out of storage.
+  Every handler on the sheet takes the list index and a die index — never a string from the
+  roll — because a recent roll arrives in a character code.
+
+Tests: `party.test` (the rules, the reducer), `security.test` (forged rerolls, hostile
+records), `creator.test` (sheet options, Spirit, Lens hint, Mobile, Tool Rig, Inspire, a
+hostile code), `embedded.test` (paid once, first contact, Mobile one Spirit for two dice,
+Inspire used up, the posted fields), `gmtools.test` (the roller in Chromium: buttons only on
+your own roll, the hint, confirm, the log lines, one paid per roll, the GM's Threat, claim
+locks). Proved by breaking the owner check, the hint and the one-paid rule in `out/`.
+
+Live checks: a player rerolls in the roller and their sheet loses 1 Spirit (open, and
+closed-then-opened); the yellow hint appears for a character wearing a Tactical Lens on a
+Quickness/Insight + Fight roll; another player sees the reroll lines but no buttons.
+
 ## The files
 
 | file | what it is |
