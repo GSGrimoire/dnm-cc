@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dreams &amp; Machines Character Creator &mdash; Changelog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Exo+2:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --teal: #00B4B4;
+  --teal-dim: #007a7a;
+  --teal-faint: rgba(0,180,180,.06);
+  --teal-glow: rgba(0,180,180,.25);
+  --bg: #0a0f0f;
+  --bg3: #131e1e;
+  --bg4: #0f1717;
+  --panel: #111a1a;
+  --border: rgba(0,180,180,.2);
+  --border-bright: rgba(0,180,180,.45);
+  --text: #d4e8e8;
+  --text-dim: #7aa8a8;
+  --text-bright: #f0ffff;
+  --accent: #ff6b35;
+  --warning: #ffd166;
+  --font-display: "Rajdhani", system-ui, sans-serif;
+  --font-body: "Exo 2", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  line-height: 1.62;
+  position: relative;
+}
+
+/* Faint hex field behind everything. Purely decorative. */
+.hex-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .5;
+  background:
+    radial-gradient(ellipse at 15% 0%, rgba(0,180,180,.10), transparent 55%),
+    radial-gradient(ellipse at 85% 100%, rgba(255,107,53,.05), transparent 55%),
+    repeating-linear-gradient(60deg, rgba(0,180,180,.035) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(-60deg, rgba(0,180,180,.035) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(0deg, rgba(0,180,180,.035) 0 1px, transparent 1px 40px);
+}
+
+.page {
+  position: relative;
+  z-index: 1;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 40px 20px 72px;
+}
+
+/* Header ---------------------------------------------------- */
+.site-header { margin-bottom: 26px; }
+.logo-text {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.9rem, 6vw, 3.2rem);
+  letter-spacing: .14em;
+  color: var(--text-bright);
+  line-height: 1.05;
+}
+.logo-text span { color: var(--teal); }
+.logo-sub {
+  font-family: var(--font-mono);
+  font-size: .8rem;
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin-top: 6px;
+}
+.nav-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.btn-link {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--teal);
+  border: 1px solid var(--teal-dim);
+  background: var(--teal-faint);
+  text-decoration: none;
+  padding: 9px 14px;
+  font-size: .78rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  transition: border-color .15s, box-shadow .15s, color .15s;
+}
+.btn-link:hover { border-color: var(--teal); color: var(--text-bright); box-shadow: 0 0 16px var(--teal-glow); }
+
+/* Panels ---------------------------------------------------- */
+.panel {
+  position: relative;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 26px 26px 30px;
+  margin-bottom: 20px;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+.version-kicker {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin: 0 0 12px;
+}
+.lead { font-size: 1.02rem; color: var(--text); margin: 0 0 22px; max-width: 62ch; }
+
+/* Dev note -------------------------------------------------- */
+.dev-note-panel {
+  border-left: 2px solid var(--warning);
+  background: rgba(255,209,102,.05);
+  padding: 14px 16px;
+  margin-bottom: 24px;
+}
+.dev-note-panel h3 {
+  font-family: var(--font-display);
+  font-size: .95rem;
+  letter-spacing: .08em;
+  color: var(--warning);
+  margin: 0 0 6px;
+}
+.dev-note-panel p { margin: 0 0 6px; font-size: .9rem; color: var(--text-dim); }
+.dev-note-panel p:last-child { margin-bottom: 0; }
+.link-inline { color: var(--teal); }
+.link-inline:hover { color: var(--text-bright); }
+
+/* Feature cards --------------------------------------------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.feature-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--teal);
+  padding: 14px 16px;
+}
+.feature-card h3 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: var(--text-bright);
+  margin: 0 0 6px;
+}
+.feature-card p { margin: 0; font-size: .88rem; color: var(--text-dim); line-height: 1.55; }
+
+.note {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+/* Timeline -------------------------------------------------- */
+.timeline-entry { border-left: 1px solid var(--border); padding-left: 20px; margin-bottom: 6px; }
+
+/* v1.20: one <article> per version, each independently collapsible. The page used
+   to be three long articles of stacked versions — 18 headings and 123 bullets in one
+   scroll — so finding what changed in a given release meant reading past everything
+   newer than it. Newest opens; the rest are one click. No entry text was changed. */
+.era-heading {
+  font-family: var(--font-display);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 30px 0 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.era-heading:first-of-type { margin-top: 8px; }
+.history-hint { font-family: var(--font-mono); font-size: .72rem; color: var(--text-dim); margin: 0 0 4px; }
+
+.version-entry > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-radius: 3px;
+}
+.version-entry > summary::-webkit-details-marker { display: none; }
+.version-entry > summary::before {
+  content: "\25B8";
+  color: var(--teal);
+  font-size: .8rem;
+  transition: transform .15s ease;
+  display: inline-block;
+}
+.version-entry[open] > summary::before { transform: rotate(90deg); }
+.version-entry > summary:hover .version-title { color: var(--text-bright); }
+.version-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .01em;
+}
+.version-entry[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.version-entry > ul, .version-entry > p { margin-top: 10px; }
+.version-entry > ul:last-child, .version-entry > p:last-child { margin-bottom: 14px; }
+.version-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  letter-spacing: .12em;
+  color: var(--teal);
+  border: 1px solid var(--teal-dim);
+  background: var(--bg4);
+  padding: 2px 9px;
+  margin: 26px 0 0 -33px;
+}
+.timeline-entry .version-tag:first-child { margin-top: 4px; }
+.timeline-entry h2 {
+  font-family: var(--font-display);
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--text-bright);
+  margin: 10px 0 8px;
+}
+.timeline-entry ul { margin: 0; padding-left: 1.15rem; }
+.timeline-entry li { margin: 7px 0; color: var(--text); font-size: .93rem; }
+.entry-note {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--text-dim);
+  margin: 10px 0 0;
+}
+.timeline-entry code {
+  font-family: var(--font-mono);
+  font-size: .85em;
+  color: var(--teal);
+  background: var(--bg4);
+  padding: 1px 5px;
+}
+
+.footer {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: .76rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .version-tag { margin-left: -21px; }
+  .panel { padding: 20px 18px 24px; }
+}
+</style>
+</head>
+<body>
+<div class="hex-bg"></div>
+<main class="page">
+
+  <header class="site-header">
+    <div class="logo-text">DREAMS <span>&amp;</span> MACHINES</div>
+    <div class="logo-sub">Player Changelog</div>
+    <nav class="nav-row" aria-label="Changelog links">
+      <a class="btn-link" href="./">Back to Character Creator</a>
+      <a class="btn-link" href="./UPGRADE_NOTES.md">Technical Notes</a>
+    </nav>
+  </header>
+
+  <section class="panel">
+    <div class="version-kicker">Current Version</div>
+    <h1>Version v.2.4 &middot; extension 1.5</h1>
+    <p class="lead">The GM has a toolbox: every way the Gamemaster&apos;s Guide gives the GM to gain and spend Threat, one press each, with the book&apos;s own words on hover; Threat that ticks up every round; a hazard builder; and an NPC roster with stat blocks that can sit on tokens. Before that: the table got an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
+    <p class="lead" style="font-size:.86rem;opacity:.75;">The GM tools are an <em>extension</em> update, and the sheet learned three new things to go with them. You need extension 1.5, which means reloading the room.</p>
+
+    <div class="dev-note-panel">
+      <h3>Player changelog vs. technical log</h3>
+      <p>This page is the player-facing changelog: it explains what changed in practical play terms. For implementation details, data schema changes, compatibility notes and developer handoff context, use the technical notes.</p>
+      <p><a class="link-inline" href="./UPGRADE_NOTES.md">Open the technical upgrade notes</a>.</p>
+    </div>
+
+    <div class="grid">
+      <article class="feature-card">
+        <h3>GM Tools</h3>
+        <p>GM only. A new panel under Table Controls listing every way the GM gains and spends Threat in Chapter 4 of the Gamemaster&apos;s Guide &mdash; Escalation, Dithering, Reinforcements, Reveal, Change of Circumstances and the rest. Hover any of them for the book&apos;s exact words and the page. Every press asks first.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Pop It Out</h3>
+        <p>GM only. <em>Pop out</em> puts the GM tools in their own panel, docked and sized the way the character sheet is: nine positions, drag an edge to resize, zoom in and out.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Threat Every Round</h3>
+        <p>GM only. Set up tickers &mdash; a fire spreading, an alarm, reinforcements on the way &mdash; each adding 0 to 6 Threat. <em>Next Round</em> adds them up and asks before it does. Each gets its own line in the log, and a hidden one just reads &ldquo;Threat rises&rdquo;.</p>
+      </article>
+      <article class="feature-card">
+        <h3>What the Table Sees</h3>
+        <p>Gains are announced by name, as the book asks. Spends show the table only that Threat was spent: the GM&apos;s own log keeps the reason, so a Reveal does not give itself away.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Rushed</h3>
+        <p>The GM can end a scene with no time to rest (2 Threat). Breather, Break and Bed grey out on every sheet until the next scene ends, and the tooltip says why.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Reversal</h3>
+        <p>Once per adventure the GM can end a scene with the situation unresolved. Everyone who was there gets half their maximum Spirit back on their sheet, automatically.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Growth From Adversity</h3>
+        <p>When the GM spends 3 or more Threat at once, every character in the scene gains 1 Growth, as the book says. It lands on the sheet by itself. The GM can switch it off.</p>
+      </article>
+      <article class="feature-card">
+        <h3>NPCs and Stat Blocks</h3>
+        <p>GM only. A roster of adversaries the GM can add to, edit, export and import. Put one into the fight hidden, then reveal it &mdash; Menacing and reinforcement Threat are added for you. A few placeholder samples are included until the book&apos;s are entered.</p>
+      </article>
+      <article class="feature-card">
+        <h3>NPCs on Tokens</h3>
+        <p>GM only. Attach a stat block to a token, select the token, and the roller fills in its numbers. The token carries nothing a player could read: no name, no stats.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Hazards and Starting Threat</h3>
+        <p>GM only. Build a hazard from the book&apos;s table and the cost adds itself up. Pick the adventure&apos;s stakes and set the starting Threat for the number of characters.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Initiative</h3>
+        <p>The GM presses <em>Start Initiative</em> and the Party panel becomes the turn order. Names grey out as people act, <em>Next Round</em> lights up once everyone has gone, and the round number counts up. Everyone can see it.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Adversaries in the Order</h3>
+        <p>GM only. Type a name at the bottom of the tracker and it joins the order. <em>Hide</em> keeps the name from the table &mdash; they still see that something is taking a turn, just not what it is called.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Mark Your Own Turn</h3>
+        <p>Press <em>Acted</em> on your own row when you are done, and <em>Undo</em> if you were not. The GM can mark and unmark anyone.</p>
+      </article>
+      <article class="feature-card">
+        <h3>A Shared Party Panel</h3>
+        <p>The Party panel used to be the GM&apos;s alone. Now the GM can share it, so everyone sees the party&apos;s Spirit, exhaustion and injury counts. On by default; the <em>Shared</em> button turns it off.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Lost Characters Come Back</h3>
+        <p>GM only. Delete a token by accident and the character it was carrying turns up under <em>Lost characters</em> in the panel, ready to put on a new token. It is listed only while nothing else is carrying that character, so there is never a stale copy sitting next to a live one.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Back Up the Party</h3>
+        <p>GM only. One press writes out every character in the scene as codes you can copy or download and keep somewhere that is not Owlbear.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Shorter Character Codes</h3>
+        <p>About a third of the length they were. Short enough to paste into a chat window without it swallowing the channel. Every code you already have still works and always will.</p>
+      </article>
+      <article class="feature-card">
+        <h3>A Quicker Sheet</h3>
+        <p>The item catalogue is built when you open it rather than every time anything on the sheet changes. Clicking around the sheet, and adding an item, are several times faster.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Exhaustion and Injuries at a Glance</h3>
+        <p>GM only. Each party row shows exhaustion as yellow initials &mdash; hover for the full name &mdash; and how many Injuries someone is carrying. Not what the Injuries are: that is theirs to tell the table.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Injuries Are Visible</h3>
+        <p>Taking, healing, reopening or renaming an Injury posts to the log. Injuries still change no numbers &mdash; they are a Truth about your character, and that has not changed.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Party Panel</h3>
+        <p>GM only. Every character on a token, with their Spirit and whether they have caught up with the rests you have called.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Caught Up, Behind, Not Synced</h3>
+        <p>Three states, not two. A brand new character reads as Not synced rather than Behind, because it has nothing to catch up on.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Five-Part Sheet</h3>
+        <p>Character, Actions, Items, Growth, Share Code. The same sections in the same order, grouped so the page is easier to move around.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Tidier Item Block</h3>
+        <p>Starting Equipment and Item Catalogue start collapsed. Open one and it stays open while you work.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Recent Rolls</h3>
+        <p>Your last three rolls stay on the sheet after you close it, and travel with your character code.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Maverick Drive</h3>
+        <p>Fires by itself when the GM spends 3 or more Threat at once. The Spirit arrives, the log says so, and closed sheets catch up.</p>
+      </article>
+      <article class="feature-card">
+        <h3>One Change, One Line</h3>
+        <p>A run of +/&minus; presses on Threat or Momentum is added up and posted once. The number moves as you press; it reads dimmed until the table confirms it.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Rivalry Bonds</h3>
+        <p>When someone uses Adrenaline Rush, anyone holding a rivalry bond with them recovers 1 Spirit. It arrives on its own.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Supportive Bonds</h3>
+        <p>Name the ally you are helping and a supportive bond with them adds +1 to what they get, on Second Wind and at a rest.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Sharing a Rest</h3>
+        <p>Give up part of the Spirit a rest just returned to you and hand it to an ally. New &mdash; the sheet never had this before.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Shared Roll Room Removed</h3>
+        <p>It needed a server that was never set up. Rolls have travelled through Owlbear since v1.12, which needs no server at all.</p>
+      </article>
+      </div>
+
+    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.4 needs extension 1.5; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
+  </section>
+
+  <section class="panel">
+    <div class="version-kicker">Version History</div>
+    <p class="history-hint">Newest first. Click any version to open it.</p>
+
+    <h3 class="era-heading">The shared table</h3>
+
+    <article class="timeline-entry">
+      <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.4 &middot; 1.5</span>
+          <span class="version-title">GM tools</span>
+        </summary>
+        <ul>
+        <li><strong>GM Tools.</strong> A new GM-only panel under Table Controls with every way Chapter 4 of the Gamemaster&apos;s Guide gives the GM to gain and spend Threat. Hover anything for the book&apos;s exact wording and the page number. Every button that changes Threat or reaches the table asks for a second press.</li>
+        <li><strong>Pop out.</strong> The same tools in their own docked panel, placed, sized and zoomed the way the character sheet is. <em>Bring back</em> returns them to the roller.</li>
+        <li><strong>Threat each round.</strong> Up to eight tickers, each 0 to 6, each on or off, public or hidden, for this scene or pinned. <em>Next Round</em> shows the total, asks first, and writes one log line per ticker.</li>
+        <li><strong>Private reasons.</strong> The table&apos;s log shows gains by name and spends only as &ldquo;Threat spent&rdquo;. The GM sees the full reason in its place, marked <em>Only you</em>.</li>
+        <li><strong>Rushed.</strong> End the scene with no time to rest, for 2 Threat. Every rest is greyed &mdash; on the sheets and in Table Controls &mdash; until the next End Scene, or until the GM lifts it.</li>
+        <li><strong>Reversal.</strong> Once per adventure: ends the scene unresolved for 2 Threat per character present, and everyone who was there recovers half their maximum Spirit on their sheet.</li>
+        <li><strong>Growth from adversity.</strong> Spending 3 or more Threat at once gives each character in the scene 1 Growth, up to the usual 10 unspent. The GM can switch this off in Adventure setup.</li>
+        <li><strong>NPC roster.</strong> Normal and Major stat blocks, custom ones for homebrew or other adventures, export and import. Into the fight hidden, then <em>Reveal</em> (adds Menacing) or <em>Arrives</em> (charges reinforcements too). Major NPCs track Personal Threat.</li>
+        <li><strong>NPCs on tokens.</strong> The token gets an anonymous id and nothing else. Select it as the GM and the roller fills in its numbers; a player selecting it sees nothing.</li>
+        <li><strong>Hazard builder, starting Threat, Undo,</strong> and a cheat sheet of the rest of Chapter 4.</li>
+        <li>The four sample NPCs are placeholders in the book&apos;s stat block shape, not the book&apos;s adversaries. Delete them once you have entered Chapter 5&apos;s.</li>
+        <li>Fixed: an empty bar sat above the roller&apos;s Character box whenever no token was selected.</li>
+        <li>Requires extension 1.5. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">1.4C</span>
+          <span class="version-title">Adversaries start hidden</span>
+        </summary>
+        <ul>
+        <li><strong>An adversary the GM adds to the order is hidden from the players by default.</strong> They see that something is in the fight; they do not see its name until the GM presses <em>Show</em> on its row.</li>
+        <li>The name is never sent to the room while it is hidden, not even for a moment. It is kept in the GM&apos;s own browser, as hidden names always have been.</li>
+        <li>Characters are unchanged: they go into the order visible, as before.</li>
+        <li>Requires extension 1.4C. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">1.4B</span>
+          <span class="version-title">One list, not two</span>
+        </summary>
+        <ul>
+        <li><strong>The initiative tracker is part of the Party panel now.</strong> 1.4 put it in a panel of its own, directly above a Party panel that was already listing the same people. One row per person, with the turn-order controls on it.</li>
+        <li><strong>A character&apos;s name is the link to their sheet.</strong> The separate <em>Sheet</em> button is gone &mdash; it was spending space to say a second time what the name already said, and that space is what the turn controls needed.</li>
+        <li><strong>Adversaries sit among the party in the order</strong>, where they belong, rather than in a second list.</li>
+        <li><strong>The caught-up badge steps aside during a fight.</strong> It answers a between-scenes question and it was the longest thing on the row.</li>
+        <li><strong>Someone who joins mid-fight</strong> appears below the order with a <em>+ Order</em> button to drop them in.</li>
+        <li>A player can see the turn order even when the GM has not shared the party&apos;s Spirit and injuries. Those are two different decisions and they now behave like it.</li>
+        <li>Requires extension 1.4B. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">1.4</span>
+          <span class="version-title">Initiative, and a party panel the table can see</span>
+        </summary>
+        <ul>
+        <li><strong>This one is the extension only.</strong> The character creator is unchanged at 2.3. Reload the room to pick it up.</li>
+        <li><strong>An initiative tracker.</strong> <em>Start Initiative</em> in Table Controls fills the order with every character on a token in the scene. Names grey out as people act. The round number counts up, and <em>Next Round</em> lights up once everyone has gone &mdash; it never fires on its own, because a round that ended itself while someone was still deciding would be worse than no tracker at all.</li>
+        <li>It tracks <strong>who is left</strong> rather than whose turn it is, because that is how the table actually plays: anyone who has not gone may go.</li>
+        <li><strong>Everyone sees it.</strong> Players get the list and a button on their own row; the GM gets the controls.</li>
+        <li><strong>Adversaries go in the order too.</strong> Type a name in the box at the bottom and it joins. No stat block, no token needed &mdash; just a name and a place in the order.</li>
+        <li><strong>Hide keeps a name from the table.</strong> Players still see that a row exists and whether it has acted, which is right &mdash; in a fight you can see something taking its turn. They never see the name: it is not sent to them at all, rather than sent and hidden.</li>
+        <li><strong>Up and down arrows reorder the list</strong> so it matches the order you are actually running.</li>
+        <li><strong>End Scene ends initiative.</strong> A Breather, Break or Bed does not &mdash; those happen during a fight.</li>
+        <li><strong>The Party panel can be shared with the players.</strong> It used to be the GM&apos;s alone. Sharing is on by default; the <em>Shared</em> button in its header turns it off again. <em>Back up</em> and <em>Lost characters</em> stay the GM&apos;s whatever the switch says.</li>
+        <li>Requires extension 1.4. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.3</span>
+          <span class="version-title">Nothing is lost with the token</span>
+        </summary>
+        <ul>
+        <li><strong>A character is no longer lost when its token is deleted.</strong> Everything a character is has always lived on the token, so deleting one took a whole session&apos;s growth, injuries and bonds with it, with no undo. The GM&apos;s panel now keeps a copy: anything whose token has left the scene appears under <em>Lost characters</em>, and can be copied or put straight onto a token you have selected.</li>
+        <li>It shows a character only while nothing in the scene is carrying it. Put it back on a token and it leaves the list on its own. There is no point at which two versions of one character are both on offer, and nothing that can put an old copy over a current one.</li>
+        <li>Kept in the GM&apos;s own browser for 30 days. It does not follow you to another computer, and clearing your browsing data clears it &mdash; so for anything you really want to keep, use the backup.</li>
+        <li><strong>Back up the whole party in two clicks.</strong> <em>Back up</em> in the Party panel writes every character in the scene out as codes to copy or download. Any one of them pastes back through <em>Attach D&amp;M character</em> on a token.</li>
+        <li><strong>Character codes are about a third the length.</strong> A code that ran to nearly ten thousand characters is now under four thousand &mdash; short enough to paste into a chat window. Every code you have ever copied still works, and always will.</li>
+        <li><strong>The sheet is several times quicker.</strong> The item catalogue is now built when you open it, instead of being rebuilt every single time anything on the sheet changed. Adding an item was the worst of it and is about twenty times faster.</li>
+        <li><strong>The Party panel shows exhaustion and injuries.</strong> Exhaustion as yellow initials with the full name on hover, and a count of Injuries &mdash; never what they are.</li>
+        <li>Requires extension 1.3. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.2</span>
+          <span class="version-title">Every position remembers its own size</span>
+        </summary>
+        <ul>
+        <li><strong>Each of the nine positions now keeps its own size.</strong> A sheet along the bottom wants to be broad and short; the same sheet at a side wants to be narrow and tall. Set each one once and moving between them keeps whatever you chose. Before, they all shared one size, so you re-dragged it every time you moved it.</li>
+        <li>Positions you have not used yet start out sensibly: the sides and the middle are narrow and full height, the top and bottom are full width and short, the corners are a box. Whatever you had set before this update is kept for the position you were using.</li>
+        <li><strong>An item&apos;s tags no longer get cut off in a narrow panel.</strong> They wrap onto as many lines as they need, the way the catalogue&apos;s tags always have.</li>
+        <li><strong>The character name has gone from the strip at the top of the panel.</strong> It was the first thing squeezed out when the panel got narrow, and the sheet right below it says the name in type you can actually read.</li>
+        <li><strong>A critical in the Rolls and Actions log is now the same yellow it is on the sheet.</strong> It was teal, the same colour as an ordinary success, so the rarest thing a roll can do looked unremarkable in the log while it glowed on the sheet.</li>
+        <li>Requires extension 1.2. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.1D</span>
+          <span class="version-title">Tidy at any width</span>
+        </summary>
+        <ul>
+        <li><strong>Tapping a Skill or an Attribute no longer moves the sheet at all.</strong> It used to pull the dice roller into view every time, which helped in a wide window and threw you down the page in a narrow panel. Nothing is lost: the box you tapped lights up, and the roller says what you are about to roll.</li>
+        <li><strong>The Roll button no longer hangs off the edge of a narrow panel.</strong> At the narrowest widths the roller now stacks: what you are rolling on one line, dice and difficulty on the next, Roll across the bottom.</li>
+        <li><strong>An item&apos;s tags no longer land on top of its own buttons.</strong> In a narrow panel the name and tags take the full line and the Equip and quantity controls sit below them. At a comfortable width it stays on one line as before.</li>
+        <li><strong>The equipment catalogue fits the panel too.</strong> It insisted on a minimum width and hung past the edge of anything narrower.</li>
+        <li>No change to the extension. Still requires extension 1.1B, and no reinstall.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.1C</span>
+          <span class="version-title">2.1 never actually ran</span>
+        </summary>
+        <ul>
+        <li><strong>This is the real fix for what 2.1 broke, and 2.1B was not it.</strong> Everything the sheet does inside Owlbear lives in one block of code, and in 2.1 that block would not start at all. Two names it used clashed with names inside the bundled Owlbear library, which stops the whole block dead. So the panel showed the plain character creator: no header, no Close, no position pad, no zoom, no dragging, and no character off the token.</li>
+        <li>Everything built in 2.1 was in there the whole time and simply never got to run. The pad, the drag handles, the zoom, the rolls arriving from the roller, the new dice roller readout &mdash; all of it should appear now.</li>
+        <li>2.1B fixed a different, real problem that had not surfaced yet: opening the sheet on a token with no character left you with no Close button. That fix stays.</li>
+        <li>Requires extension 1.1B. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.1B</span>
+          <span class="version-title">The panel can always be closed</span>
+        </summary>
+        <ul>
+        <li><strong>Fixes a bad one in 2.1: a sheet opened on a token with no character had no Close button, and no way to get rid of it.</strong> The header strip with Close, the position pad and the zoom controls was only built once a character had loaded. Open the sheet on an empty token and you got a panel sitting on the table that nothing would dismiss. It is part of the panel now, not part of the character, so it is there the moment the sheet opens.</li>
+        <li>The same fix covers a character this version of the creator cannot read, which also used to leave you stuck, and the header now says so rather than looking like an empty token.</li>
+        <li>Copy code and Detach still wait for a character, since neither means anything without one.</li>
+        <li>No change to the extension. Still requires extension 1.1, and no reinstall.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.1</span>
+          <span class="version-title">Put the sheet where you want it</span>
+        </summary>
+        <ul>
+        <li><strong>Nine places to put the sheet instead of three.</strong> The header now shows a small grid of the screen. Press a square and the sheet moves there: any corner, any edge, or the middle. The square it is already on is lit.</li>
+        <li><strong>Drag the edges to resize it.</strong> The &minus; and + buttons that changed the panel size are gone, replaced by dragging the panel&apos;s edges and corners, which is what you would reach for anyway. Only the edges facing into the screen can be dragged, since the others are against the window. Resizing is instant and never reloads the sheet.</li>
+        <li><strong>&minus; and + now zoom instead.</strong> They scale the sheet inside the panel and leave the panel where it is, so you can see more of a long sheet without covering more of the map. The zoom is remembered along with the position and the size.</li>
+        <li><strong>The header no longer collapses on itself in a narrow panel.</strong> It is two rows now, and the name gives way before the controls do. Buttons in the docked sheet are smaller to match the width they are actually read at.</li>
+        <li><strong>Rolls made in the Rolls and Actions roller now appear in the sheet&apos;s Recent Rolls.</strong> Before, only rolls made on the sheet itself were kept there. Rolls made while your sheet was closed are picked up when you open it. Hidden rolls stay hidden.</li>
+        <li><strong>The sheet&apos;s dice roller has lost its Attribute and Skill dropdowns.</strong> You already choose those by tapping an Attribute or a Skill on the sheet, and having two controls for one choice meant they could disagree. The roller now shows what you are about to roll, and still has dice and difficulty.</li>
+        <li><strong>Tapping a Skill or an Attribute no longer jumps the sheet.</strong> It scrolled the roller into view every time, which was helpful in a wide window and maddening in a tall thin one. It only scrolls now if the roller is actually off screen.</li>
+        <li>Requires extension 1.1. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.0B</span>
+          <span class="version-title">Character codes are treated as untrusted</span>
+        </summary>
+        <ul>
+        <li><strong>A character code can no longer run code on the sheet that opens it.</strong> The Growth section printed a purchase&apos;s description straight into the page without checking it first, so a code could carry something other than text and have it run in whoever opened the sheet &mdash; and because the sheet sits inside Owlbear, that meant acting at the table as whoever was reading, the GM included. Codes are pasted out of chat and read off tokens anyone can write to, so they are treated as untrusted now. Nothing you type yourself changes.</li>
+        <li><strong>A character from a newer version of the creator now says so instead of opening blank.</strong> If a code names an origin, archetype or temperament this version does not have, you get a message telling you to reload. Before, the sheet came up empty with nothing to explain it. Half-built characters still import exactly as they did.</li>
+        <li><strong>A damaged character code no longer opens an empty sheet either.</strong> A code with a corrupted Growth entry used to stop the sheet drawing partway through, with nothing to say why. It is skipped now.</li>
+        <li>No change to the extension. Still requires extension 1.0, and no reinstall.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.2.0</span>
+          <span class="version-title">The sheet beside the map</span>
+        </summary>
+        <ul>
+        <li><strong>The sheet no longer covers the table.</strong> It opens docked to the edge of the Owlbear window instead of as a box in the middle of it, so the map, the tokens and the Rolls and Actions log all stay visible and clickable while the sheet is open. Open it once at the start of the evening and leave it there.</li>
+        <li><strong>Clicking the map no longer closes the sheet.</strong> You can move a token, read the log, and come back to the sheet without reopening it.</li>
+        <li><strong>Three places to put it.</strong> Buttons in the sheet&apos;s header dock it to the left edge, the right edge, or along the bottom. Left and right run full height, which suits the sheet&apos;s long layout; the bottom dock suits a wide map. The sheet reloads when it moves, which takes a moment &mdash; anything you have typed is saved first.</li>
+        <li><strong>And two to size it.</strong> The &minus; and + buttons make it narrower and wider, or shorter and taller on the bottom dock. Resizing is instant and does not reload. Wherever you leave it, that is where it opens next time.</li>
+        <li><strong>The Pop out button is gone.</strong> It never worked. It was added in 1.29 to open the sheet in a separate browser window, and that window could never reach the room &mdash; almost certainly because browsers keep the extension&apos;s storage separate from a window you open yourself, which is not something the sheet can work around. Docking does the job it was meant to do, and it does it properly, because a docked sheet is still inside Owlbear.</li>
+        <li>Requires extension 1.0. Install link unchanged, so no reinstall &mdash; but reload the room once, and this release in particular: the docked sheet will not appear until you do.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.30</span>
+          <span class="version-title">A room with no GM says so</span>
+        </summary>
+        <ul>
+        <li><strong>A room with no GM now warns you.</strong> Without a GM present, nothing saves to the room &mdash; Momentum, Threat, rests and the shared log all need the GM&apos;s connection to write them. You could add Momentum, watch your own sheet change, and never see the pool move. It still works that way, but the roller and the sheet both say so now instead of looking broken.</li>
+        <li>The warning clears by itself the moment a GM joins or someone is promoted.</li>
+        <li><strong>A raised Complication range is now in Threat&apos;s colour</strong>, on its own line under the rest of the dice hint. It wrapped to two lines anyway, so the break is somewhere useful &mdash; and playing on the wrong odds because you did not notice the change is worth avoiding.</li>
+        <li><strong>The pop-out window is still not working, and this release does not fix it.</strong> What it does is tell you why it failed. Most likely your Owlbear room is still running the older extension: reload the room, then try again. The window now says which of the three possible causes it hit, and offers a Try again button.</li>
+        <li>Requires extension 0.9.10. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.29</span>
+          <span class="version-title">The sheet in its own window, and it remembers your rolls</span>
+        </summary>
+        <ul>
+        <li><strong>The sheet can open in its own browser window.</strong> Open it from the token as usual, then press <em>Pop out</em>. It becomes a normal window you can move, resize, or drag to a second screen &mdash; and the map, the log and the roller all stay where they are. No more opening the sheet to roll, closing it to see the log, and opening it again.</li>
+        <li>Everything works from that window: rolls reach the table, Threat and Momentum move the shared pools, edits save back to the token.</li>
+        <li>Popping out closes the sheet inside Owlbear on purpose. Two copies of one character open at once would each keep overwriting the other.</li>
+        <li>If your browser blocks the window, the button tells you so and nothing else changes &mdash; allow pop-ups for Owlbear Rodeo and press it again.</li>
+        <li>If you close Owlbear while the window is still open, the window says plainly that it has lost the room rather than quietly doing nothing.</li>
+        <li><strong>Your last three rolls now stay on the sheet.</strong> They used to vanish the moment you closed it. They are kept with the character, so they are still there when you reopen it and they travel with your character code. Each one is shown as it read when you made it, even if the GM has changed the Complication range since.</li>
+        <li>Requires extension 0.9.9. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.28B</span>
+          <span class="version-title">The Maverick drive fires by itself</span>
+        </summary>
+        <ul>
+        <li><strong>&ldquo;When the GM spends 3 or more Threat at once, regain 1 Spirit&rdquo; now happens on its own.</strong> Every Maverick at the table gets the Spirit, whether their sheet is open or not &mdash; a closed one catches up the next time it is opened, the same way rests do.</li>
+        <li><strong>Nothing happens quietly.</strong> The GM sees &ldquo;Spent 3 Threat at once&rdquo; when they do it. Each Maverick gets their own message and a line in the shared log, marked <em>Drive</em> so it is not mistaken for a bond.</li>
+        <li>&ldquo;At once&rdquo; means at once. Two presses is two; two presses, a pause, then two more is still two runs and not a spend of four. Adding Threat never counts &mdash; only spending it.</li>
+        <li>This is the one drive the sheet can see. The other five &mdash; being first to act in a round, creating a scheming Truth, and so on &mdash; are things it has no way of knowing about, so they stay yours to claim.</li>
+        <li>Requires extension 0.9.8B. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+        <p><strong>1.28B fixes, from play:</strong></p>
+        <ul>
+        <li><strong>&ldquo;Add Momentum&rdquo; in the roller is yours to press again.</strong> It was clickable for the GM and nobody else. The roller offers a roll&apos;s surplus to whoever made it, and rolls sent from a character sheet had never said who that was &mdash; so if you roll from your sheet, as most of us do, the button was never yours. Rolls made in the roller itself were always fine, which is why it took a while to spot.</li>
+        <li>Rolls already sitting in the log from before this fix can be claimed by anyone, since there is no way to tell whose they were.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.27</span>
+          <span class="version-title">Pressing + three times is one change, not three</span>
+        </summary>
+        <ul>
+        <li><strong>A run of Threat or Momentum presses is added up and posted once.</strong> Raising Threat by 3 used to write three separate &ldquo;added 1 Threat&rdquo; lines, so the log recorded the clicking rather than the decision and everyone had to add them up. It now reads <em>added 3 Threat</em>, once.</li>
+        <li><strong>Press + then &minus; and nothing is posted at all.</strong> Previously that was two lines for a change nobody made.</li>
+        <li>The number still moves the moment you press it. While it is waiting for the table to confirm it, it reads dimmed with a dotted underline &mdash; the value is right, and the panel is not pretending it has landed yet.</li>
+        <li>Abilities are never rolled into a manual adjustment. Anything with its own name &mdash; Adrenaline Rush, Nanobarrier, Second Wind &mdash; still posts on its own, with its own wording. Two uses of Second Wind stay two entries.</li>
+        <li>Wait a moment between presses and you get two entries, as you should. Only a quick run counts as one decision.</li>
+        <li><strong>Maverick players:</strong> your drive is &ldquo;when the GM spends 3 or more Threat at once, regain 1 Spirit&rdquo;, and until now there was no way to tell 3 at once from three separate 1s. The log now says <em>removed 3 Threat</em> in one line. It is still yours to claim &mdash; all six drives work that way, and several of them are things the sheet cannot see at all.</li>
+        <li>Requires extension 0.9.7. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.26</span>
+          <span class="version-title">Bonds pay out by themselves, and you can share a rest</span>
+        </summary>
+        <ul>
+        <li><strong>Rivalry bonds now pay out.</strong> When a character uses Adrenaline Rush, everyone who holds a rivalry bond naming them recovers 1 Spirit. It lands on their sheet on its own &mdash; the next time they open it, if it was closed.</li>
+        <li>Worth reading twice, because it runs the opposite way to how it sounds: <strong>the person spending the Threat needs no bond at all.</strong> The bond belongs to the one who benefits. If you wrote a rivalry with Kestrel, you gain when <em>Kestrel</em> buys Spirit with Threat.</li>
+        <li><strong>Second Wind now asks who you are helping.</strong> It used to spend the Momentum and tell nobody, which meant the ally had to be told out loud and the bond could not be worked out at all. A <strong>supportive bond</strong> with the ally you name adds +1 Spirit for them, automatically.</li>
+        <li><strong>New: give up part of your rest to an ally.</strong> After any rest you may hand some of the Spirit you just regained to someone else, which is the rules&apos; other route for a supportive bond &mdash; and something the sheet has never been able to do. The control appears under the rest buttons and lapses at the next rest or scene.</li>
+        <li>With the <strong>Performer</strong> talent you may split a rest between several allies. Without it, one per rest, as written.</li>
+        <li><strong>Cautious now works.</strong> It adds +1 Spirit to a Second Wind you take on yourself. It has been in the rules text since the beginning and had never actually done anything.</li>
+        <li>Both the Second Wind and the rest-sharing box suggest the names of characters attached to tokens in your scene, so you can pick the exact spelling. Bonds only fire on an exact name, ignoring capitals and stray spaces &mdash; so if a bond is not paying out, check the spelling against the character&apos;s name first.</li>
+        <li>The Adrenaline Rush message used to say &quot;your rivalry-bonded ally also gains 1 Spirit&quot; based on <em>your</em> bonds, which was the rule backwards and contradicted the Actions entry three inches above it.</li>
+        <li>Requires extension 0.9.6. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.25B</span>
+          <span class="version-title">The log finally catches everything, spare Momentum is a button, and the GM can raise the danger</span>
+        </summary>
+        <ul>
+        <li><strong>End Scene, New Session and New Adventure now post to the log.</strong> They only ever showed you a popup, so the rest of the table never knew.</li>
+        <li><strong>Spending Momentum now posts to the log too.</strong> Ask a Question, Counterattack, Damage, Reduce Time, Follow-Up and Second Wind all moved the pool silently. The underlying cause was one shared fault, so this class of miss should be gone rather than fixed one button at a time.</li>
+        <li>Writing, changing or removing a <strong>Truth</strong> or a <strong>Knowledge Fragment</strong> is now logged, the way Injuries have been. It posts once when you finish typing, not once per letter.</li>
+        <li><strong>A roll that beats its Difficulty offers its spare Momentum as a button</strong>, on the sheet and in the roller. Press it to add that Momentum to the group pool; it greys out once taken so the same surplus cannot be counted twice. In the roller only the person who rolled, or the GM, can press it.</li>
+        <li><strong>The GM can lower the Complication range</strong> from Table Controls: 20, 19, 18, 17, 16 or 15. Any die at or above the number complicates, for everyone, until it is set back. The dice hint on the roller says which number is live so nobody plays on the wrong odds.</li>
+        <li><strong>Ending a scene now costs the group 1 Momentum</strong>, as the rules say. It comes off once, when the GM presses End Scene &mdash; not once per character.</li>
+        <li>Momentum is labelled <em>Group Pool</em> on the sheet, so it is clear it is not yours alone.</li>
+        <li>Knowledge Fragments have their own section now, just under the character. They used to sit inside the Resources grid, which pushed the dice roller away from the Attributes and Skills you pick a roll from.</li>
+        <li>Tooltips have room to breathe between the title and the text.</li>
+        <li>Fixed the double line under every section heading. One of the two rules had been drawn by mistake for several versions.</li>
+        <li>Requires extension 0.9.5B. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+        </ul>
+        <p><strong>1.25B fixes, from testing 1.25:</strong></p>
+        <ul>
+        <li>The tooltip gap now works on every tooltip, and is much smaller. Most tooltip titles are written in a way that ignored the spacing entirely, so only a handful of them had picked it up.</li>
+        <li>Table Controls: <em>Complication on</em> is now <em>Complication Level</em>, with room enough not to wrap.</li>
+        <li>Knowledge Fragments collapses, and no longer repeats its own name as a subheading underneath itself.</li>
+        <li>Fixed the remaining double line, under <em>Actions, Talents &amp; Abilities</em>. The 1.25 fix only covered one kind of section and that block uses another.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.24</span>
+          <span class="version-title">The GM sees hidden rolls, and the sheet loses three things it did not need</span>
+        </summary>
+        <ul>
+        <li><strong>A player&apos;s Hidden roll is now visible to the GM.</strong> It is hidden from the other players, not from the GM &mdash; which is how it should have worked from the start. Everyone else still sees only that a roll was made, and the label you typed if you gave one.</li>
+        <li>Worth knowing, and we would rather say it plainly: <em>Hidden</em> conceals a result from other players&apos; screens, not from a player who goes looking in their browser&apos;s developer tools. Owlbear gives extensions no private channel, so a roll that reaches the GM reaches everyone&apos;s browser. <strong>If a result must be unreachable, use Secret</strong> &mdash; that one is never sent anywhere.</li>
+        <li>The mode note under the Roll button now says so, rather than implying the result stays with you.</li>
+        <li>Removed the <em>Finalized</em> tag from a finished character. It labelled a state you can see at a glance.</li>
+        <li>Removed the <em>Character</em> heading and the rule beneath it from the first block of the sheet. Naming that block &quot;Character&quot; on a character sheet said nothing. Every other block keeps its heading.</li>
+        <li>The <em>Share Code</em> section is now just <em>Copy Code</em>, <em>Save Local</em>, the character count and the copied confirmation. The code itself is no longer printed on the page &mdash; nobody read 13&nbsp;kB of it, and showing it cost a fold-out panel and two more rules.</li>
+        <li>Copying still works the same way, and now tells you if your browser blocks it instead of looking like it worked.</li>
+        <li>Requires extension 0.9.4. Install link unchanged, so no reinstall &mdash; but reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">ext 0.9.3</span>
+          <span class="version-title">Drag the panel to resize it, and three kinds of roll</span>
+        </summary>
+        <p>An extension release. The character creator is unchanged and stays at v.1.23.</p>
+        <ul>
+        <li>The roller panel resizes by dragging the strip at its foot. 0.9.2 added &minus; and + buttons in the log header instead, which nobody found and which is not what resizable means. The buttons are still there, next to the grip, for anyone who prefers them. Your chosen height is remembered.</li>
+        <li><strong>Rolls now have three modes instead of a Hidden tick-box.</strong> <em>Open</em> is the usual thing &mdash; the table sees the roll and the result. <em>Hidden</em> tells the table that you rolled and nothing else: the dice, the target and the outcome stay with you. <em>Secret</em> sends nothing at all, so no one can tell a roll happened.</li>
+        <li><strong>Anyone can roll Hidden.</strong> It used to be the GM&apos;s alone. Concealing a result is ordinary play, and the table still sees that a roll was made, so nothing goes missing from the record.</li>
+        <li><em>Secret</em> stays the GM&apos;s, on purpose. A player rolling with no trace at all is the one thing a shared log exists to prevent.</li>
+        <li>Concealed rolls are labelled by kind in your own log &mdash; amber for Hidden, orange for Secret &mdash; so you can always tell what the table was told.</li>
+        <li>Install link unchanged, so no reinstall. Reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.23</span>
+          <span class="version-title">Sentinels rejoin the party, saved characters attach, and the roller gets rearranged</span>
+        </summary>
+        <ul>
+        <li><strong>Sentinel characters were invisible to the Party panel.</strong> Every other archetype worked. Sentinel&apos;s internal code is <code>SNT</code>, and the extension read those first two letters as the start of the character summary it was looking for, then gave up on the whole character as unreadable. Importing the same character into the creator always worked, which is what made it look random.</li>
+        <li>Loading a locally saved character while a sheet was open on a token did not attach it. It rendered fine, had no header bar, and only stuck if you pressed Edit and then Finalize. Loading now attaches exactly like pasting a code does.</li>
+        <li><strong>Players can pay Threat again.</strong> Version 1.22 locked all Threat changes to the GM, which was wrong: Nanobarrier, Adrenaline Rush and several items charge Threat, and those are player actions. Adding Threat is open to everyone again; only the GM can spend it back down.</li>
+        <li>The manual Threat + and &minus; buttons on the sheet are now the GM&apos;s only, matching the roller. For a player they had stopped working while still announcing themselves in the log.</li>
+        <li>Hidden rolls survive closing the roller. They used to be discarded, so a GM who looked away and came back found them gone, which read as hidden rolls working only sometimes. They are still never sent to the table and never stored in the room.</li>
+        <li>A hidden roll now carries a clear <em>Hidden</em> badge and a tinted row instead of the word &quot;hidden&quot; tacked onto the character&apos;s name.</li>
+        <li>The roller is reordered: Table Controls, then Party, then the dice, then the log. A result now sits directly under the button that produced it instead of two panels away.</li>
+        <li>The panel is taller, and there is a height control in the log header. Your choice is remembered. The log and the party list grow with it rather than staying a fixed few lines.</li>
+        <li>The GM can open any character&apos;s sheet straight from their row in the Party panel.</li>
+        <li>Scrollbars are themed to match everything else.</li>
+        <li>Requires extension 0.9.2. The install link is unchanged, so no reinstall &mdash; but reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.22</span>
+          <span class="version-title">The GM&apos;s controls are the GM&apos;s, and no third-party code at the table</span>
+        </summary>
+        <ul>
+        <li>Rests, scene boundaries and clearing the shared log are now checked against who actually sent them. Before this, the check that you were the GM ran only inside your own window, so anyone at the table with a browser console could call a Bed rest on every character, wipe the Rolls and Actions log, or move Threat. Nothing was wrong with the buttons; there was simply nothing behind them.</li>
+        <li>Nobody needs to have done this for it to have mattered. A forced rest reaches every attached character, including players who are not online, and there is no undo.</li>
+        <li>Momentum is unchanged and stays open to everyone. It is the group&apos;s pool.</li>
+        <li>The extension no longer downloads the Owlbear toolkit from a third-party site each time you open a room. It ships with the extension instead, the way the character creator has done since v1.14. Anything that site served would have run with full access to every character at the table.</li>
+        <li>Entries in the shared log are now bounded before they are stored. An oversized one could previously exceed the room&apos;s storage limit, which is shared with every other extension you have installed, or freeze everyone&apos;s browser as it drew.</li>
+        <li>A character code that has been tampered with can no longer alter how the sheet handles the character object it builds.</li>
+        <li>Requires extension 0.9.1. The install link is unchanged, so no reinstall is needed &mdash; but everyone should reload the room once.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.21</span>
+          <span class="version-title">Characters stay on their tokens, and a sheet in play can be edited</span>
+        </summary>
+        <ul>
+        <li>Building a brand-new character straight onto a token now sticks. Pressing Finalize saves it to the token the way pasting a code always has. Before this it looked finished, played correctly, and was gone the moment you closed the sheet, because it had never actually been written to the token.</li>
+        <li>This is also why the GM&apos;s Party panel could read empty and why rests and scene boundaries never arrived: both go looking for characters on tokens, and a character that was never saved is not there to find.</li>
+        <li>A finished character can now be edited from inside Owlbear. The step bar &mdash; Origin, Archetype, Growth and the rest &mdash; appears when you press Edit Character, so you can go straight to the step you want.</li>
+        <li>Added a Spend Growth button to the Growth section of the sheet. When the GM grants Growth mid-session, that is one click to the right screen instead of hunting for it.</li>
+        <li>While editing a finished character, every step offers &quot;Done &mdash; back to play&quot;, so you are never walked through the whole wizard to get back to the sheet. Returning to play changes nothing you have spent or taken.</li>
+        <li>A rest the GM called while you were part-way through editing now lands as soon as you press Done, rather than waiting for the next thing to happen in the room.</li>
+        <li>Extension 0.9.0 is unchanged and still required. No reinstall.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.20</span>
+          <span class="version-title">Injuries in the log, a party panel for the GM, and a sheet in five parts</span>
+        </summary>
+        <ul>
+        <li>Taking, healing, reopening, changing or removing an Injury now posts to the Rolls and Actions log, so the table sees who got hurt and who got patched up. Damage was the last consequential thing at the table that happened silently.</li>
+        <li>Injuries still have no mechanical effect of their own. Nothing here changes a number: an Injury is a Truth representing harm, and the Spirit you spend to avoid one was already logged.</li>
+        <li>Renaming an Injury &mdash; which is how the rules treat one, turning Bleeding into Bandaged Wound &mdash; posts once when you finish typing, not once per letter.</li>
+        <li>Heal and Treat are the same control. Pressing Heal moves the Injury into Healed Injuries and says so in the log.</li>
+        <li>Added a Party panel to the roller, visible only to the GM. It lists every character on a token in the scene with their Spirit and whether they have caught up with the rests and scene boundaries you have called.</li>
+        <li>A character reads as Caught up, Behind, or Not synced. Behind names what it is waiting on, so &quot;Waiting on Bed&quot; tells you who to chase. Not synced means the character has never met this room and has nothing to catch up on &mdash; a new character is not behind.</li>
+        <li>Opening the roller with a token already selected now reads that token straight away. It used to show nothing until you clicked something else.</li>
+        <li>The play sheet is now five clearly separated sections: Character, Actions Talents &amp; Abilities, Items and Equipment, Growth, and Share Code. Nothing moved relative to anything else &mdash; the same sections in the same order, grouped so the page reads as five things instead of one long column.</li>
+        <li>Character Share Code is its own titled section at the foot of the sheet.</li>
+        <li>Starting Equipment and Item Catalogue now start collapsed. Open one and it stays open while you work.</li>
+        <li>Removed the Shared Roll Room. It needed a server that was never set up, and its Connect button could only ever fail. Rolls have reached the table through Owlbear since v1.12, which needs no server at all.</li>
+        <li>Requires extension 0.9.0. The install link is unchanged, so no reinstall is needed.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.19B</span>
+          <span class="version-title">Nanobarrier fix and catch-up improvements</span>
+        </summary>
+        <ul>
+        <li>Fixed Nanobarrier doing nothing. Sentinels are granted it automatically, and the sheet was not counting an automatically granted talent as one you have, so every press was silently ignored and the cost never moved off Free.
+        <li>Sheets now catch up the moment they are opened, instead of waiting until you rolled or pressed something.
+        <li>When your sheet catches up, it posts to the log so the table can see who has received a rest and who has not.
+        <li>The catch-up entry carries the detail — Spirit regained, items recharged — rather than only naming what the GM called.
+        <li>A rest that restores no Spirit no longer says "regained 0 Spirit".
+        <li>GM table control buttons now ask for confirmation. The first press arms the button, the second sends it, and it disarms itself after a few seconds.
+        <li>Adjusting Momentum or Threat with the roller's own buttons now posts to the log, attributed to whoever pressed them.
+        <li>Requires extension 0.8.1.
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.19</span>
+          <span class="version-title">GM table controls</span>
+        </summary>
+        <ul>
+        <li>Added a Table Controls panel to the roller, visible only to the GM, with buttons for Breather, Break and Bed rests and for End Scene, New Session and New Adventure.
+        <li>Pressing one applies it to every attached character, not just the sheets that happen to be open.
+        <li>A character whose sheet was closed catches up the next time it is opened, and is told what was called.
+        <li>Catching up after several missed presses applies the strongest one once. Three missed Bed rests is one Bed rest.
+        <li>A new character attached to a token does not retroactively take rests it was never present for.
+        <li>The GM calling a rest appears once in the log, attributed to the GM, rather than once per character.
+        <li>Requires extension 0.8.0. The install link is unchanged, so no reinstall is needed.
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.18</span>
+          <span class="version-title">Nanobarrier, damage buttons, and item charge logging</span>
+        </summary>
+        <ul>
+        <li>Added Nanobarrier as a tracked ability with all three options — Barrier, Shock and Display — each showing what the next activation will cost.
+        <li>Nanobarrier's first use in a scene is free, the second costs 1 Threat, and each use after that costs one more. All three options draw on the same count.
+        <li>The cost resets at End Scene, and therefore also at New Session and New Adventure.
+        <li>Replaced the single extra-damage button with six, one per Momentum, labelled so both the cost and the damage are visible before you commit.
+        <li>Damage buttons show doubled damage for characters with Precision Firepower, with a note naming the talent responsible.
+        <li>Discharging or recharging a Powered item now posts to the Rolls and Actions log.
+        <li>A rest posts a single summary line rather than one entry per item recharged.
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.17</span>
+          <span class="version-title">Rolls and Actions log, item buttons, and Start Over</span>
+        </summary>
+        <ul>
+        <li>The shared roll log became the Rolls and Actions log: it now records ability uses, item uses, and every change to the Momentum and Threat pools alongside rolls.</li>
+        <li>Log entries name who acted and what they used, so "Kell &mdash; Second Wind &mdash; spent 3 Momentum, regained 2 Spirit" reads as one line instead of a number moving on its own.</li>
+        <li>Added buttons for the five items whose rules carry a cost: Communicator, Tactical Lens, Combat Automed and Emergency Trauma Kit add Threat; Combat Medkit spends Momentum. These were previously notes asking you to move the counter yourself.</li>
+        <li>An item button you cannot currently afford is shown greyed out rather than hidden, so you can still see the item has the ability.</li>
+        <li>Manual adjustments to the Threat counter now post to the log.</li>
+        <li>Added a Start Over button beside Save Local on a finished sheet. It warns first if the character has not been saved locally.</li>
+        <li>Moved Starting Equipment above the Item Catalogue in Inventory &amp; Equipment.</li>
+        <li>Removed the Shared Roll Room panel, which relied on a server that is not going to be available.</li>
+        <li>Confirmed that New Adventure refreshes I Know a Guy, which it already did.</li>
+      </ul>
+      </details>
+    </article>
+
+    <h3 class="era-heading">Owlbear Rodeo</h3>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.16</span>
+          <span class="version-title">One sheet, and no more loading from elsewhere</span>
+        </summary>
+        <ul>
+        <li>The Owlbear character sheet and the character creator became a single page, so the sheet you play on and the sheet you build on can no longer drift apart.</li>
+        <li>Fixed: opening a character from a token could quietly fall back to the ordinary creator, showing the import screen instead of your character. Anything you changed was saved to your browser rather than to the token, and your rolls and Momentum never reached the table.</li>
+        <li>Fixed: rolls made from the sheet were reaching the shared log without their Difficulty, so they always read as if you had rolled against Difficulty&nbsp;0.</li>
+        <li>The creator is now completely self-contained. It loads nothing from anywhere, which means it also works offline and from a saved copy on your own machine.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.15</span>
+          <span class="version-title">Threat goes where it is supposed to go</span>
+        </summary>
+        <ul>
+        <li>Adrenaline Rush and I Know a Guy no longer just tell you to add Threat. Played inside Owlbear Rodeo, they add it to the table's Threat pool for you.</li>
+        <li>There is a Threat counter beside your other resources when you are playing on a token, showing the table's current Threat. Use the plus button for anything else that tells you to add Threat, such as a Communicator message or a Tactical Lens signal.</li>
+        <li>Momentum on an Owlbear sheet is the group's pool, not a private counter. Spending it in any way &mdash; the buttons, the number field, or an ability &mdash; moves the shared total.</li>
+      </ul>
+      <p class="entry-note">In a normal browser tab nothing changes: the sheet still tells you the number and leaves the pool to your Game Master, because there is no shared table to write to.</p>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.14</span>
+          <span class="version-title">Quicker rolling, and dice that tell you the result</span>
+        </summary>
+        <ul>
+        <li>Click any Attribute or Skill to select it for a test. The one you picked is highlighted, and an Attribute shut down by Exhaustion cannot be picked.</li>
+        <li>The Dice Roller moved up to sit directly beneath your Attributes, Skills and Resources, instead of near the bottom of the sheet.</li>
+        <li>There is a Difficulty setting next to the Roll button. Your result now says whether the test passed and how much Momentum you gained, rather than leaving you to work it out.</li>
+        <li>The share code block leads with Copy Code and Save Local, and the code itself sits in a small scrolling box below rather than filling the page.</li>
+        <li>Momentum earned on a roll is reported, not spent for you. You can use it straight away or save it to the group pool, up to the usual maximum of 6.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.13</span>
+          <span class="version-title">The last of the sheet travels with your code</span>
+        </summary>
+        <ul>
+        <li>Your temperament's Drive and Attitude now travel with your code, alongside the exhaustion trigger that was already there.</li>
+        <li>Your archetype goal, your starting equipment list and your origin's special note come across too.</li>
+        <li>Coin, Growth and Momentum maxima are included, along with the "equipped&nbsp;+N" footnote that explains where a raised maximum came from.</li>
+        <li>Powered items carry their recharge timing, so a tabletop can tell a Breather item from a Bed one.</li>
+        <li>Codes stopped growing with your inventory. They sit at roughly 10&nbsp;kB no matter how much gear you carry.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.12</span>
+          <span class="version-title">Abilities, descriptions and exhaustion in your code</span>
+        </summary>
+        <ul>
+        <li>Exhaustion states travel with your code. A tabletop that reads it can show all four, let you toggle them, and grey out the attribute each one shuts down.</li>
+        <li>Your origin abilities now come across with their full rules text, so you can read what they do without opening the creator.</li>
+        <li>Origin, archetype and temperament descriptions are included, along with your temperament's exhaustion clause.</li>
+        <li>Bonds now carry the bond type's name and description rather than just a label.</li>
+        <li>Codes grew to around 9&nbsp;kB. Older codes still work; you just will not get exhaustion tracking until you export a fresh one.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.11</span>
+          <span class="version-title">Character codes a virtual tabletop can read</span>
+        </summary>
+        <ul>
+        <li>Your code now includes your finished numbers: attributes, skills, Spirit and Supply maxima, tech level, your talents and your equipment with damage, injury, protection and qualities.</li>
+        <li>This means another tool can display your character without needing a copy of the rules. Paste your code in once and it knows who you are.</li>
+        <li>Everything you change during play &mdash; Spirit spent, injuries taken, truths written, gear discharged &mdash; can be carried back here by pasting the code in again. Nothing is lost in the trip.</li>
+        <li>Codes roughly doubled in length. Older codes still load normally, and codes made from this version onward still work in older copies of the creator.</li>
+      </ul>
+      </details>
+    </article>
+
+    <h3 class="era-heading">The character creator</h3>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.10</span>
+          <span class="version-title">Rest, and abilities you can spend</span>
+        </summary>
+        <ul>
+        <li>Added tracked uses for Haggler, Just What They Need, I Know a Guy, Ambush, and Tough, each with a Use control and a used state.</li>
+        <li>Added New Session and New Adventure controls beside End Scene, so abilities limited to a session or an adventure refresh at the right boundary.</li>
+        <li>Moved Tech Level up to the name line and stacked the Origin, Archetype, and Temperament tags, giving the Goals boxes more room.</li>
+        <li>Origin, Archetype, and Temperament tooltips now show what each one is, instead of repeating its own label.</li>
+        <li>Expanded panels no longer snap shut and the page no longer jumps when you equip an item, take a rest, or confirm an action.</li>
+        <li>Fixed the version link in the header, which was showing an older release than the one you were using.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.09</span>
+          <span class="version-title">Actions, Momentum, Powered items, and a rebuilt layout</span>
+        </summary>
+        <ul>
+        <li>Added expandable reference cards for all core actions, including Counterattack.</li>
+        <li>Added confirmed Momentum spending for Second Wind, Create Truth, Ask a Question, Damage, Reduce Time, Follow-Up, and Counterattack.</li>
+        <li>Added once-per-scene Adrenaline Rush controls and an End Scene reset.</li>
+        <li>Added an interactive Spear's Blend scene effect and automatic Bold and Spear's Blend Spirit bonuses.</li>
+        <li>Added Breather, Break, and Bed controls which restore Spirit and recharge eligible Powered item stacks.</li>
+        <li>Added Charged and Discharged state tracking for Powered items and weapons, including manual handling for Powered (Special).</li>
+        <li>Added Custom Items and Knowledge Fragments as persistent free-text lists.</li>
+        <li>Fixed starting Spirit and Supply Point initialization and added a confirmed Supply Point reset.</li>
+        <li>Relabeled Character Truths to Truths, added Truth type guidance, and connected action controls to Truth creation.</li>
+        <li>Reorganized the finished sheet and refined the identity header, resource layout, and play controls.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.08</span>
+          <span class="version-title">Item effects, resources, Truths, Injuries, and catalogue refinement</span>
+        </summary>
+        <ul>
+        <li>Full descriptions added for all equipment, vehicles, and Common GLIF patterns.</li>
+        <li>Item Catalogue and Owned Items can show expanded item descriptions.</li>
+        <li>Owned Items can be marked as equipped or unequipped.</li>
+        <li>Only one armor item can be equipped at a time.</li>
+        <li>Handy armor increases maximum Supply Points while equipped.</li>
+        <li>Equipped situational item reminders appear on relevant Attributes, Skills, and Dice Roller choices.</li>
+        <li>Resource counters were cleaned up and given rules tooltips.</li>
+        <li>Growth maximum corrected to 10 and Coin maximum set to 20.</li>
+        <li>Character Truths changed into editable saved fields.</li>
+        <li>Injuries added as editable saved fields.</li>
+        <li>Tech Level and Rarity tags now explain their specific levels.</li>
+        <li>Item Catalogue tooltip clipping and horizontal scrollbar issues fixed.</li>
+        <li>Clear Search added to reset catalogue text and filters.</li>
+        <li>Finalized sheet layout cleaned up.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.07</span>
+          <span class="version-title">Portraits and owned item display</span>
+        </summary>
+        <ul>
+        <li>Character Portrait Web Address field added.</li>
+        <li>Live portrait preview added while editing character information.</li>
+        <li>Portraits now appear in finalized character sheet headers.</li>
+        <li>Portrait addresses are saved in character data, share codes, imports, and local saves.</li>
+        <li>Portrait validation and Clear Portrait support added.</li>
+        <li>Supportive Bond and Rivalry tooltips updated with their mechanical benefits.</li>
+        <li>Owned Items received a disclosure indicator and cleaner expanded text.</li>
+        <li>Item Catalogue search no longer loses focus while typing.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.06</span>
+          <span class="version-title">Changelog, sheet order, and catalogue filters</span>
+        </summary>
+        <ul>
+        <li>Changelog page added and linked from the version label.</li>
+        <li>Back to Character Creator links added to the changelog.</li>
+        <li>Growth moved near the end of the character sheet.</li>
+        <li>Character Share Code moved to the bottom.</li>
+        <li>Item Catalogue subfilters now update correctly when the main category filter changes.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.05</span>
+          <span class="version-title">Exhaustion blocks rolls, and better catalogue filters</span>
+        </summary>
+        <ul>
+        <li>Exhaustion now disables rolls using the affected attribute.</li>
+        <li>Exhausted attributes are struck through in the Dice Roller dropdown.</li>
+        <li>Item Catalogue sub-filters now appear after selecting a main category, grouped by manufacturing source such as Hand-Made, Security, or Military.</li>
+        <li>Character Share Code moved to the second-to-last section.</li>
+        <li>Growth moved to the bottom of the sheet.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.04</span>
+          <span class="version-title">Local saves, finalized sheets, and live resources</span>
+        </summary>
+        <ul>
+        <li>Added local saved characters in browser local storage.</li>
+        <li>Added finalized character mode with an Edit Character return path.</li>
+        <li>Moved Character Share Code to a collapsible bottom section.</li>
+        <li>Limited the import field to the opening screen.</li>
+        <li>Added dynamic Spirit, Supply Points, Coin, Growth, and Momentum fields.</li>
+        <li>Expanded equipment, item, vehicle, GLIF, and Bond tooltips.</li>
+        <li>Made Item Catalogue and Starting Equipment collapsible.</li>
+        <li>Added clickable Exhaustion States.</li>
+        <li>Made inventory items expandable.</li>
+      </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">v.1.03</span>
+          <span class="version-title">The catalogue, the dice, and the first shared rolls</span>
+        </summary>
+        <ul>
+        <li>Added full skill names on the sheet.</li>
+        <li>Added attribute and skill tooltips.</li>
+        <li>Added the full item catalogue, all 118 items, searchable and filterable.</li>
+        <li>Added the Exhaustion States section with the attribute each state shuts down.</li>
+        <li>Added the Dice Roller.</li>
+        <li>Added shared roll room support.</li>
+        <li>Added the collapsible share code.</li>
+        <li>Fixed character-code import, which had been silently dropping names, goals, and full character state for some codes.</li>
+      </ul>
+      </details>
+    </article>
+  </section>
+
+  <div class="nav-row">
+    <a class="btn-link" href="./">Back to Character Creator</a>
+    <a class="btn-link" href="./UPGRADE_NOTES.md">Technical Notes</a>
+  </div>
+
+  <footer class="footer">Dreams &amp; Machines Character Creator &mdash; Changelog</footer>
+</main>
+</body>
+</html>
