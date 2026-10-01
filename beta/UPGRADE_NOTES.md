@@ -153,6 +153,13 @@ including the group's 1 Momentum.
 - Proved by breaking it: public spend reasons, `readRushed()` ignoring the scene, the
   sheet ignoring the rush, and the header wrap each fail their tests in `out/`.
 
+## Testing it before it is live
+
+Staged as a BETA with `tools/stage-beta.mjs` (new): `beta/` on `main` in both repos,
+namespaces suffixed `-beta`, live files untouched. Install
+`https://gsgrimoire.github.io/dnm-obr/beta/manifest.json` in a test room. See the skill's
+deploy section.
+
 ## Live checks
 
 - Reload the ROOM. Then as GM: GM Tools appears under Table Controls; as a player it does
