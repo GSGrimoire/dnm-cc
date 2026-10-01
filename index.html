@@ -2007,6 +2007,9 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
   from { transform: scaleX(1); }
   to   { transform: scaleX(0); }
 }
+/* v2.4. A rest the GM has rushed away. Dimmed rather than disabled, so the tooltip that
+   says why still opens on hover. */
+.confirm-btn.rest-rushed { opacity: .45; border-style: dashed; cursor: not-allowed; }
 .confirm-btn:disabled,
 .confirm-btn[data-spent="1"] {
   opacity: 0.35;
@@ -2848,7 +2851,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -5200,7 +5203,14 @@ function renderPlayControls() {
   const restBtns = Object.values(REST_TYPES).map(r => {
     const amount = getRestSpiritAmount(r);
     const wandererNote = amount !== r.spirit ? ` Wanderer increases this recovery to ${amount} Spirit.` : '';
-    return `<button class="confirm-btn dm-tip" tabindex="0" onclick="confirmClick(this, () => takeRest('${r.key}'), 'Confirm?')">${escHtml(r.name)} +${amount}<span class="dm-tip-body"><span class="dm-tip-title">${escHtml(r.name)} — regain ${amount} Spirit</span><span class="dm-tip-desc">${escHtml(r.desc + wandererNote)} Powered items and limited-use abilities with a recharge time no longer than this rest are also refreshed.</span></span></button>`;
+    // v2.4. Greyed while the GM has rushed the table. The tooltip says why, because a
+    // greyed rest with no reason reads as the sheet being broken. Not `disabled`: a
+    // disabled button gets no hover in some browsers, and the hover is the explanation.
+    // A press is answered by takeRestManual()'s toast instead.
+    if (roomRushed) {
+      return `<button class="confirm-btn dm-tip rest-rushed" tabindex="0" aria-disabled="true" onclick="takeRestManual('${r.key}')">${escHtml(r.name)} +${amount}<span class="dm-tip-body"><span class="dm-tip-title">Rushed — no ${escHtml(r.name)}</span><span class="dm-tip-desc">The GM has rushed the table: the next scene begins only moments later, so there is no time to rest (GM Guide p.101). Rests come back at the next End Scene.</span></span></button>`;
+    }
+    return `<button class="confirm-btn dm-tip" tabindex="0" onclick="confirmClick(this, () => takeRestManual('${r.key}'), 'Confirm?')">${escHtml(r.name)} +${amount}<span class="dm-tip-body"><span class="dm-tip-title">${escHtml(r.name)} — regain ${amount} Spirit</span><span class="dm-tip-desc">${escHtml(r.desc + wandererNote)} Powered items and limited-use abilities with a recharge time no longer than this rest are also refreshed.</span></span></button>`;
   }
   ).join('');
   return `<div class="play-controls no-print">
@@ -7897,6 +7907,43 @@ function readRoomEpochs(roomState) {
   return out;
 }
 
+// v2.4. Mirrors readRushed() in dnm.js: the GM spent 2 Threat to deny the table its rest
+// between scenes (GM Guide p.101). The room holds the scene epoch the rush was set in,
+// and the table is rushed for as long as the room is still in that scene — so the next
+// End Scene lifts it with nothing to clear. A room from before extension 1.5 has no
+// rushed key, which reads as not rushed.
+function readRoomRushed(roomState) {
+  const raw = roomState && roomState.rushed;
+  if (!raw || typeof raw !== 'object') return false;
+  const at = Math.round(Number(raw.scene));
+  if (!Number.isFinite(at)) return false;
+  return at === readRoomEpochs(roomState).scene;
+}
+
+// Set by the module block from room metadata. Standalone there is no room and no GM to
+// rush anyone, so it stays false.
+let roomRushed = false;
+function setRoomRushed(value) {
+  const next = !!value;
+  if (next === roomRushed) return false;
+  roomRushed = next;
+  return true;
+}
+
+// The rest buttons go through this rather than takeRest() directly. A GM-pushed rest
+// does not: when the GM calls a Bed rest the GM has decided there is time, and the
+// catch-up applies it whatever this sheet last heard about a rush.
+//
+// It is a reminder, not a lock — this runs in the player's own tab. A rest taken anyway
+// still reaches the shared log, which is where the GM would see it.
+function takeRestManual(key) {
+  if (roomRushed) {
+    showToast('The GM has rushed the table: no time to rest before the next scene.', 'info');
+    return;
+  }
+  return takeRest(key);
+}
+
 // ============================================================
 // BONDS (v1.26)
 // ============================================================
@@ -8075,6 +8122,35 @@ function applyPendingBondEffects(queue) {
       if (state.character.temperament !== 'maverick') return;
       amount = 1;
       why = `Maverick Drive — the GM spent ${Math.max(0, Math.round(Number(fx.amount) || 0))} Threat at once`;
+    } else if (fx.kind === 'adversity' || fx.kind === 'reversal') {
+      // v2.4. Both name the characters who were on tokens in the scene when the GM
+      // pressed. A character elsewhere is not facing this adversity and was not there
+      // for the reversal. An effect naming nobody reaches everyone, which is what a
+      // sender that cannot read the scene sends.
+      const targets = Array.isArray(fx.targets) ? fx.targets : [];
+      if (targets.length && !targets.some(t => bondNamesEqual(t, state.character.name))) return;
+      if (fx.kind === 'adversity') {
+        // GM Guide p.125: "Characters gain growth when they face adversity, in any
+        // situation where you spend three or more Threat in one go." Growth, not Spirit,
+        // so it is applied here and does not join the Spirit total below. Capped at the
+        // most unspent Growth a character may hold.
+        const maxGrowth = getResourceMaxes().growth;
+        const before = getGrowthRemaining();
+        const available = clampNumber(before + 1, 0, maxGrowth);
+        state.character.growthPool = getGrowthSpent() + available;
+        state.character.currentGrowth = available;
+        const spent = Math.max(0, Math.round(Number(fx.amount) || 0));
+        kinds.add('adversity');
+        lines.push(available > before
+          ? `Adversity — the GM spent ${spent} Threat at once — +1 Growth`
+          : `Adversity — the GM spent ${spent} Threat at once — already at ${maxGrowth} unspent Growth`);
+        return;
+      }
+      // GM Guide p.115: "let each of the PCs recover half their maximum Spirit when the
+      // scene ends." The queue carries no amount because only this sheet knows its own
+      // maximum. Half, rounded down.
+      amount = Math.floor(maxSpirit / 2);
+      why = 'Reversal — half your maximum Spirit';
     } else {
       return;
     }
@@ -8096,8 +8172,14 @@ function applyPendingBondEffects(queue) {
   saveCharacterLocal(true);
   // v1.28. The log entry is named for what actually paid out. A drive is not a bond
   // and calling it one would send a Maverick looking for a bond they never wrote.
-  const onlyDrive = kinds.size === 1 && kinds.has('drive');
-  const label = onlyDrive ? 'Drive' : (kinds.has('drive') ? 'Bond & Drive' : 'Bond');
+  // v2.4: the same for the two GM payouts, which are neither.
+  const bondish = ['rivalry', 'grant'].some(k => kinds.has(k));
+  const named = [];
+  if (bondish) named.push('Bond');
+  if (kinds.has('drive')) named.push('Drive');
+  if (kinds.has('reversal')) named.push('Reversal');
+  if (kinds.has('adversity')) named.push('Growth');
+  const label = named.length ? named.join(' & ') : 'Bond';
   return { changed: true, gained, detail: lines.join('; '), label };
 }
 
@@ -10508,9 +10590,19 @@ function announceThreatSpendDrive(pool, delta) {
   if (delta > -DRIVE_THREAT_SPEND_MIN) return;
   const spent = Math.abs(delta);
   sendBondEffect({ kind: "drive", drive: "maverick", amount: spent });
+  // v2.4. Adversity Growth (GM Guide p.125), the same spend read the same way the
+  // extension reads it. The GM's switch for it lives in the GM tools' settings, which
+  // share this origin's localStorage; absent means on, because it is the rule. The sheet
+  // cannot read the scene, so the effect names no targets and reaches every sheet.
+  let award = true;
+  try {
+    const st = JSON.parse(localStorage.getItem(`${EXT_ID}/gm-settings`) || "{}");
+    award = !st || st.awardGrowth !== false;
+  } catch (err) { award = true; }
+  if (award) sendBondEffect({ kind: "adversity", amount: spent, targets: [] });
   // The GM is told as well. A drive firing silently on somebody else's sheet is the
   // thing the shared log exists to prevent.
-  showToast(`Spent ${spent} Threat at once — every Maverick regains 1 Spirit.`, "warning");
+  showToast(`Spent ${spent} Threat at once — every Maverick regains 1 Spirit${award ? ", and every character gains 1 Growth" : ""}.`, "warning");
 }
 
 let tokenId = null;
@@ -10979,7 +11071,10 @@ function adoptRoom(meta) {
   const nextCompAt = found && typeof found.compAt === "number" ? found.compAt : 20;
   const compChanged = nextCompAt !== obrCompAt;
   obrCompAt = nextCompAt;
-  const changed = next !== roomMomentum || nextThreat !== obrThreat || compChanged;
+  // v2.4. Whether the GM has rushed the table. The rest buttons read it at render, so a
+  // change has to count as one worth re-rendering for.
+  const rushChanged = setRoomRushed(readRoomRushed(found));
+  const changed = next !== roomMomentum || nextThreat !== obrThreat || compChanged || rushChanged;
   roomMomentum = next;
   obrThreat = nextThreat;
   // v1.19B: the room state is remembered even when the character is not loaded yet.
@@ -11055,7 +11150,8 @@ function reconcileBonds(roomState) {
   if (!result.detail) return result;
   const label = result.label || 'Bond';
   sendAction({ label, detail: result.detail });
-  showToast(`${label === 'Drive' ? 'Your Drive' : 'A bond'} paid out: ${result.detail}.`, 'success');
+  const who = label === 'Drive' ? 'Your Drive' : label === 'Bond' ? 'A bond' : label;
+  showToast(`${who} paid out: ${result.detail}.`, 'success');
   return result;
 }
 

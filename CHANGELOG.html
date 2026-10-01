@@ -303,9 +303,9 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.3 &middot; extension 1.4C</h1>
-    <p class="lead">The table now has an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
-    <p class="lead" style="font-size:.86rem;opacity:.75;">The initiative tracker is an <em>extension</em> update. The character creator is unchanged at 2.3 &mdash; you need extension 1.4, which means reloading the room.</p>
+    <h1>Version v.2.4 &middot; extension 1.5</h1>
+    <p class="lead">The GM has a toolbox: every way the Gamemaster&apos;s Guide gives the GM to gain and spend Threat, one press each, with the book&apos;s own words on hover; Threat that ticks up every round; a hazard builder; and an NPC roster with stat blocks that can sit on tokens. Before that: the table got an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
+    <p class="lead" style="font-size:.86rem;opacity:.75;">The GM tools are an <em>extension</em> update, and the sheet learned three new things to go with them. You need extension 1.5, which means reloading the room.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -314,6 +314,46 @@ h1 {
     </div>
 
     <div class="grid">
+      <article class="feature-card">
+        <h3>GM Tools</h3>
+        <p>GM only. A new panel under Table Controls listing every way the GM gains and spends Threat in Chapter 4 of the Gamemaster&apos;s Guide &mdash; Escalation, Dithering, Reinforcements, Reveal, Change of Circumstances and the rest. Hover any of them for the book&apos;s exact words and the page. Every press asks first.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Pop It Out</h3>
+        <p>GM only. <em>Pop out</em> puts the GM tools in their own panel, docked and sized the way the character sheet is: nine positions, drag an edge to resize, zoom in and out.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Threat Every Round</h3>
+        <p>GM only. Set up tickers &mdash; a fire spreading, an alarm, reinforcements on the way &mdash; each adding 0 to 6 Threat. <em>Next Round</em> adds them up and asks before it does. Each gets its own line in the log, and a hidden one just reads &ldquo;Threat rises&rdquo;.</p>
+      </article>
+      <article class="feature-card">
+        <h3>What the Table Sees</h3>
+        <p>Gains are announced by name, as the book asks. Spends show the table only that Threat was spent: the GM&apos;s own log keeps the reason, so a Reveal does not give itself away.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Rushed</h3>
+        <p>The GM can end a scene with no time to rest (2 Threat). Breather, Break and Bed grey out on every sheet until the next scene ends, and the tooltip says why.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Reversal</h3>
+        <p>Once per adventure the GM can end a scene with the situation unresolved. Everyone who was there gets half their maximum Spirit back on their sheet, automatically.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Growth From Adversity</h3>
+        <p>When the GM spends 3 or more Threat at once, every character in the scene gains 1 Growth, as the book says. It lands on the sheet by itself. The GM can switch it off.</p>
+      </article>
+      <article class="feature-card">
+        <h3>NPCs and Stat Blocks</h3>
+        <p>GM only. A roster of adversaries the GM can add to, edit, export and import. Put one into the fight hidden, then reveal it &mdash; Menacing and reinforcement Threat are added for you. A few placeholder samples are included until the book&apos;s are entered.</p>
+      </article>
+      <article class="feature-card">
+        <h3>NPCs on Tokens</h3>
+        <p>GM only. Attach a stat block to a token, select the token, and the roller fills in its numbers. The token carries nothing a player could read: no name, no stats.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Hazards and Starting Threat</h3>
+        <p>GM only. Build a hazard from the book&apos;s table and the cost adds itself up. Pick the adventure&apos;s stakes and set the starting Threat for the number of characters.</p>
+      </article>
       <article class="feature-card">
         <h3>Initiative</h3>
         <p>The GM presses <em>Start Initiative</em> and the Party panel becomes the turn order. Names grey out as people act, <em>Next Round</em> lights up once everyone has gone, and the round number counts up. Everyone can see it.</p>
@@ -400,7 +440,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.3 needs extension 1.4C; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
+    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.4 needs extension 1.5; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
   </section>
 
   <section class="panel">
@@ -411,6 +451,30 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">v.2.4 &middot; 1.5</span>
+          <span class="version-title">GM tools</span>
+        </summary>
+        <ul>
+        <li><strong>GM Tools.</strong> A new GM-only panel under Table Controls with every way Chapter 4 of the Gamemaster&apos;s Guide gives the GM to gain and spend Threat. Hover anything for the book&apos;s exact wording and the page number. Every button that changes Threat or reaches the table asks for a second press.</li>
+        <li><strong>Pop out.</strong> The same tools in their own docked panel, placed, sized and zoomed the way the character sheet is. <em>Bring back</em> returns them to the roller.</li>
+        <li><strong>Threat each round.</strong> Up to eight tickers, each 0 to 6, each on or off, public or hidden, for this scene or pinned. <em>Next Round</em> shows the total, asks first, and writes one log line per ticker.</li>
+        <li><strong>Private reasons.</strong> The table&apos;s log shows gains by name and spends only as &ldquo;Threat spent&rdquo;. The GM sees the full reason in its place, marked <em>Only you</em>.</li>
+        <li><strong>Rushed.</strong> End the scene with no time to rest, for 2 Threat. Every rest is greyed &mdash; on the sheets and in Table Controls &mdash; until the next End Scene, or until the GM lifts it.</li>
+        <li><strong>Reversal.</strong> Once per adventure: ends the scene unresolved for 2 Threat per character present, and everyone who was there recovers half their maximum Spirit on their sheet.</li>
+        <li><strong>Growth from adversity.</strong> Spending 3 or more Threat at once gives each character in the scene 1 Growth, up to the usual 10 unspent. The GM can switch this off in Adventure setup.</li>
+        <li><strong>NPC roster.</strong> Normal and Major stat blocks, custom ones for homebrew or other adventures, export and import. Into the fight hidden, then <em>Reveal</em> (adds Menacing) or <em>Arrives</em> (charges reinforcements too). Major NPCs track Personal Threat.</li>
+        <li><strong>NPCs on tokens.</strong> The token gets an anonymous id and nothing else. Select it as the GM and the roller fills in its numbers; a player selecting it sees nothing.</li>
+        <li><strong>Hazard builder, starting Threat, Undo,</strong> and a cheat sheet of the rest of Chapter 4.</li>
+        <li>The four sample NPCs are placeholders in the book&apos;s stat block shape, not the book&apos;s adversaries. Delete them once you have entered Chapter 5&apos;s.</li>
+        <li>Fixed: an empty bar sat above the roller&apos;s Character box whenever no token was selected.</li>
+        <li>Requires extension 1.5. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">1.4C</span>
           <span class="version-title">Adversaries start hidden</span>

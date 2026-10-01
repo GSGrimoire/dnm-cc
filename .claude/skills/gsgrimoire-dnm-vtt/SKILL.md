@@ -399,6 +399,31 @@ to check whether the block is genuinely empty before filling it.
 deleted.** `layout.test.mjs` opens the catalogue before measuring, and separately records
 that it really was empty first.
 
+## GM Tools (1.5 / creator 2.4)
+
+`gmrules.js` is the rules as data — every cost, quote and page — and is the ONLY place a
+cost lives. `gmpanel.js` draws the panel in the roller and in the pop-out (`gm.html`)
+against a small `host`, and holds the table actions. Read UPGRADE_NOTES 2.4 / 1.5 before
+changing it. The rules that have to hold:
+
+- **Quotes are the book's, verbatim, with the PRINTED footer page** (the chapter's own
+  cross-references run two pages early). Requested explicitly; do not paraphrase inside
+  the quote marks.
+- **Spends are public as "Threat spent"; the reason is the GM's.** The private line in
+  `…/gmlog/<room>` SHADOWS its public twin by id. Gains are public by name. Tickers are
+  hidden unless marked public. The test is that the reason appears in nothing sent.
+- **Every button that changes Threat or reaches the table takes two presses.** Steppers
+  and setup do not.
+- **Tickers fire on the GM's Next Round press, never in the reducer** (which runs on every
+  client).
+- **`rushed` is a scene number stamped by the reducer**, read by `readRushed()` in the
+  extension and `readRoomRushed()` in the creator. Change one, change both.
+- **An NPC token holds `{ v, id }` and nothing else.** The roster is in the GM's browser.
+- **Never prune the fight list on render** — the room may not have echoed the new row yet.
+  It is cleared at End Scene and End.
+- `adversity` and `reversal` are GM-only bond kinds carrying `targets`; no targets means
+  everyone.
+
 ## The trust boundary
 
 Owlbear's broadcast channel is open to every client in the room. **A check that runs in the
@@ -494,7 +519,7 @@ touching the trust boundary — ask before building.
 
 ## Testing
 
-`dnm-cc/tests/` holds six suites. They read the two repos from `dnm-cc/out/`, which is
+`dnm-cc/tests/` holds nine suites. They read the two repos from `dnm-cc/out/`, which is
 gitignored scaffolding, not source — stage it before every run or you will test the last
 release:
 
@@ -503,7 +528,7 @@ cd dnm-cc
 npm install jsdom playwright --no-save     # both, together: --no-save prunes the other
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
-for t in codec creator embedded party dock security layout; do node tests/$t.test.mjs; done
+for t in codec creator embedded party dock security layout rollerui gmtools; do node tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -522,6 +547,8 @@ and playwright in ONE command or the next run dies on a missing module.
   panel is extension code and no suite could reach it at all before that
 - `codec.test.mjs` — the DM2 payload codec, fuzzed against zlib in both directions, plus
   a character-for-character comparison of the two vendored copies
+- `gmtools.test.mjs` — the GM tools, in Chromium with the stub SDK AND the real reducer
+  standing in for the GM's background page, so a press reaches the room and comes back
 - `rollerui.test.mjs` — the only suite that RUNS `roller.js`. Chromium, with the
   vendored SDK swapped for a stub in a staged copy, so the test can push a scene, a
   room and a role at it. Added in 1.4B and it found four real bugs on its first run,

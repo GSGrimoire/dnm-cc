@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 2.3", g("APP_VERSION") === "2.3");
+ok("APP_VERSION is 2.4", g("APP_VERSION") === "2.4");
 
 // -------------------------------------------------------------
 // Fixture
@@ -859,6 +859,62 @@ const DM1_EXPECTED = {
 
   g("state.character.temperament = Object.keys(DM_DATA.temperaments)[0];");
 
+  // --- v2.4: Reversal, from the GM tools (GM Guide p.115) ---
+  // "let each of the PCs recover half their maximum Spirit when the scene ends." The
+  // queue carries no amount; the sheet halves its own maximum.
+  const revFx = (extra) => ({ id: `rv${Math.random()}`, t: Date.now(), kind: "reversal", from: "GM", targets: ["Fixture", "Kestrel"], ...extra });
+  {
+    const max = setUp([], "Fixture");
+    g("state.character.currentSpirit = 0");
+    result = drain([revFx()]);
+    ok(`Reversal restores half the maximum Spirit (${Math.floor(max / 2)} of ${max})`,
+      spirit() === Math.floor(max / 2) && result.gained === Math.floor(max / 2));
+    ok("and is named a Reversal in the log", result.label === "Reversal");
+    setUp([], "Fixture");
+    g("state.character.currentSpirit = 0");
+    drain([revFx({ targets: ["Kestrel", "Nadia"] })]);
+    ok("a Reversal naming other characters pays this one nothing", spirit() === 0);
+    setUp([], "Fixture");
+    g("state.character.currentSpirit = 0");
+    drain([revFx({ targets: [] })]);
+    ok("one naming nobody reaches everyone", spirit() === Math.floor(max / 2));
+    setUp([], "  fixture ");
+    g("state.character.currentSpirit = 0");
+    drain([revFx()]);
+    ok("names are matched the way bonds match them", spirit() === Math.floor(max / 2));
+  }
+
+  // --- v2.4: adversity Growth (GM Guide p.125) ---
+  const advFx = (extra) => ({ id: `ad${Math.random()}`, t: Date.now(), kind: "adversity", from: "GM", amount: 4, targets: ["Fixture"], ...extra });
+  {
+    setUp([], "Fixture");
+    const growth = () => g("getGrowthRemaining()");
+    g("setResource('growth', 2)");
+    const sp = spirit();
+    result = drain([advFx()]);
+    ok("adversity adds 1 Growth", growth() === 3);
+    ok("and no Spirit", spirit() === sp && result.gained === 0);
+    ok("the entry is named Growth and says why", result.label === "Growth" && /spent 4 Threat at once/.test(result.detail));
+    g("setResource('growth', getResourceMaxes().growth)");
+    const full = growth();
+    result = drain([advFx()]);
+    ok("Growth never goes past the unspent maximum", growth() === full);
+    ok("and the log says it was already full", /already at/.test(result.detail));
+    g("setResource('growth', 0)");
+    drain([advFx({ targets: ["Kestrel"] })]);
+    ok("adversity naming someone else pays nothing", growth() === 0);
+    // Spent Growth survives: the pool is spent + available, and only available moves.
+    g("setResource('growth', 1)");
+    const spentBefore = g("getGrowthSpent()");
+    drain([advFx()]);
+    ok("spending history is untouched", g("getGrowthSpent()") === spentBefore && growth() === 2);
+    // A Reversal and a drive and an adversity in one drain name all three.
+    g("state.character.temperament = 'maverick'; state.character.currentSpirit = 0;");
+    result = drain([revFx(), advFx(), driveFx()]);
+    ok(`one drain of three kinds is named for all of them (${result.label})`, result.label === "Drive & Reversal & Growth");
+    g("state.character.temperament = Object.keys(DM_DATA.temperaments)[0];");
+  }
+
   // --- the ally picker ---
   g(`(function(){
     state.character.name = 'Fixture';
@@ -1106,6 +1162,51 @@ const DM1_EXPECTED = {
     ok("and a re-render after closing builds no cards",
       g(`document.querySelectorAll('.cat-item').length`) === 0);
   }
+}
+
+// -------------------------------------------------------------
+// v2.4: Rushed (GM Guide p.101)
+// -------------------------------------------------------------
+// The room says the GM spent 2 Threat to deny the rest between scenes. The sheet's three
+// rest buttons are dimmed with a tooltip that says why, and a press is answered rather
+// than obeyed. A GM-pushed rest is NOT blocked: the GM has decided there is time.
+{
+  const room = (scene, rushedAt) => ({ epochs: { scene, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 }, rushed: rushedAt == null ? null : { scene: rushedAt } });
+  ok("a room with no rushed key is not rushed", g(`readRoomRushed({ epochs: { scene: 4 } })`) === false);
+  ok("a rush set in this scene holds", g(`readRoomRushed(${JSON.stringify(room(4, 4))})`) === true);
+  ok("the next End Scene lifts it", g(`readRoomRushed(${JSON.stringify(room(5, 4))})`) === false);
+  ok("a mangled rush reads as none", g(`readRoomRushed({ epochs: { scene: 4 }, rushed: { scene: "x" } })`) === false);
+
+  // The play view, built the way the catalogue block above builds it: a finalized
+  // character from real data, on the summary step.
+  g(`(function(){
+    var c = state.character = getDefaultCharacter();
+    var arch = Object.keys(DM_DATA.archetypes)[0];
+    c.name = 'Rushed';
+    c.origin = Object.keys(DM_DATA.origins)[0];
+    c.archetype = arch;
+    c.temperament = Object.keys(DM_DATA.temperaments)[0];
+    var a = DM_DATA.archetypes[arch];
+    if (!a.forcedTalent) { var t = Object.keys(a.talents || {}); if (t.length) c.talent = t[0]; }
+    c.finalized = true;
+    normalizeEditableLists(); normalizeCurrentValues();
+    if (!computeStats()) throw new Error('fixture does not compute');
+    state.currentStep = STEPS.indexOf('summary');
+  })()`);
+  g("setRoomRushed(true); renderAll();");
+  const rushedButtons = g(`[...document.querySelectorAll('.play-controls .rest-rushed')].length`);
+  ok(`all three rest buttons are dimmed while rushed (${rushedButtons})`, rushedButtons === 3);
+  ok("each says why", g(`[...document.querySelectorAll('.play-controls .rest-rushed .dm-tip-title')].every(t => /Rushed/.test(t.textContent))`));
+  ok("End Scene is untouched", g(`!document.querySelector('.play-controls .end-scene').classList.contains('rest-rushed')`));
+  g("state.character.currentSpirit = 0");
+  g("takeRestManual('bed')");
+  ok("a rest pressed while rushed restores nothing", g("getEffectiveResource('spirit')") === 0);
+  g("takeRest('breather')");
+  ok("a rest the GM pushes still applies", g("getEffectiveResource('spirit')") > 0);
+  g("setRoomRushed(false); renderAll();");
+  ok("lifting the rush gives the buttons back", g(`document.querySelectorAll('.play-controls .rest-rushed').length`) === 0);
+  ok("setRoomRushed reports a change only when there is one", g("setRoomRushed(false)") === false && g("setRoomRushed(true)") === true);
+  g("setRoomRushed(false)");
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);

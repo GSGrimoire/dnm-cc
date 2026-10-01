@@ -333,6 +333,25 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   await wait(1100);
   ok("two separate spends of 2 are not one spend of 4", drives().length === 0);
 
+  // v2.4. The same spend is adversity (GM Guide p.125): one Growth to every character.
+  // The sheet cannot read the scene, so it names nobody, and an effect naming nobody
+  // reaches every sheet.
+  const adversity = () => sent.filter((e) => e.type === "bond" && e.effect.kind === "adversity");
+  sent.length = 0;
+  g("addThreat(-3,'manual adjustment');");
+  await wait(1100);
+  ok("a GM spend of 3 from a sheet also announces adversity", adversity().length === 1);
+  ok("naming nobody, so it reaches every sheet", adversity()[0] && adversity()[0].effect.targets.length === 0);
+  ok("and how much was spent", adversity()[0] && adversity()[0].effect.amount === 3);
+  // The GM tools' switch turns it off here too: same origin, same localStorage.
+  w.localStorage.setItem("com.thuknights.dnm-obr/gm-settings", JSON.stringify({ awardGrowth: false }));
+  sent.length = 0;
+  g("addThreat(-3,'manual adjustment');");
+  await wait(1100);
+  ok("with the GM's Growth switch off, no adversity", adversity().length === 0);
+  ok("but the drive still fires", drives().length === 1);
+  w.localStorage.removeItem("com.thuknights.dnm-obr/gm-settings");
+
   // ADDING Threat is a player action several abilities require. It is not a spend.
   sent.length = 0;
   g("addThreat(6,'Adrenaline Rush');");
@@ -347,6 +366,22 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   await wait(1100);
   ok("a player's client does not announce a drive", drives().length === 0);
   g("obrRole = 'GM';");
+}
+
+
+// -------------------------------------------------------------
+// v2.4: the room's rush reaches the sheet
+// -------------------------------------------------------------
+{
+  const room = (scene, rushed) => JSON.stringify({ "com.thuknights.dnm-rolls/state": {
+    momentum: 0, threat: 0, log: [], bonds: [],
+    epochs: { scene, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 }, rushed } });
+  g(`adoptRoom(${room(4, { scene: 4 })})`);
+  ok("a rush in the room's metadata reaches the sheet", g("roomRushed") === true);
+  g(`adoptRoom(${room(5, { scene: 4 })})`);
+  ok("and the next End Scene lifts it", g("roomRushed") === false);
+  g(`adoptRoom(${room(5, null)})`);
+  ok("a room from before 1.5 is not rushed", g("roomRushed") === false);
 }
 
 // -------------------------------------------------------------
