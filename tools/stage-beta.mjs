@@ -35,6 +35,7 @@ if (!obrSrc || !ccSrc || !obrDst || !ccDst) {
 }
 
 const HOST = "https://gsgrimoire.github.io";
+const OWLBEAR_DESCRIPTION_MAX = 128;
 
 // The namespace split. Order matters: the more specific string first.
 const isolate = (text) => text
@@ -80,7 +81,14 @@ const manifest = JSON.parse(fs.readFileSync(path.join(obrSrc, "manifest.json"), 
 const base = `${HOST}/dnm-obr/beta/`;
 manifest.name = "Dreams & Machines (BETA)";
 manifest.version = `${manifest.version}-beta`;
-manifest.description = `TEST BUILD of ${manifest.version.replace(/-beta$/, "")}. Isolated from the live extension: its own log, pools and token data. ${manifest.description}`;
+// Owlbear refuses a manifest whose description is over 128 characters ("description
+// length must be less than or equal to 128 characters long"). Found by installing the
+// first beta. Kept short and checked below rather than trusted.
+manifest.description = `TEST BUILD ${manifest.version.replace(/-beta$/, "")}. Isolated from the live extension: its own log, pools and tokens.`;
+if (manifest.description.length > OWLBEAR_DESCRIPTION_MAX) {
+  console.error(`beta description is ${manifest.description.length} characters; Owlbear allows ${OWLBEAR_DESCRIPTION_MAX}`);
+  process.exit(1);
+}
 manifest.icon = base + "icon.svg";
 manifest.background_url = base + "background.html";
 manifest.action = { ...manifest.action, title: "D&M Rolls (BETA)", icon: base + "icon.svg", popover: base + "index.html" };
