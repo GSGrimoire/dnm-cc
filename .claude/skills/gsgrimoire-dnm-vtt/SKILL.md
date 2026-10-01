@@ -107,6 +107,23 @@ GitHub Pages serves `main` on both repos. `main` is production. Work on a branch
 4. **Everyone reloads the room.** The extension's background page is cached per room session,
    so a tab refresh is not always enough. Say this in every release note.
 
+**The BETA channel (since 1.5).** Test a build in Owlbear before it goes live:
+
+```sh
+# from dnm-cc, with main checked out somewhere (a worktree is easiest)
+node tools/stage-beta.mjs ../dnm-obr . <main dnm-obr> <main dnm-cc>
+# commit beta/ on main in both repos and push — nothing else changes
+```
+
+It writes `beta/` in each repo on `main` and touches no live file. Install
+`https://gsgrimoire.github.io/dnm-obr/beta/manifest.json` as its own extension. The beta
+is ISOLATED: every `com.thuknights.dnm-obr` / `dnm-rolls` string becomes `…-beta`, so it
+has its own log, pools, token data and storage, and two background pages in one room
+cannot double-relay each other's events. A live character must be re-attached under
+"Attach D&M character (BETA)" with its code. The script refuses to finish if any live
+namespace or live URL survives in what it wrote. Deploying for real is still the normal
+order below; the beta folder can stay for the next test.
+
 Before claiming a deploy: **verify `main` actually moved.** Check `git rev-parse main` against
 `origin/main`. Pushing `main` while checked out on another branch succeeds and does nothing —
 it has happened, and the release was reported as live when it was not.
