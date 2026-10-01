@@ -773,6 +773,10 @@ async function press(page, startsWith, times = 2) {
   await page.waitForTimeout(250);
   await page.selectOption("#attr-key", "quickness");
   await page.selectOption("#skill-key", "fight");
+  // A 19 and a 20: a roll with dice worth rerolling, so the reminder is LIKELY to apply.
+  // Random dice would make the hint assertion flaky — a roll that happened to succeed
+  // on both dice is meant to get no hint.
+  await page.evaluate(() => { const seq = [0.9, 0.95]; let n = 0; const real = Math.random; Math.random = () => (n < 2 ? seq[n++] : real()); });
   await page.click("#roll-btn");
   await settle(page);
   const first = await page.evaluate(() => {
@@ -827,6 +831,14 @@ async function press(page, startsWith, times = 2) {
   }, ROOM_KEY);
   await page.waitForTimeout(150);
   ok("another player's roll has no reroll buttons", await page.evaluate(() => document.querySelector("#log .entry").querySelectorAll("button.die").length === 0));
+  // A roll where both dice succeed gets no reminder.
+  await page.evaluate(() => { const seq = [0.0, 0.05]; let n = 0; const real = Math.random; Math.random = () => (n < 2 ? seq[n++] : real()); });
+  await page.click("#roll-btn");
+  await settle(page);
+  ok("no hint on a roll where every die already succeeded", await page.evaluate(() => {
+    const li = [...document.querySelectorAll("#log .entry")].find((x) => x.querySelector("button.die"));
+    return li && !li.querySelector(".reroll-hint");
+  }));
   ok("no errors through rerolling", errors.length === 0);
   if (errors.length) console.log("      " + errors.join("\n      "));
   await page.close();

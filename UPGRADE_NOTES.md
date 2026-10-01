@@ -47,6 +47,13 @@ alike), **one paid reroll per roll**, **dice locked once the Momentum is claimed
   DM_DATA. Evade's attack type and Extra Effort's skill are not stored anywhere, so those two
   are confirm-the-condition. Tool Rig: once per die beyond the base two. Mobile is not a
   reroll of its own: it lets the Spirit reroll take two dice on Move.
+- **The hint is narrower than the option** (after the first playtest). `rerollHintLikely()`
+  in `dnm.js` (mirrored as `rerollHintLikelyCC()`): only when the roll has a failed or
+  complicated die, and only where a source's `hintSkills` / `hintMinDice` allow — Supply
+  and Demand on Talk, Evade on Fight or Move, Extra Effort and Tool Rig on 3+ dice. The
+  reroll itself is still offered on any roll when a die is picked.
+- **No separate log line for the Spirit.** The roll's own "Reroll 18 → 11 (1 Spirit)" is the
+  record; the sheet's extra "Reroll / paid 1 Spirit…" entry was dropped after the playtest.
 - **Inspire** rides on the Second Wind grant (`inspire: true`); the ally's sheet stores
   `inspireAt` (the grant's time) and offers the free reroll on the first roll after it.
   Used up on use, in the sheet or (via `reconcileRerolls`) in the roller.

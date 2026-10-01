@@ -1255,6 +1255,9 @@ const DM1_EXPECTED = {
   build();
   const sent = [];
   w.postReroll = (ev) => { sent.push(ev); };
+  const actions = [];
+  const realLog = w.logAction;
+  w.logAction = (label, detail) => { actions.push(label); return realLog(label, detail); };
   seed("might", "fight", [20, 19]);
   ok("a fresh roll on the sheet can be rerolled for 1 Spirit", JSON.stringify(opts()) === JSON.stringify(["spirit"]));
   ok("no free reroll without the gear or talent", !opts().some((h) => h !== "spirit"));
@@ -1270,6 +1273,8 @@ const DM1_EXPECTED = {
   ok(`the result is re-judged from the new dice (${r.su})`, r.su === judged && r.gn === Math.max(0, judged - r.df));
   ok("the room is told, marked as paid on the sheet", sent.length === 1 && sent[0].type === "reroll" && sent[0].pay === "sheet" && sent[0].how === "spirit" && sent[0].id === r.rid);
   ok("one paid reroll per roll: it is not offered again", !opts().includes("spirit"));
+  ok("the Spirit is not logged as a line of its own", !actions.includes("Reroll"));
+  w.logAction = realLog;
   const lines = g("[...document.querySelectorAll('#recentRollsArea .roll-reroll-line')].map(x => x.textContent).join('|')");
   ok(`the reroll line is drawn under the original (${lines})`, /^Reroll 20 → \d+ \(1 Spirit\)$/.test(lines));
   ok("the replaced die is struck through in the original row", g("document.querySelectorAll('#recentRollsArea .die.is-replaced').length") === 1);
@@ -1312,6 +1317,23 @@ const DM1_EXPECTED = {
   pick(0, 0);
   g("applySheetReroll(0, 'spirit')");
   ok("free and paid on the same roll: two reroll lines", g("document.querySelectorAll('#recentRollsArea .recent-roll')[0].querySelectorAll('.roll-reroll-line').length") === 2);
+
+  // The reminder only where it is likely to apply.
+  seed("quickness", "fight", [1, 2]);
+  ok("no hint on a roll where every die already succeeded", g("document.querySelectorAll('#recentRollsArea .recent-roll')[0].querySelector('.reroll-hint')") === null);
+  ok("though the free reroll is still on offer if a die is picked", opts().includes("tacticalLens"));
+  build();
+  g("state.character.growthExtraTalents = ['supplyAndDemand', 'extraEffort', 'evade']");
+  const hintOn = () => g("(document.querySelectorAll('#recentRollsArea .recent-roll')[0].querySelector('.reroll-hint') || {}).textContent || ''");
+  seed("insight", "talk", [20, 19]);
+  ok("Supply and Demand is hinted on a Talk test", /Supply and Demand/.test(hintOn()));
+  seed("might", "fight", [20, 19]);
+  ok("but not on a Fight test", !/Supply and Demand/.test(hintOn()));
+  ok("where Evade is", /Evade/.test(hintOn()));
+  ok("Extra Effort is not hinted on a two-dice roll", !/Extra Effort/.test(hintOn()));
+  seed("might", "study", [20, 19, 18]);
+  ok("but is on a roll with bought dice", /Extra Effort/.test(hintOn()));
+  ok("and Evade is not hinted on Study", !/Evade/.test(hintOn()));
 
   // Mobile: the one Spirit reroll covers two dice on a Move test.
   build([{ id: "protective-clothing-tl2", qty: 1, equipped: true }]);

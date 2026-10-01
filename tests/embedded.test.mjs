@@ -404,7 +404,7 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   sent.length = 0;
   g(`reconcileRerolls(${JSON.stringify(fresh)})`);
   ok("a Spirit reroll made in the roller costs this character 1 Spirit", spirit() === 2);
-  ok("the payment is announced", sent.some((e) => e.type === "action" && e.entry.label === "Reroll" && /1 Spirit/.test(e.entry.detail)));
+  ok("and no separate log line: the roll's own reroll line is the record", !sent.some((e) => e.type === "action"));
   g(`reconcileRerolls(${JSON.stringify(fresh)})`);
   ok("and only once, however often the room is read", spirit() === 2);
   ok("a reroll paid on the sheet, a free one, and someone else's cost nothing here", spirit() === 2);

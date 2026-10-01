@@ -9926,6 +9926,16 @@ const REROLL_WHEN = {
   toolRig: 'you used a toolkit, a Supply Points device or an item on your rig, and bought dice with Spirit (one reroll per die bought)',
 };
 const REROLL_TALENTS = ['supplyAndDemand', 'toolRig', 'evade', 'extraEffort'];
+// When the yellow reminder is worth drawing, beyond "this roll has a die worth
+// rerolling" — mirrors rerollHintLikely() in the extension's dnm.js, which reads these
+// from the snapshot. Narrowing only the HINT: the reroll itself is still offered when a
+// die is picked, because the sheet cannot see every way a talent can apply.
+const REROLL_HINT = {
+  supplyAndDemand: { hintSkills: ['talk'] },
+  evade: { hintSkills: ['fight', 'move'] },
+  extraEffort: { hintMinDice: 3 },
+  toolRig: { hintMinDice: 3 },
+};
 
 function rerollTalentText(key) {
   if (DM_DATA.generalTalents && DM_DATA.generalTalents[key]) return DM_DATA.generalTalents[key].description || '';
@@ -9956,7 +9966,7 @@ function getRerollSources() {
     });
   });
   REROLL_TALENTS.forEach(key => {
-    if (hasTalent(key)) out.push({ id: key, label: REROLL_LABELS_CC[key], text: rerollTalentText(key), when: REROLL_WHEN[key], attrs: [], skills: [], from: 'talent' });
+    if (hasTalent(key)) out.push({ id: key, label: REROLL_LABELS_CC[key], text: rerollTalentText(key), when: REROLL_WHEN[key], attrs: [], skills: [], from: 'talent', ...(REROLL_HINT[key] || {}) });
   });
   return out.slice(0, 12);
 }
@@ -9967,6 +9977,14 @@ function firstRollAfterInspire() {
   if (!at) return null;
   const after = normalizeRecentRolls().filter(e => e.t > at).sort((a, b) => a.t - b.t);
   return after.length ? after[0].rid : null;
+}
+
+function rerollHintLikelyCC(e, src) {
+  if (!e.d.some(v => { const k = classifyDie(v, e.av, e.sv, e.at); return k === 'fail' || k === 'complication'; })) return false;
+  const skill = String(e.sn || '').toLowerCase();
+  if (src && Array.isArray(src.hintSkills) && src.hintSkills.length && !src.hintSkills.includes(skill)) return false;
+  if (src && Number(src.hintMinDice) > 0 && e.d.length < Number(src.hintMinDice)) return false;
+  return true;
 }
 
 function sheetRerollOptions(e) {
@@ -9988,10 +10006,10 @@ function sheetRerollOptions(e) {
     if (src.id === 'toolRig') {
       if (rr.filter(r => r.how === 'toolRig').length >= Math.max(0, e.d.length - 2)) return;
     } else if (rr.some(r => r.how === src.id)) return;
-    out.push({ how: src.id, label: src.label, cost: 'free', max: 1, when: src.when, text: src.text });
+    out.push({ how: src.id, label: src.label, cost: 'free', max: 1, when: src.when, text: src.text, likely: rerollHintLikelyCC(e, src) });
   });
   if (firstRollAfterInspire() === e.rid && !rr.some(r => r.how === 'inspire')) {
-    out.push({ how: 'inspire', label: 'Inspire', cost: 'free', max: 1, when: '',
+    out.push({ how: 'inspire', label: 'Inspire', cost: 'free', max: 1, when: '', likely: rerollHintLikelyCC(e, null),
       text: 'An ally with Inspire restored your Spirit: re-roll 1d20 on your next Skill Test for free.' });
   }
   return out;
@@ -10056,7 +10074,9 @@ function renderRerollableDice(e, idx, small) {
   html += `<div class="recent-roll-sum ${e.pa ? 'pass' : 'fail'}">${rerollSummaryBits(e.su, e.co, e.pa, e.gn, e.df)}</div>`;
   // The free-reroll reminder, asked for at the table: the yellow note under a roll that a
   // talent or a piece of gear lets you reroll for nothing.
-  const free = opts.filter(o => o.cost === 'free');
+  // Only the free rerolls LIKELY to apply get the reminder (rerollHintLikelyCC). All of
+  // them are still in the panel when a die is picked.
+  const free = opts.filter(o => o.cost === 'free' && o.likely);
   if (free.length) {
     html += `<div class="reroll-hint dm-tip" tabindex="0">Free reroll: ${free.map(o => escHtml(o.label) + (o.when ? ` (only if ${escHtml(o.when)})` : '')).join('; ')}. Press a die to use it.<span class="dm-tip-body"><span class="dm-tip-title">Free rerolls on this roll</span><span class="dm-tip-desc">${free.map(o => `${escHtml(o.label)}: ${escHtml(o.text || '')}`).join(' ')}</span></span></div>`;
   }
@@ -10094,10 +10114,10 @@ function applySheetReroll(idx, how) {
   state.character.recentRolls = list;
   if (how === 'spirit') {
     // Taken here, because the sheet owns the character. The room is told the reroll
-    // was paid on the sheet, so nothing collects it a second time.
-    logAction('Reroll', `spent 1 Spirit: ${shown}`);
+    // was paid on the sheet, so nothing collects it a second time. No log line of its
+    // own: the "Reroll 18 → 11 (1 Spirit)" line under the roll already says it, and a
+    // separate entry above the roll was found redundant in the first playtest.
     state.character.currentSpirit = Math.max(0, getEffectiveResource('spirit') - 1);
-    logActionNow();
   }
   if (how === 'inspire') delete state.character.inspireAt;
   // Keep the open result in step, so the claim button offers the new Momentum.
@@ -11426,9 +11446,10 @@ function reconcileRerolls(found) {
     if (o.how === "inspire") delete state.character.inspireAt;
   }
   if (spirit) {
+    // Quietly: the roll's own "Reroll 18 → 11 (1 Spirit)" line is the record. A second
+    // entry saying the same thing was found redundant in the first playtest.
     const before = getEffectiveResource("spirit");
     state.character.currentSpirit = Math.max(0, before - spirit);
-    sendAction({ label: "Reroll", detail: `paid ${spirit} Spirit for ${spirit === 1 ? "a reroll" : spirit + " rerolls"} in the roller` });
   }
   state.character.appliedRerolls = [...stored.map(String), ...fresh.map((o) => o.key)].slice(-MAX_APPLIED_REROLLS);
   saveCharacterLocal(true);

@@ -10,7 +10,7 @@ import { epochStatus, readAppliedEpochs, readEpochs, EPOCH_KEYS, emptyEpochs, EP
   INITIATIVE_ACTIONS, MAX_INITIATIVE_ROWS, INITIATIVE_NAME_MAX,
   mayMarkRow, initRowLabel, initRowIdForCharacter, gmPopover, readGmDock, writeGmDock, GM_POPOVER_ID,
   SHEET_POPOVER_ID, readDock, DOCK_KEY, applyReroll, rerollProblem, rerollOptions, rerollLines,
-  REROLL_LABELS } from "../out/dnm-obr/dnm.js";
+  REROLL_LABELS, rerollHintLikely } from "../out/dnm-obr/dnm.js";
 import * as gmr from "../out/dnm-obr/gmrules.js";
 
 let pass = 0, fail = 0;
@@ -1046,6 +1046,14 @@ ok("a zero Threat delta is not a spend",
   ok("nothing to pay with, nothing offered", hows(roll(), { kind: "none" }).length === 0);
   ok("a claimed roll offers nothing", hows(roll({ claimed: true }), pc).length === 0);
   ok("every reroll kind has a label", ["spirit", "threat", "personalThreat", "tacticalLens", "supplyAndDemand", "evade", "extraEffort", "toolRig", "inspire"].every((k) => REROLL_LABELS[k]));
+
+  // When the yellow reminder is drawn (the reroll itself is always offered).
+  const allGood = roll({ detail: [{ d: 3, kind: "success" }, { d: 1, kind: "crit" }] });
+  ok("no hint when every die already succeeded", rerollHintLikely(allGood, null) === false);
+  ok("a hint when a die failed", rerollHintLikely(roll(), null) === true);
+  ok("hintSkills narrows it", rerollHintLikely(roll(), { hintSkills: ["talk"] }) === false && rerollHintLikely(roll({ sn: "Talk" }), { hintSkills: ["talk"] }) === true);
+  ok("hintMinDice narrows it", rerollHintLikely(roll({ detail: [{ d: 20, kind: "complication" }, { d: 19, kind: "fail" }] }), { hintMinDice: 3 }) === false && rerollHintLikely(roll(), { hintMinDice: 3 }) === true);
+  ok("options carry the verdict", rerollOptions(allGood, pc).find((o) => o.how === "tacticalLens").likely === false && rerollOptions(roll(), pc).find((o) => o.how === "tacticalLens").likely === true);
 
   // Through the reducer, as the GM's background page runs it.
   let st = applyEvent({ ...EMPTY_STATE, log: [roll()] }, ev("spirit", [{ i: 0, to: 1 }]), { sender: "p1" });
