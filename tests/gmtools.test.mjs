@@ -848,6 +848,10 @@ async function press(page, startsWith, times = 2) {
 {
   const { page } = await boot({ role: "GM" });
   await page.evaluate(() => { document.getElementById("attr-val").value = "20"; document.getElementById("skill-val").value = "0"; });
+  // Fixed dice (and a fixed reroll), all under 20: random ones rolled a natural 20 about
+  // one run in ten, leaving no Momentum to claim and failing the lock assertion for a
+  // reason that had nothing to do with locking. Caught on the release run.
+  await page.evaluate(() => { let n = 0; const real = Math.random; Math.random = () => (n++ < 3 ? 0.1 : real()); });
   await page.click("#roll-btn");
   await settle(page);
   await page.click("#log .entry button.die >> nth=0");
