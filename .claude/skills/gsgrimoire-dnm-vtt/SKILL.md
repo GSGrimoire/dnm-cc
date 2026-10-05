@@ -441,6 +441,25 @@ changing it. The rules that have to hold:
 - `adversity` and `reversal` are GM-only bond kinds carrying `targets`; no targets means
   everyone.
 
+## Chapter 5 (1.6)
+
+- **Menacing IS Threatening** (decided with the table: the book's own cross-reference
+  names an ability the chapter does not print). Threat on arrival is a house rule, OFF
+  by default. Do not bring Menacing back as a separate rule.
+- **`npcSpend()` is the only way an NPC pays**: Personal Threat first, an ally adds
+  instead, the pool refuses a short spend (p.126). A new NPC button goes through it.
+- **Abilities are recognised by NAME** (`abilityKey()`, with the book's aliases) and
+  creature costs are read off the TEXT (`threatCostIn()`). Do not add a "key" field to
+  the editor.
+- **The book's stat blocks never go in the repo.** They live in a private roster file
+  the GM imports. The repo's samples are placeholders and say so.
+- **Placing a token builds the item by hand** (`buildNpcTokenItem()`), copied from the
+  SDK 3.1.0 `ImageBuilder`; the vendored SDK has no builders. Hidden, named "NPC",
+  `{ v, id }` only.
+- **A PDF's stat blocks may not survive text extraction.** Chapter 5's handwriting font
+  came out scrambled, with plausible-looking wrong numbers (a Thrall read as 10 that is
+  printed 12). Render the pages to images and read those.
+
 ## Rerolls (1.5 / 2.4)
 
 - **Your own rolls only.** Enforced in the reducer against the roll's `by`, with the sender
