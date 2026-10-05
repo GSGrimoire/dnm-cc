@@ -2,6 +2,147 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 1.6 — Chapter 5: the Bestiary and NPCs by the book
+
+`dnm-obr` **1.5 → 1.6**. Creator unchanged at **2.4** (it needs 1.5 or later). Room state
+unchanged at **v6**: everything new is GM-local (`localStorage`) or rides on events that
+already existed (`pool`, `action`, `init act`, `init remove`). A number on the extension:
+a new panel and new rules automated.
+
+Asked for after reading the Gamemaster's Guide, Chapter 5 (pp.126–139, the whole
+chapter: types of NPC, Normal and Major NPCs, groups, the common abilities and actions,
+and ten stat blocks).
+
+## What the chapter changed about 1.5
+
+- **There is no Menacing.** Chapter 4 points to a Menacing ability "in Chapter 5"; the
+  chapter prints **Threatening** — "adds +1 to Threat at the start of each of its
+  actions" (p.130) — and the Waker's own block uses it. Decided with the table: they are
+  the same thing (Modiphius's proofing, not a second rule). `normalizeNpc()` gives any
+  stat block with `menacing > 0` the Threatening ability on the way out of storage. The
+  1.5 reading, Threat when it is revealed, is kept as a **house rule switched off by
+  default** (`readSettings().arrivalThreat`, Adventure setup); `menacing` is now that
+  rule's Arrival Threat and the editor shows it only while the rule is on. Its log line
+  is "Threat rises", never "Menacing".
+- **Action tables are d20** (1–4, 5–8 … 17–20 on p.130). The 1.5 sample captain used
+  d6-style ranges; the samples are rebuilt in the book's shape, still marked SAMPLE.
+- **Personal Threat** is what a Major NPC enters each scene with (Ch.4 p.113, Ch.5
+  p.129); 1.5 already refilled it by building the row from the roster.
+
+## The rules, as data (`gmrules.js`)
+
+Quoted from the printed pages, as Chapter 4 is. One printed slip corrected: "akill"
+(p.127) is shown as "skill".
+
+| rule | page | function |
+|---|---|---|
+| NPCs spend Threat as PCs spend Spirit; cannot avoid with less than needed | 126 | `NPC_SPEND_RULE`, enforced in `npcSpend()` |
+| Adversary / Ally / Bystander | 126 | `SIDES` |
+| An ally adds what it would spend (Personal Threat spent as normal) | 127 | `ALLY_RULE`, `npcSpend()` |
+| Normal NPC: one Injury defeats it | 127 | `defeatLimit()` |
+| Major NPC: Truths + 1 unless its block says | 129 | `defeatLimit()` |
+| Competence table | 128 | `COMPETENCE`, `competenceOf()` |
+| Group attack +1 Difficulty per 2; 2 Threat counter-attack | 128 | `groupDefenceBonus()`, `COUNTER_ATTACK_COST` |
+| Extra hits: 2 Momentum each, 1 with Burst | 128 | `extraHitsMomentum()` |
+| Avoid an Injury: damage − Protection, Breaker halves (round down) | 126, 130 | `avoidInjuryCost()` |
+| The common abilities and actions | 130–131 | `NPC_ABILITIES`, `abilityKey()` |
+| Solitary 1, 2, 3 … | 131 | `solitaryCost()` |
+| Retreat adds the Injuries it could still take | 131 | `injuriesLeft()` |
+
+**Recognised by NAME.** `abilityKey()` matches a stat block line's name against the
+library and its aliases ("Armor Plating", "Armored Hide" → Armored; "Menacing" →
+Threatening), longest first. The editor stays a text box per list; nothing new to type.
+**Creature-specific costs are read off the text**: `threatCostIn()` finds "Spend 2
+Threat" or "Spend 1, 2, or 3 Threat", which is how Trample, Stun-flash, Pin and Missile
+Salvo get buttons without the library knowing them. "costs 1 Threat" (Solitary's wording)
+deliberately does not match; Solitary has its own button.
+
+**Breaker rounds down.** The book's own blocks are the check: Protection 2 → 1, 4 → 2.
+Ranged Protection (the Prowlcat's +2) and Defend's +2 are added before halving: the rule
+says the Protection *rating* is halved.
+
+## The panel (`gmpanel.js`)
+
+- **Sections.** "NPCs and stat blocks" is split into **In this fight** (open by default)
+  and **Bestiary**. A 1.5 `gm-ui` with `npcs` open simply finds both closed/default.
+- **Fighter rows gained** `startCount`, `side`, `injuries`, `payPt`, `extraRound`,
+  `extraTurns`, `lastAction`, all clamped in `readFight()`. `fightOpen` is the open
+  fighter, separate from the open Bestiary card (sharing one slot closed one when the
+  other opened).
+- **`npcSpend()` is the one way an NPC pays.** Personal Threat first when it has enough
+  and `payPt` is on; an ally adds instead; otherwise the GM's pool, refused when short.
+  Spends stay private ("Threat spent" in public, the reason in the GM log) and a spend of
+  3+ sets off the drive and Growth like any other.
+- **Public wording never names a hidden NPC**: `publicName()` gives "An adversary" until
+  the row is revealed.
+- **Threatening** adds 1 and sends `init act` for its row: the party panel's tick.
+- **Roll its action** uses `Math.random`, writes only to the GM log and the row.
+- **Injuries are GM notes.** Nothing is sent.
+
+## Place on map
+
+The roller and the pop-out are popovers: separate documents over the map. There is no
+drag-and-drop out of one, so **"drag onto the map" is not buildable**; *Place on map*
+adds a token in the middle of the GM's view instead.
+
+- The vendored SDK has **no item builders** (it is the API surface only).
+  `buildNpcTokenItem()` produces what `buildImage(...).build()` makes in
+  `@owlbear-rodeo/sdk` 3.1.0 — read from the package's `ImageBuilder.js` and
+  `GenericItemBuilder.js` — field for field. If Owlbear refuses it in a room, that is the
+  first place to look.
+- `npc-token.svg` is new in the repo (and in `stage-beta.mjs`'s file list). 300px at 300
+  dpi is one grid square.
+- **Hidden, named "NPC", metadata `{ v, id }` only** — the same reasoning as the hidden
+  initiative names: everything on an item is readable by every client.
+- New host methods, in both `roller.js` and `gm.js`: `addItems`, `playerId`,
+  `viewCenter`.
+
+## Decrepit in the roller
+
+`rollCompAt()` in `roller.js`: when the GM's selected token is an NPC with Decrepit (and
+no character), a roll's complication threshold is `min(room, 19)`. The hint says
+"(Decrepit)". The room's own raised danger still wins when it is lower.
+
+## The book's stat blocks are NOT in the repo
+
+Decided with the table: the ten stat blocks are the book's content and the repo is
+public. They were transcribed from the page images (the PDF's text layer scrambles the
+handwriting font the blocks are set in) into a roster file the GM imports with the
+panel's Import, which now also takes a file. The repo's four samples stay placeholders.
+The transcription is checked against `normalizeNpc()` field by field, which is how the
+next item was found.
+
+## Fixed
+
+`normalizeNpc()` capped a weapon's damage at **10 characters**: "Plasma Burn 3" became
+"Plasma Bur" and "Paralyzed 3" lost its rating. Now 24, range 12. Regression test in
+`gmtools.test`.
+
+## Tests
+
+`gmtools.test`: 204 (was 133) — the rules as numbers (the p.128 example, Breaker
+rounding, ranged and Defend Protection, defeat limits, aliases, text costs, d20 ranges,
+competence, the token item's fields); then in Chromium: the house rule off and on, 1.5
+Menacing migrating, the fight tools (Personal Threat first, the pool refusing a short
+spend, an ally adding, Threatening's act tick, the private action roll, defeat), a group
+(the +2, one falling, counter-attack, Retreat), Place on map, Decrepit, and the fight
+tools at 320 and 420px. Proved by breaking, one at a time in `out/`: Breaker halving,
+the ally rule, the pool check, the hidden token, Decrepit, the house rule default, and a
+name on the token — each caught.
+
+Also: the 1.5 "claiming the Momentum locks the dice" check failed one run in five on
+this branch. It now waits for the claim button and for the dice to go rather than
+sleeping a fixed time; 8 runs green after. A timing race is the likely cause but it was
+not proved.
+
+## Live checks
+
+- Place on map in a real room: Owlbear accepts the item, it lands hidden at the centre
+  of the view, one square, with the token image.
+- The Waker on a token: selecting it fills Might + Fight 12/4 and the hint says
+  "Complication on 19+ (Decrepit)".
+- Import the Chapter 5 file from disk in the pop-out and in the roller.
+
 # 2.4 / 1.5 — GM tools
 
 `dnm-obr` **1.4C → 1.5**, creator **2.3 → 2.4**. Room state schema **v5 → v6** (one
