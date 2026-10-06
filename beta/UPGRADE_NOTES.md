@@ -2,6 +2,77 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.5 (creator) — Revive and Rouse
+
+Creator **2.4 → 2.5**, needs extension **1.6** (which carries the two new bond kinds and
+the party mark; 1.6 was not yet live, so they ride in it rather than a 1.6B). A number:
+two new actions, a new character state, a new automation.
+
+The rules came from the table's GM as a NotebookLM summary of the Players Guide, the GM
+Guide and the Quickstart. Their exact wording and page numbers are NOT checked — the
+action cards are paraphrase, like every other action card on the sheet. Two existing
+texts in DM_DATA confirmed the details:
+
+- **Supportive Bond**: "+1 Spirit" when helping an ally "regain Spirit by spending
+  Momentum or giving up their own Spirit during a rest". So Revive by Momentum gets the
+  +1 and Revive by Test does not. (The summary's "if the assisting character has a
+  supportive bond… they regain 1 extra Spirit" was ambiguous about who "they" is; the
+  bond text says the ally.)
+- **Reassure**: the Test route at Difficulty 1, and "half your Talk skill, rounding up,
+  rather than only 1" — which also confirms the base of 1.
+- **Inspire** fires on "spend one or more Momentum to restore an ally's Spirit", so the
+  Momentum route carries it.
+
+## Revive
+
+`useRevive('momentum' | 'test')` on the helper's sheet: pays (2 Momentum) or not (Test),
+logs "Revive", and sends `reviveAlly({ target, amount, source, inspire })` — the module
+block's `reviveToRoom` puts a `revive` bond effect in the queue. The helped sheet's
+`applyPendingBondEffects()` clears **all** `activeExhaustion` and adds the Spirit. Same
+self and name guards as a grant. Rally (extra allies for Spirit) is not applied to
+Revive; it was not asked for and its text is about Spirit amounts.
+
+## Defeated and Rouse
+
+- `c.defeated` is new on the character, so it rides in the code. **Only a real `true`**
+  survives `normalizeCurrentValuesInner()`; anything else is deleted.
+- Set by hand (`toggleDefeated()`, the card under the exhaustion cards). The sheet does
+  not decide an Injury defeats you: an Injury you avoided does not, and only the player
+  knows.
+- Cleared by: `rouse` from an ally (`useRouse('test' | 'medkit')`, the medkit route
+  spending 1 Momentum and only offered when a Combat Medkit is owned), the Combat
+  Automed's own `combat-automed-self-revive-threat` item action ("cease being
+  defeated"), and every scene boundary ("cannot take further actions in the scene"),
+  local or pushed by the GM.
+- The Combat Medkit's existing item button still only spends Momentum: it has no target.
+  The Rouse card is the path that wakes someone.
+- `rouse` carries no amount, and the reducer drops one if sent.
+
+## Extension 1.6 additions
+
+`BOND_KINDS` gains `revive` (grant-shaped, amount capped at 4) and `rouse` (target and
+source only); neither is GM-only. The party row reads `char.defeated` and draws
+**Defeated**.
+
+## Tests
+
+creator 308 (Revive both routes, the bond, Reassure, the guards, the drain clearing
+exhaustion, rouse, the medkit gate, toggle, End Scene, Automed, a hostile code),
+embedded 113 (the two bridges and what they send), party 328 and security 141 (the
+reducer and forged effects), gmtools 205 (the party mark from a real code). Proved by
+breaking: the bond +1 on the Test route, exhaustion left in place, a truthy `defeated`
+accepted, End Scene keeping it, the reducer dropping the kinds, and the party mark.
+
+**The intermittent claim-lock failure, root-caused.** Its diagnostic caught the reroll
+die on a natural 20: only three `Math.random` draws were pinned and ids consumed them.
+Every draw is pinned now. The 1.6 note blaming timing was wrong and is corrected.
+
+## Live checks
+
+- Revive between two real sheets: exhaustion clears and Spirit lands on the other sheet,
+  open and closed-then-opened.
+- Rouse clears a defeated sheet; the Party panel mark goes.
+
 # 1.6 — Chapter 5: the Bestiary and NPCs by the book
 
 `dnm-obr` **1.5 → 1.6**. Creator unchanged at **2.4** (it needs 1.5 or later). Room state
@@ -130,10 +201,10 @@ tools at 320 and 420px. Proved by breaking, one at a time in `out/`: Breaker hal
 the ally rule, the pool check, the hidden token, Decrepit, the house rule default, and a
 name on the token — each caught.
 
-Also: the 1.5 "claiming the Momentum locks the dice" check failed one run in five on
-this branch. It now waits for the claim button and for the dice to go rather than
-sleeping a fixed time; 8 runs green after. A timing race is the likely cause but it was
-not proved.
+Also: the 1.5 "claiming the Momentum locks the dice" check failed now and then. The
+waits added here were NOT the fix: the diagnostic in the assertion caught the real cause
+later (2.5) — only three Math.random draws were pinned, ids took them, and the reroll
+die sometimes came up a natural 20, leaving nothing to claim. Every draw is pinned now.
 
 ## Live checks
 
