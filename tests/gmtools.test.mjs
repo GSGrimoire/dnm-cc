@@ -139,12 +139,13 @@ async function makeCodes(names, items = {}) {
       c.finalized = true; normalizeEditableLists(); normalizeCurrentValues();
       if (!computeStats()) throw new Error('fixture does not compute');
       c.currentSpirit = 2;
+      if (${JSON.stringify(name)} === "Down") c.defeated = true;
       return buildCharacterCode();
     })()`);
   }
   return out;
 }
-const codes = await makeCodes(["Kesh", "Orrin", "Vee", "Lens"], { Lens: [{ id: "tactical-lens", qty: 1, equipped: true }] });
+const codes = await makeCodes(["Kesh", "Orrin", "Vee", "Lens", "Down"], { Lens: [{ id: "tactical-lens", qty: 1, equipped: true }] });
 const token = (id, name) => ({ id, metadata: { [CHAR_KEY]: { v: 1, code: codes[name] } } });
 const SCENE = [token("t1", "Vee"), token("t2", "Kesh"), token("t3", "Orrin"), { id: "e1", metadata: {} }, { id: "e2", metadata: {} }];
 
@@ -877,7 +878,10 @@ async function press(page, startsWith, times = 2) {
   // Fixed dice (and a fixed reroll), all under 20: random ones rolled a natural 20 about
   // one run in ten, leaving no Momentum to claim and failing the lock assertion for a
   // reason that had nothing to do with locking. Caught on the release run.
-  await page.evaluate(() => { let n = 0; const real = Math.random; Math.random = () => (n++ < 3 ? 0.1 : real()); });
+  // EVERY draw, not the first three: entry and event ids take Math.random too, so a
+  // three-value pin left the reroll die on a real random draw, and a natural 20 there
+  // (1 run in 20 or so) left no Momentum to claim. Found by the diagnostic below.
+  await page.evaluate(() => { Math.random = () => 0.1; });
   await page.click("#roll-btn");
   await settle(page);
   await page.click("#log .entry button.die >> nth=0");
@@ -1125,6 +1129,20 @@ async function press(page, startsWith, times = 2) {
 
   ok("no page errors through the fight", errors.length === 0);
   if (errors.length) console.log("      " + errors.join("\n      "));
+  await page.close();
+}
+
+// Creator 2.5: a defeated character is marked on their party row.
+{
+  const { page } = await boot();
+  await page.evaluate((code) => window.__stub.setItems([...window.__stub.state.items, { id: "down", metadata: { "com.thuknights.dnm-obr/char": { v: 1, code } } }]), codes.Down);
+  await page.waitForTimeout(600);
+  const rows = await page.evaluate(() => [...document.querySelectorAll("#party-list .party-name")].map((n) => {
+    const row = n.closest("li, .party-row, div");
+    return { name: n.textContent, down: !!(row && row.querySelector(".party-defeated")) };
+  }));
+  ok(`a defeated character's row says Defeated (${JSON.stringify(rows.filter((r) => r.down).map((r) => r.name))})`,
+    rows.some((r) => r.name === "Down" && r.down) && !rows.some((r) => r.name !== "Down" && r.down));
   await page.close();
 }
 

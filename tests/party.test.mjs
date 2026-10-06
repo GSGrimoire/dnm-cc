@@ -243,6 +243,14 @@ ok("a zero Threat delta is not a spend",
     isGmOnlyEvent({ type: "bond", effect: { id: "b6", kind: "rivalry", from: "K" } }) === false);
   ok("a grant is not GM-only",
     isGmOnlyEvent({ type: "bond", effect: { id: "b7", kind: "grant", from: "K", target: "A", amount: 2 } }) === false);
+  // 1.6. One character helping another: open like a grant.
+  ok("a revive is not GM-only, nor a rouse",
+    isGmOnlyEvent({ type: "bond", effect: { id: "b7r", kind: "revive", from: "K", target: "A", amount: 1 } }) === false
+    && isGmOnlyEvent({ type: "bond", effect: { id: "b7s", kind: "rouse", from: "K", target: "A" } }) === false);
+  const rq = readBondQueue(applyEvent(fresh(), bondEv({ id: "b7t", t: now, kind: "revive", from: "K", target: "A", amount: 2, source: "Revive", inspire: true })))[0];
+  ok("a revive is queued with its target, amount and Inspire", rq && rq.kind === "revive" && rq.target === "A" && rq.amount === 2 && rq.inspire === true);
+  const sq = readBondQueue(applyEvent(fresh(), bondEv({ id: "b7u", t: now, kind: "rouse", from: "K", target: "A", source: "Rousing Test" })))[0];
+  ok("a rouse is queued with its target and no amount", sq && sq.kind === "rouse" && sq.target === "A" && !("amount" in sq));
 
   // The DRIVE is, because its own text says "when THE GM spends". Unlike a bond, a
   // forged copy would reach every Maverick at the table on nobody's authority.

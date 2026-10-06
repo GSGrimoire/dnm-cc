@@ -441,6 +441,16 @@ changing it. The rules that have to hold:
 - `adversity` and `reversal` are GM-only bond kinds carrying `targets`; no targets means
   everyone.
 
+## Revive, Rouse and Defeated (creator 2.5)
+
+- Both are one character helping another, so they go through the **bond queue** as
+  `revive` / `rouse` (open, not GM-only), like Second Wind's `grant`. The helped sheet is
+  the only place exhaustion, Spirit and `defeated` live.
+- **Supportive +1 and Inspire only on the Momentum route**, per the bond's and the
+  talent's own text. Reassure changes the Test route.
+- **`defeated` is set by the player**, cleared by rouse, the Automed, or any scene
+  boundary. Only a literal `true` survives a code.
+
 ## Chapter 5 (1.6)
 
 - **Menacing IS Threatening** (decided with the table: the book's own cross-reference

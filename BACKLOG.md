@@ -21,8 +21,9 @@ ships, delete it and let `UPGRADE_NOTES.md` carry the record.
 - **More creatures.** Chapter 5 has one Waker and no machines or people beyond the
   Thrall. If another book or the Quickstart has stat blocks, they go in the same private
   file, never the repo.
-- **"Revive"** was reported as a rule the table had not seen. It is in neither Chapter 4
-  nor Chapter 5.
+- **Quote Revive and Rouse.** 2.5 built them from the GM's NotebookLM summary of the
+  Players Guide. When the Players Guide is to hand, check the numbers against the page
+  and note the page on the action cards.
 - **Allies under a player's control** (p.126: "Players can often take direct control of
   NPCs"). Today only the GM rolls for an NPC token. Letting a player do it means the
   player's client reading a stat block, which lives only in the GM's browser.

@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 2.4", g("APP_VERSION") === "2.4");
+ok("APP_VERSION is 2.5", g("APP_VERSION") === "2.5");
 
 // -------------------------------------------------------------
 // Fixture
@@ -737,6 +737,104 @@ const DM1_EXPECTED = {
   g("useSecondWind(2, 'self')");
   ok("Cautious adds +1 to a Second Wind taken on yourself", spirit() === before + 3);
   g("state.character.growthExtraTalents = []");
+
+  // --- Revive and Rouse (v2.5) ---
+  // The two seams the module block replaces, intercepted the same way as grants.
+  const revives = [];
+  const rouses = [];
+  w.reviveAlly = (payload) => { revives.push(payload); };
+  w.rouseAlly = (payload) => { rouses.push(payload); };
+  const exKey = g("Object.keys(DM_DATA.exhaustionTypes)[0]");
+
+  setUp([{ name: "Kestrel", type: "supportive" }]);
+  g("state.character.currentMomentum = 5");
+  g(`setAllyTarget('revive', 'Kestrel')`);
+  g("useRevive('momentum')");
+  ok("Revive by Momentum costs 2", g("state.character.currentMomentum") === 3);
+  ok("and sends 1 Spirit plus the supportive bond's 1 to the named ally",
+    revives.length === 1 && revives[0].target === "Kestrel" && revives[0].amount === 2);
+
+  revives.length = 0;
+  g(`setAllyTarget('revive', 'Someone Unbonded')`);
+  g("useRevive('momentum')");
+  ok("an unbonded ally regains 1", revives.length === 1 && revives[0].amount === 1);
+
+  revives.length = 0;
+  g("state.character.currentMomentum = 1");
+  g("useRevive('momentum')");
+  ok("Revive with less than 2 Momentum does nothing", revives.length === 0 && g("state.character.currentMomentum") === 1);
+
+  // The Test route: no Momentum, and the bond's +1 does not apply (its text is about
+  // spending Momentum or giving up Spirit at a rest).
+  revives.length = 0;
+  g(`setAllyTarget('revive', 'Kestrel')`);
+  g("useRevive('test')");
+  ok("Revive by a Difficulty 2 Test spends nothing and sends 1, bond or not",
+    revives.length === 1 && revives[0].amount === 1 && g("state.character.currentMomentum") === 1);
+
+  // Reassure: Difficulty 1, and half your Talk rounded up rather than only 1.
+  g("state.character.growthExtraTalents = ['reassure']");
+  const talk = g("computeStats().skills.talk");
+  revives.length = 0;
+  g("useRevive('test')");
+  ok(`Reassure: Difficulty 1 (${g("reviveTestDifficulty()")}) and half Talk ${talk} rounded up`,
+    g("reviveTestDifficulty()") === 1 && revives[0].amount === Math.max(1, Math.ceil(talk / 2)));
+  g("state.character.growthExtraTalents = []");
+
+  revives.length = 0;
+  g(`setAllyTarget('revive', '  ')`);
+  g("useRevive('test')");
+  g(`setAllyTarget('revive', state.character.name)`);
+  g("useRevive('test')");
+  ok("Revive needs an ally's name, and not your own", revives.length === 0);
+
+  // On the revived character's sheet: the exhaustion goes, the Spirit comes.
+  setUp([], "Kestrel");
+  g(`state.character.activeExhaustion = ['${exKey}']`);
+  before = spirit();
+  result = drain([{ id: "rv1", t: Date.now(), kind: "revive", from: "Fixture", target: "Kestrel", amount: 2, source: "Revive" }]);
+  ok("a revived character's exhaustion is cleared", g("state.character.activeExhaustion.length") === 0);
+  ok("and they regain the Spirit", spirit() === before + 2 && result.gained === 2);
+  ok("the log line says both", /exhaustion cleared/.test(result.detail) && result.label === "Revived");
+  g(`state.character.activeExhaustion = ['${exKey}']`);
+  drain([{ id: "rv2", t: Date.now(), kind: "revive", from: "Fixture", target: "Somebody Else", amount: 2 }]);
+  ok("a revive naming someone else changes nothing", g("state.character.activeExhaustion.length") === 1);
+  drain([{ id: "rv3", t: Date.now(), kind: "revive", from: "Kestrel", target: "Kestrel", amount: 2 }]);
+  ok("nor one you sent yourself", g("state.character.activeExhaustion.length") === 1);
+
+  // Defeated, and roused.
+  g("state.character.defeated = true");
+  result = drain([{ id: "ro1", t: Date.now(), kind: "rouse", from: "Fixture", target: "Kestrel", source: "Rousing Test" }]);
+  ok("a rouse ends the defeated state", g("state.character.defeated === true") === false);
+  ok("and restores no Spirit", result.gained === 0 && result.label === "Roused");
+
+  setUp([], "Fixture");
+  g(`setAllyTarget('rouse', 'Kestrel')`);
+  g("useRouse('test')");
+  ok("a Rousing Test sends a rouse to the named ally", rouses.length === 1 && rouses[0].target === "Kestrel");
+  rouses.length = 0;
+  g("state.character.currentMomentum = 3; state.character.items = []");
+  g("useRouse('medkit')");
+  ok("the Combat Medkit route needs a Combat Medkit", rouses.length === 0 && g("state.character.currentMomentum") === 3);
+  g("state.character.items = [{ id: 'combat-medkit', qty: 1, equipped: false }]");
+  g("useRouse('medkit')");
+  ok("with one, it spends 1 Momentum and wakes them", rouses.length === 1 && rouses[0].source === "Combat Medkit" && g("state.character.currentMomentum") === 2);
+  ok("and the card offers it", /Combat Medkit: 1 Momentum/.test(g("renderActionControls(ACTION_DEFINITIONS.find(a => a.key === 'rouse'))")));
+
+  // Your own defeated state: toggled, cleared by the scene ending and by an Automed.
+  g("toggleDefeated()");
+  ok("Defeated can be set on your own sheet", g("state.character.defeated") === true);
+  ok("and the sheet shows it", /class="defeated-card active"/.test(g("renderSheetExhaustionSection(state.character)")));
+  g("endScene()");
+  ok("End Scene clears it", g("state.character.defeated === true") === false);
+  g("state.character.defeated = true");
+  g("state.character.items = [{ id: 'combat-automed', qty: 1, equipped: true }]");
+  g("useItemAction('combat-automed', 'combat-automed-self-revive-threat')");
+  ok("a Combat Automed's self-revive clears it", g("state.character.defeated === true") === false);
+  // A character code is untrusted: only a real true counts.
+  g("state.character.defeated = 'yes'; normalizeCurrentValues();");
+  ok("a code claiming defeated: 'yes' reads as not defeated", g("'defeated' in state.character") === false);
+  g("state.character.items = []");
 
   // --- Adrenaline Rush announces regardless of the actor's own bonds ---
   g(`(function(){

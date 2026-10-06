@@ -1670,6 +1670,14 @@ body.print-light .sheet-block-title { color: #000; border-bottom-color: #999; }
 .exhaustion-card:hover { border-color: var(--accent-dim); }
 .exhaustion-card.active { background: rgba(255,107,53,0.12); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
 .exhaustion-card.active .exhaustion-name { color: var(--accent); }
+/* v2.5: defeated, under the four exhaustion cards */
+.defeated-card { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-top: 8px; padding: 6px 10px; cursor: pointer;
+  background: var(--bg3); border: 1px dashed var(--border); border-left: 2px solid var(--accent); }
+.defeated-card:hover { border-color: var(--accent-dim); }
+.defeated-card.active { background: rgba(255,107,53,0.18); border-style: solid; border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.defeated-name { font-family: var(--font-display); font-weight: 700; font-size: 0.85rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; }
+.defeated-card.active .defeated-name { color: var(--accent); }
+.defeated-desc { font-size: 0.72rem; color: var(--text-dim); line-height: 1.4; flex: 1 1 16rem; min-width: 0; }
 .collapsible-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
 .collapsible-section > summary { font-family: var(--font-mono); font-size: 0.6rem; color: var(--teal); letter-spacing: 0.25em; text-transform: uppercase; cursor: pointer; list-style: none; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
 .collapsible-section > summary::-webkit-details-marker { display:none; }
@@ -2864,7 +2872,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -4204,6 +4212,9 @@ function useItemAction(itemId, actionId) {
   if (action.resource === 'threat') {
     // addThreat() carries the reason to the log itself, so no logAction() here — that
     // would announce the same press twice.
+    // v2.5. The Automed's self-revive is the wearer rousing themselves: "cease being
+    // defeated".
+    if (action.id === 'combat-automed-self-revive-threat') clearDefeated();
     addThreat(value, `${item.name} — ${action.label}`);
     return;
   }
@@ -5149,6 +5160,8 @@ function endScene() {
   // place it would put a live "give away 3 Spirit" control on the sheet in a
   // scene the rest had nothing to do with.
   clearRestShare();
+  // v2.5. Defeated lasts the scene: "cannot take further actions in the scene".
+  clearDefeated();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${refreshed.join(', ')}.` : '';
@@ -5176,6 +5189,8 @@ function startNewSession() {
   // place it would put a live "give away 3 Spirit" control on the sheet in a
   // scene the rest had nothing to do with.
   clearRestShare();
+  // v2.5. Defeated lasts the scene: "cannot take further actions in the scene".
+  clearDefeated();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -5202,6 +5217,8 @@ function startNewAdventure() {
   // place it would put a live "give away 3 Spirit" control on the sheet in a
   // scene the rest had nothing to do with.
   clearRestShare();
+  // v2.5. Defeated lasts the scene: "cannot take further actions in the scene".
+  clearDefeated();
   saveCharacterLocal(true);
   renderAll();
   const names = refreshed.length ? ` Refreshed: ${[...new Set(refreshed)].join(', ')}.` : '';
@@ -5308,6 +5325,8 @@ function normalizeCurrentValuesInner() {
   c.currentGrowth = clampNumber(getGrowthRemaining(), 0, maxes.growth);
   c.currentMomentum = clampNumber(c.currentMomentum, 0, maxes.momentum);
   if (!Array.isArray(c.activeExhaustion)) c.activeExhaustion = [];
+  // v2.5. Arrives in a character code, so anything but a real true is nothing.
+  if (c.defeated !== true) delete c.defeated;
   if (!Array.isArray(c.oncePerSceneUsed)) c.oncePerSceneUsed = [];
   if (!Array.isArray(c.activeSceneEffects)) c.activeSceneEffects = [];
   normalizeLimitedUseAbilities();
@@ -7488,6 +7507,12 @@ function renderSheetExhaustionSection(c) {
         </div>`;
       }).join('')}
     </div>
+    <div class="defeated-card ${c.defeated ? 'active' : ''}" onclick="toggleDefeated()" tabindex="0">
+      <span class="defeated-name">${c.defeated ? 'Defeated' : 'Not defeated'}</span>
+      <span class="defeated-desc">${c.defeated
+        ? 'You suffered an Injury and take no further actions this scene, until an ally rouses you (Difficulty 2 Test, or 1 Momentum with a Combat Medkit). Click when you are back up.'
+        : 'Suffered an Injury you did not avoid? Click: you are out of the scene until an ally rouses you. End Scene clears it.'}</span>
+    </div>
   </div>`;
 }
 
@@ -7718,6 +7743,17 @@ const ACTION_DEFINITIONS = [
   {
     key: 'secondWind', name: 'Second Wind', badge: 'Momentum',
     desc: `After a successful Test, spend Momentum to restore up to 3 lost Spirit to yourself or one ally who can see and hear you. Restoring 1 Spirit costs 1 Momentum, restoring 2 costs 3 Momentum, and restoring 3 costs 6 Momentum.`
+  },
+  {
+    // v2.5. Revive and Rouse, from the Players Guide as the GM summarised it for the
+    // table. An exhausted character is still in the fight with an Attribute shut down;
+    // a defeated one took an Injury and is out of the scene until roused.
+    key: 'revive', name: 'Revive', badge: '2 Momentum',
+    desc: `Help an exhausted ally back on their feet. Spend 2 Momentum, or succeed at a Difficulty 2 Test, and the ally's exhaustion is removed and they regain 1 Spirit. Through Momentum, a supportive bond with them adds +1 Spirit.`
+  },
+  {
+    key: 'rouse', name: 'Rouse', badge: 'Difficulty 2',
+    desc: `A character who suffers an Injury rather than just running out of Spirit is defeated, and takes no further actions in the scene. An ally can bring them back with a Difficulty 2 Test, most often Resolve + Talk. Rousing ends the defeated state; it does not remove Injuries or restore Spirit. With a Combat Medkit, spending 1 Momentum while treating an Injury wakes them immediately.`
   },
   {
     key: 'createTruth', name: 'Create Truth', badge: '2 Momentum',
@@ -8027,7 +8063,7 @@ function getKnownAllyNames() {
 // Where the pickers keep what has been typed. Deliberately NOT on the character: a
 // half-typed ally name describes this visit to the sheet, and a field on the object
 // would be serialised into the share code and written to the token.
-const allyTarget = { secondWind: '', restShare: '' };
+const allyTarget = { secondWind: '', restShare: '', revive: '', rouse: '' };
 
 function setAllyTarget(which, value) {
   if (!(which in allyTarget)) return;
@@ -8056,6 +8092,16 @@ function renderAllyPicker(which) {
 // to put the effect in the room's queue, exactly as it replaces addThreat().
 function grantSpiritToAlly({ target, amount, source }) {
   showToast(`Tell ${target} to add ${amount} Spirit (${source}).`, 'info');
+}
+
+// v2.5. Two more ways one character's help reaches another sheet, replaced by the
+// module block exactly as grantSpiritToAlly() is.
+function reviveAlly({ target, amount, source }) {
+  showToast(`Tell ${target} to clear their exhaustion and add ${amount} Spirit (${source}).`, 'info');
+}
+
+function rouseAlly({ target, source }) {
+  showToast(`Tell ${target} they are roused and can act again (${source}).`, 'info');
 }
 
 // A no-op standalone on purpose: the Adrenaline Rush toast already says who benefits,
@@ -8123,6 +8169,29 @@ function applyPendingBondEffects(queue) {
       if (!findBondNaming('rivalry', fx.from)) return;
       amount = 1;
       why = `Rivalry Bond — ${fx.from} used Adrenaline Rush`;
+    } else if (fx.kind === 'revive') {
+      // v2.5. An ally revived you: the exhaustion goes, and the Spirit is added below.
+      if (bondNameKey(fx.from) === myName) return;
+      if (!bondNamesEqual(fx.target, state.character.name)) return;
+      const had = (state.character.activeExhaustion || []).length;
+      state.character.activeExhaustion = [];
+      amount = Math.max(0, Math.round(Number(fx.amount) || 0));
+      why = `${fx.source || 'Revive'} from ${fx.from || 'an ally'}${had ? ', exhaustion cleared' : ''}`;
+      if (fx.inspire) {
+        state.character.inspireAt = Number.isFinite(Number(fx.t)) ? Number(fx.t) : Date.now();
+        why += ' (Inspire: a free reroll on your next Skill Test)';
+      }
+    } else if (fx.kind === 'rouse') {
+      // v2.5. Roused: no Spirit, no Injury treated, so it never joins the total below.
+      if (bondNameKey(fx.from) === myName) return;
+      if (!bondNamesEqual(fx.target, state.character.name)) return;
+      const was = state.character.defeated === true;
+      clearDefeated();
+      kinds.add('rouse');
+      lines.push(was
+        ? `Roused by ${fx.from || 'an ally'} (${fx.source || 'Rousing Test'}) — you can act again`
+        : `${fx.from || 'An ally'} roused you (${fx.source || 'Rousing Test'}) — you were not defeated`);
+      return;
     } else if (fx.kind === 'grant') {
       if (bondNameKey(fx.from) === myName) return;
       if (!bondNamesEqual(fx.target, state.character.name)) return;
@@ -8198,6 +8267,8 @@ function applyPendingBondEffects(queue) {
   const bondish = ['rivalry', 'grant'].some(k => kinds.has(k));
   const named = [];
   if (bondish) named.push('Bond');
+  if (kinds.has('revive')) named.push('Revived');
+  if (kinds.has('rouse')) named.push('Roused');
   if (kinds.has('drive')) named.push('Drive');
   if (kinds.has('reversal')) named.push('Reversal');
   if (kinds.has('adversity')) named.push('Growth');
@@ -8370,6 +8441,125 @@ function useSecondWind(points, target, targetName) {
   saveCharacterLocal(true);
   renderAll();
   showToast(toast, 'success');
+}
+
+// ============================================================
+// REVIVE AND ROUSE (v2.5)
+// ============================================================
+// One character helps another, so the effect travels through the bond queue to the
+// helped character's sheet, the only place their exhaustion, Spirit and defeated state
+// live. The helper's sheet pays and announces.
+const REVIVE_MOMENTUM = 2;
+const ROUSE_MEDKIT_MOMENTUM = 1;
+const COMBAT_MEDKIT_ID = 'combat-medkit';
+
+function ownsItem(id) {
+  return (state.character.items || []).some(ref => ref && ref.id === id && (ref.qty == null || ref.qty > 0));
+}
+
+// Reassure: "When you attempt a Skill Test to help an ally who is exhausted, you reduce
+// the Difficulty by 1. Further, if you succeed, they regain Spirit equal to half your
+// Talk skill, rounding up, rather than only 1."
+function reviveTestDifficulty() {
+  return characterHasTalent('reassure') ? 1 : 2;
+}
+
+function reviveTestSpirit() {
+  if (!characterHasTalent('reassure')) return 1;
+  const stats = computeStats();
+  const talk = stats && stats.skills ? Number(stats.skills.talk) || 0 : 0;
+  return Math.max(1, Math.ceil(talk / 2));
+}
+
+function useRevive(route) {
+  const name = String(allyTarget.revive || '').trim();
+  if (!name) {
+    showToast('Name the ally you are reviving first.', 'error');
+    return;
+  }
+  if (bondNamesEqual(name, state.character.name)) {
+    showToast('Revive is for an ally. Your own exhaustion is cleared by a rest.', 'error');
+    return;
+  }
+  let total;
+  let toast;
+  if (route === 'momentum') {
+    const momentum = getEffectiveResource('momentum');
+    if (momentum < REVIVE_MOMENTUM) {
+      showToast(`Revive needs ${REVIVE_MOMENTUM} Momentum.`, 'error');
+      return;
+    }
+    // The supportive bond's own words: "Whenever a character helps an ally with whom
+    // they have a supportive bond to regain Spirit by spending Momentum … the ally
+    // regains +1 Spirit." Momentum only: the Test route is not that.
+    const bond = findBondNaming('supportive', name);
+    total = 1 + (bond ? 1 : 0);
+    const inspire = characterHasTalent('inspire');
+    logAction('Revive', `spent ${REVIVE_MOMENTUM} Momentum: ${name} is no longer exhausted and regains ${total} Spirit`);
+    state.character.currentMomentum = momentum - REVIVE_MOMENTUM;
+    // Inspire: "When you spend one or more Momentum to restore an ally's Spirit" — this is.
+    reviveAlly({ target: name, amount: total, source: 'Revive', inspire });
+    toast = `Spent ${REVIVE_MOMENTUM} Momentum. ${name} is no longer exhausted and regains ${total} Spirit.${bond ? ' Supportive Bond added +1.' : ''}${inspire ? ` Inspire: ${name} may re-roll 1d20 for free on their next Skill Test.` : ''}`;
+  } else {
+    total = reviveTestSpirit();
+    const diff = reviveTestDifficulty();
+    logAction('Revive', `passed a Difficulty ${diff} Test: ${name} is no longer exhausted and regains ${total} Spirit`);
+    reviveAlly({ target: name, amount: total, source: characterHasTalent('reassure') ? 'Revive (Reassure)' : 'Revive' });
+    toast = `${name} is no longer exhausted and regains ${total} Spirit.${characterHasTalent('reassure') ? ' Reassure: Difficulty 1, half your Talk in Spirit.' : ''}`;
+  }
+  logActionNow();
+  saveCharacterLocal(true);
+  renderAll();
+  showToast(toast, 'success');
+}
+
+function useRouse(route) {
+  const name = String(allyTarget.rouse || '').trim();
+  if (!name) {
+    showToast('Name the ally you are rousing first.', 'error');
+    return;
+  }
+  if (bondNamesEqual(name, state.character.name)) {
+    showToast('You cannot rouse yourself. An ally has to.', 'error');
+    return;
+  }
+  if (route === 'medkit') {
+    if (!ownsItem(COMBAT_MEDKIT_ID)) {
+      showToast('That needs a Combat Medkit.', 'error');
+      return;
+    }
+    const momentum = getEffectiveResource('momentum');
+    if (momentum < ROUSE_MEDKIT_MOMENTUM) {
+      showToast(`The Combat Medkit needs ${ROUSE_MEDKIT_MOMENTUM} Momentum to wake them.`, 'error');
+      return;
+    }
+    logAction('Rouse', `Combat Medkit, spent ${ROUSE_MEDKIT_MOMENTUM} Momentum: ${name} wakes and can act again`);
+    state.character.currentMomentum = momentum - ROUSE_MEDKIT_MOMENTUM;
+    rouseAlly({ target: name, source: 'Combat Medkit' });
+  } else {
+    logAction('Rouse', `passed a Difficulty 2 Test: ${name} can act again`);
+    rouseAlly({ target: name, source: 'Rousing Test' });
+  }
+  logActionNow();
+  saveCharacterLocal(true);
+  renderAll();
+  showToast(`${name} is roused and can act again. Their Injuries and Spirit are unchanged.`, 'success');
+}
+
+// Your own defeated state. Set by hand when an Injury lands that you did not avoid;
+// cleared by an ally rousing you, by a Combat Automed's self-revive, or by the scene
+// ending ("cannot take further actions in the scene").
+function toggleDefeated() {
+  state.character.defeated = !state.character.defeated;
+  if (state.character.defeated) logAction('Defeated', 'suffered an Injury and is out of the scene until roused');
+  else logAction('Back on their feet', 'no longer defeated');
+  logActionNow();
+  saveCharacterLocal(true);
+  renderAll();
+}
+
+function clearDefeated() {
+  if (state.character && state.character.defeated) delete state.character.defeated;
 }
 
 // ============================================================
@@ -8553,6 +8743,20 @@ function renderActionControls(action) {
     // on — and the reason the bond could not be automated before.
     const group = target => `<div class="action-controls-group"><div class="action-controls-label">${target === 'self' ? 'Restore your Spirit' : `Restore an ally's Spirit`}</div>${target === 'ally' ? renderAllyPicker('secondWind') : ''}<div class="action-controls">${[1,2,3].map(points => actionConfirmButton(`+${points} / −${costs[points]} Momentum`, `useSecondWind(${points}, '${target}')`, `Spend ${costs[points]}?`, momentum < costs[points] || (target === 'self' && missingSpirit < points))).join('')}</div></div>`;
     return `<div class="action-controls">${group('self')}${group('ally')}</div>`;
+  }
+  if (action.key === 'revive') {
+    const diff = reviveTestDifficulty();
+    const fromTest = reviveTestSpirit();
+    return `<div class="action-controls-group"><div class="action-controls-label">Revive an exhausted ally</div>${renderAllyPicker('revive')}<div class="action-controls">${
+      actionConfirmButton(`Spend ${REVIVE_MOMENTUM} Momentum`, `useRevive('momentum')`, `Spend ${REVIVE_MOMENTUM}?`, momentum < REVIVE_MOMENTUM)}${
+      actionConfirmButton(`Passed the Difficulty ${diff} Test`, `useRevive('test')`, 'Revive them?')}</div>${
+      diff < 2 ? `<div class="action-note">Reassure: Difficulty 1, and they regain ${fromTest} Spirit.</div>` : ''}</div>`;
+  }
+  if (action.key === 'rouse') {
+    const medkit = ownsItem(COMBAT_MEDKIT_ID);
+    return `<div class="action-controls-group"><div class="action-controls-label">Rouse a defeated ally</div>${renderAllyPicker('rouse')}<div class="action-controls">${
+      actionConfirmButton('Passed the Difficulty 2 Test', `useRouse('test')`, 'Rouse them?')}${
+      medkit ? actionConfirmButton(`Combat Medkit: ${ROUSE_MEDKIT_MOMENTUM} Momentum`, `useRouse('medkit')`, `Spend ${ROUSE_MEDKIT_MOMENTUM}?`, momentum < ROUSE_MEDKIT_MOMENTUM) : ''}</div></div>`;
   }
   if (action.key === 'createTruth') {
     return `<div class="action-controls">${actionConfirmButton('Spend 2 & Create Truth', 'createTruthWithMomentum()', 'Spend 2?', momentum < 2)}</div>`;
@@ -11262,6 +11466,13 @@ function installBondBridge() {
   };
   window.grantSpiritToAlly = function grantSpiritToRoom({ target, amount, source, inspire }) {
     sendBondEffect({ kind: "grant", target, amount, source, ...(inspire ? { inspire: true } : {}) });
+  };
+  // v2.5. Needs extension 1.6: an older reducer drops a kind it does not know.
+  window.reviveAlly = function reviveToRoom({ target, amount, source, inspire }) {
+    sendBondEffect({ kind: "revive", target, amount, source, ...(inspire ? { inspire: true } : {}) });
+  };
+  window.rouseAlly = function rouseToRoom({ target, source }) {
+    sendBondEffect({ kind: "rouse", target, source });
   };
 }
 

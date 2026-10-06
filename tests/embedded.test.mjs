@@ -296,6 +296,25 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   ok("Second Wind on an ally sends a grant", !!grant && grant.effect.kind === "grant");
   ok("to the named target", grant.effect.target === "Kestrel");
   ok("carrying 2 plus the supportive bond's 1", grant.effect.amount === 3);
+
+  // v2.5. Revive and Rouse travel the same queue under kinds of their own.
+  ok("the bond bridge replaced reviveAlly and rouseAlly", g("reviveAlly.name") === "reviveToRoom" && g("rouseAlly.name") === "rouseToRoom");
+  g("state.character.currentMomentum = 6;");
+  await wait(1100);
+  sent.length = 0;
+  g("setAllyTarget('revive','Kestrel'); useRevive('momentum');");
+  await wait(1100);
+  const rv = sent.filter((e) => e.type === "bond")[0];
+  ok("Revive sends a revive to the named ally", !!rv && rv.effect.kind === "revive" && rv.effect.target === "Kestrel");
+  ok("1 Spirit plus the supportive bond's 1", rv && rv.effect.amount === 2);
+  ok("and the 2 Momentum leaves the pool", sent.some((e) => e.type === "pool" && e.pool === "momentum" && e.delta === -2));
+  ok("logged as Revive", sent.some((e) => e.type === "action" && e.entry.label === "Revive"));
+  sent.length = 0;
+  g("setAllyTarget('rouse','Kestrel'); useRouse('test');");
+  await wait(1100);
+  const ro = sent.filter((e) => e.type === "bond")[0];
+  ok("Rouse sends a rouse with no amount", !!ro && ro.effect.kind === "rouse" && ro.effect.target === "Kestrel" && ro.effect.amount === undefined);
+  ok("logged as Rouse", sent.some((e) => e.type === "action" && e.entry.label === "Rouse"));
 }
 
 // -------------------------------------------------------------
