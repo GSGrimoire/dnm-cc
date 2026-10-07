@@ -280,6 +280,11 @@ const rollEv = (entry) => ({ type: "roll", entry });
 // check, is what bounds it.
 {
   const forged = (extra) => sanitizeBondEffect({ id: "f1", t: Date.now(), kind: "grant", from: "A", target: "B", amount: 1, ...extra });
+  // 1.6. A forged revive is capped like a grant; a forged rouse carries nothing to cap.
+  ok("a forged revive cannot pay more than 4", sanitizeBondEffect({ id: "fr", kind: "revive", target: "B", amount: 999 }).amount === 4);
+  ok("nor drain with a negative", sanitizeBondEffect({ id: "fr2", kind: "revive", target: "B", amount: -9 }).amount === 0);
+  ok("a forged rouse drops any amount it carries", !("amount" in sanitizeBondEffect({ id: "fr3", kind: "rouse", target: "B", amount: 50 })));
+  ok("an unknown kind is still refused", sanitizeBondEffect({ id: "fr4", kind: "resurrect", target: "B", amount: 4 }) === null);
 
   ok("an effect that is not an object is refused", sanitizeBondEffect("rivalry") === null);
   ok("an effect with no kind is refused", sanitizeBondEffect({ id: "x", t: 1 }) === null);

@@ -46,7 +46,7 @@ const isolate = (text) => text
 const EXT_FILES = [
   "background.html", "background.js", "dnm.js", "gm.html", "gm.js", "gmpanel.js",
   "gmrules.js", "icon-attach.svg", "icon-sheet.svg", "icon.svg", "index.html",
-  "roller.js", "sdk.js", "style.css",
+  "npc-token.svg", "roller.js", "sdk.js", "style.css",
 ];
 
 const obrBeta = path.join(obrDst, "beta");

@@ -303,9 +303,9 @@ h1 {
 
   <section class="panel">
     <div class="version-kicker">Current Version</div>
-    <h1>Version v.2.4 &middot; extension 1.5</h1>
+    <h1>Version v.2.5 &middot; extension 1.6</h1>
     <p class="lead">Rerolls: tap a die on your own roll to reroll it for 1 Spirit, and the free rerolls your talents and gear give you are offered too, with a yellow reminder when you have one. And the GM has a toolbox: every way the Gamemaster&apos;s Guide gives the GM to gain and spend Threat, one press each, with the book&apos;s own words on hover; Threat that ticks up every round; a hazard builder; and an NPC roster with stat blocks that can sit on tokens. Before that: the table got an initiative tracker, and the Party panel can be shared with the players. Before that: deleting a token no longer loses the character on it, the GM can keep a copy of the whole party in a couple of clicks, character codes are a third of the length they were, and the sheet is several times quicker to use.</p>
-    <p class="lead" style="font-size:.86rem;opacity:.75;">The GM tools are an <em>extension</em> update, and the sheet learned three new things to go with them. You need extension 1.5, which means reloading the room.</p>
+    <p class="lead" style="font-size:.86rem;opacity:.75;">New on the sheet in 2.5: <strong>Revive</strong> an exhausted ally for 2 Momentum or a Difficulty 2 Test, and <strong>Rouse</strong> a defeated one &mdash; with a Defeated switch on your own sheet and a mark on the Party panel. New in extension 1.6, for the GM: Chapter 5 of the Gamemaster&apos;s Guide. A Bestiary tab, and NPCs in a fight that track their Injuries, avoid them for Threat, act as allies, fight as groups and roll their own actions. Version 2.5 needs extension 1.6; everyone reloads the room once.</p>
 
     <div class="dev-note-panel">
       <h3>Player changelog vs. technical log</h3>
@@ -448,7 +448,7 @@ h1 {
       </article>
       </div>
 
-    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.4 needs extension 1.5; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
+    <div class="note">The Rolls and Actions log, the Party panel and the initiative tracker are Owlbear Rodeo features. In a normal browser tab the creator works as it always has, with rolls and abilities shown to you alone. Version 2.5 needs extension 1.6; the install link is unchanged, so nobody needs to reinstall &mdash; but everyone should reload the room once. Reload the ROOM, not just the tab: Owlbear keeps the old extension for the whole room session otherwise.</div>
   </section>
 
   <section class="panel">
@@ -459,6 +459,53 @@ h1 {
 
     <article class="timeline-entry">
       <details class="version-entry" open>
+        <summary>
+          <span class="version-tag">2.5</span>
+          <span class="version-title">Revive and Rouse</span>
+        </summary>
+        <ul>
+        <li><strong>Revive</strong> (a new card under Actions). Name an exhausted ally and either spend <strong>2 Momentum</strong> or press <em>Passed the Difficulty 2 Test</em>. Their exhaustion is cleared and they regain 1 Spirit, on their own sheet, the next time it is open.</li>
+        <li>Through Momentum, a <strong>supportive bond</strong> with them adds +1 Spirit, and <strong>Inspire</strong> gives them a free reroll, the same as Second Wind. The Test route gets neither: the bond&apos;s own text is about spending Momentum.</li>
+        <li><strong>Reassure</strong> makes the Test Difficulty 1, and they regain half your Talk (rounded up) instead of 1.</li>
+        <li><strong>Defeated.</strong> A new switch under your exhaustion cards. Turn it on when an Injury lands that you did not avoid: you take no further actions this scene. End Scene turns it off, and so does a Combat Automed&apos;s self-revive.</li>
+        <li><strong>Rouse</strong> (a new card under Actions). Name a defeated ally and press <em>Passed the Difficulty 2 Test</em> (most often Resolve + Talk), or, if you carry a <strong>Combat Medkit</strong>, spend 1 Momentum to wake them at once. It ends their defeated state; it does not treat Injuries or restore Spirit.</li>
+        <li>The <strong>Party panel</strong> marks a defeated character, so the GM and the table can see who is down.</li>
+        <li>Requires extension 1.6. Install link unchanged &mdash; but reload the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
+        <summary>
+          <span class="version-tag">1.6</span>
+          <span class="version-title">Chapter 5: the Bestiary and NPCs that fight by the book</span>
+        </summary>
+        <ul>
+        <li><strong>Everything here is GM only</strong>, and none of it changes the character sheet.</li>
+        <li><strong>Bestiary.</strong> A tab of its own in GM Tools: every stat block laid out like the book&apos;s, with attributes, skills, Defeat, Personal Threat and Protection. Hover a common ability or action (Armored, Swift, Pounce, Retreat&hellip;) for the book&apos;s wording and page. Filter by name, Normal or Major.</li>
+        <li><strong>Three ways onto the table.</strong> <em>Into fight</em> (hidden, as before), <em>On token</em> for the token you have selected, and <em>Place on map</em>, which drops a new hidden token in the middle of your view. Owlbear does not let a panel drag things onto the map, so this is the nearest thing. The token is named only &ldquo;NPC&rdquo; and carries nothing a player could read.</li>
+        <li><strong>In this fight.</strong> Open an NPC&apos;s name for its tools:
+          <ul>
+          <li><em>Injury</em> counts towards its Defeat: one for a Normal NPC, its Truths plus one for a Major NPC. A group loses one of its number instead.</li>
+          <li><em>Avoid the Injury</em> works out the cost from the attack&apos;s damage and its Protection (halved by Breaker, plus Defend and ranged Protection where it has them), pays it from Personal Threat first, and refuses if the pool is short, as the book says.</li>
+          <li><em>Adversary / Ally / Bystander.</em> An ally adds Threat wherever it would spend it.</li>
+          <li><em>Groups</em> show the Difficulty they add while they can defend, the Momentum for extra hits, and a 2-Threat counter-attack.</li>
+          <li>A button for every ability that costs or gives Threat: Threatening (+1 and its turn ticked), Solitary&apos;s extra turns (1, then 2, then 3), Hunt, Retreat, Swift, Pounce, Lurk, and anything whose own text says &ldquo;spend N Threat&rdquo;, like the Barg&apos;s Trample or the Cryptid&apos;s Stun-flash.</li>
+          <li><em>Roll its action</em> rolls a Major NPC&apos;s d20 table. Only you see the result.</li>
+          </ul></li>
+        <li><strong>Decrepit</strong> NPCs roll complications on 19 or 20 when you roll for them in the roller.</li>
+        <li><strong>Menacing is Threatening.</strong> Chapter 4 points to a &ldquo;Menacing&rdquo; ability that Chapter 5 does not have; it prints Threatening (+1 Threat each time it acts). Stat blocks with Menacing set now have Threatening. The old &ldquo;Threat when it arrives&rdquo; is a house rule you can switch on in Adventure setup; it is off by default.</li>
+        <li><strong>The editor</strong> picks a Competence level (Basic to Master) to fill an attribute and skill, adds the book&apos;s common abilities and actions from a list, and knows Protection against ranged attacks.</li>
+        <li><strong>Chapter 5&apos;s creatures</strong> come as a separate file you import, not with the extension: the Thrall, the Decrepit Medium Waker, Akriti, Barg, Cryptid, Horse, Manylegs, Prowlcat, Snarlback and Wolf Hunter. Import takes a file as well as pasted text now.</li>
+        <li>Fixed: a weapon&apos;s damage was cut to ten characters, so &ldquo;Plasma Burn 3&rdquo; lost its number.</li>
+        <li>Requires extension 1.6 for the GM. Players need nothing new &mdash; but everyone reloads the room once.</li>
+        </ul>
+      </details>
+    </article>
+
+    <article class="timeline-entry">
+      <details class="version-entry">
         <summary>
           <span class="version-tag">v.2.4 &middot; 1.5</span>
           <span class="version-title">GM tools</span>

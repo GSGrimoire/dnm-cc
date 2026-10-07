@@ -14,23 +14,21 @@ ships, delete it and let `UPGRADE_NOTES.md` carry the record.
 
 ---
 
-## Open — Chapter 5: the bestiary and what Menacing really does
+## Open — what Chapter 5 left for later
 
-Shipped in 1.5: a roster in the GM's browser (option 1 of the old entry here), NPCs on
-tokens by opaque id (option 2, without a second code format — the stat block never goes
-on the token at all), export/import, and a custom stat block editor. What is left is
-CONTENT and the rules Chapter 4 only points at:
+1.6 shipped the chapter's rules and its ten stat blocks (as a private import file).
 
-- The book's adversaries. The four samples in `gmrules.js` are placeholders in the
-  book's shape. Licensing still applies before shipping published stat blocks in a
-  public repo — the old option 3 question stands.
-- Menacing is used only as "Threat when it enters the scene", added once per row. If
-  Chapter 5 scales it per NPC in a group, or gives it other effects, `revealFighter()`
-  is the one place to change.
-- NPC tiers beyond Normal and Major, if the book has them.
-- "Revive" — reported as a rule the table had not seen; it is not in Chapter 4.
-- A Major NPC's action table could be rolled (the roll ranges are stored) rather than
-  read.
+- **More creatures.** Chapter 5 has one Waker and no machines or people beyond the
+  Thrall. If another book or the Quickstart has stat blocks, they go in the same private
+  file, never the repo.
+- **Quote Revive and Rouse.** 2.5 built them from the GM's NotebookLM summary of the
+  Players Guide. When the Players Guide is to hand, check the numbers against the page
+  and note the page on the action cards.
+- **Allies under a player's control** (p.126: "Players can often take direct control of
+  NPCs"). Today only the GM rolls for an NPC token. Letting a player do it means the
+  player's client reading a stat block, which lives only in the GM's browser.
+- **Lurk hides the token** (p.131: "remove their token from its current zone"). The
+  button spends the Threat; hiding the token is still the GM's click in Owlbear.
 
 ---
 
