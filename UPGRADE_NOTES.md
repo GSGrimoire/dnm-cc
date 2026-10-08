@@ -2,6 +2,33 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 1.7 — Zoom in the roller
+
+`dnm-obr` **1.6 → 1.7**; creator unchanged at **2.5**. A number: a new control.
+
+Asked for "just like in the character sheet", so it is the sheet's: CSS `zoom` on
+`#app` (it reflows; a transform would keep the layout width and scroll sideways),
+steps of 0.1, the sheet's range `DOCK_LIMITS.zoom` (0.6–1.6), the sheet's
+`.obr-zoomgroup` markup and look.
+
+- **The resize strip moved OUTSIDE `#app`** so the zoom control does not scale itself
+  (a 160% bar would grow its own buttons out from under the pointer). Its top margin went
+  from 6px to 15px to keep the gap `#app`'s 9px gap used to add.
+- Stored in `localStorage` under `dnm-obr/panel-zoom`, beside `dnm-obr/panel-height`:
+  one person's view, not table state. Clamped on the way OUT; nonsense reads as 100%.
+- The drawer's width is Owlbear's (420px), so zooming in narrows the layout. Measured:
+  nothing runs off the right edge at 60% or 160% at 420px.
+- Tooltips (`.gm-tip`) are appended to `body`, outside the zoom, and placed from
+  `getBoundingClientRect()`, which Chromium reports in zoomed coordinates — the same
+  arrangement the GM pop-out has had since 1.5.
+
+Tests: gmtools 216 — the default, a step, both limits with the buttons disabled, the bar
+outside what it scales, nothing off the edge at either limit, persistence across a reload,
+a stored 50 clamped and nonsense read as 100%.
+
+Live check: zoom in the real drawer, and check the party panel's sheet links and the GM
+tools' tooltips still land where they should.
+
 # 2.5 (creator) — Revive and Rouse
 
 Creator **2.4 → 2.5**, needs extension **1.6** (which carries the two new bond kinds and

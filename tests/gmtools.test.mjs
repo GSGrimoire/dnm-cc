@@ -1132,6 +1132,65 @@ async function press(page, startsWith, times = 2) {
   await page.close();
 }
 
+// 1.7: the roller zooms like the sheet.
+{
+  const { page, errors } = await boot();
+  const z = () => page.evaluate(() => ({
+    readout: document.getElementById("zoom-readout").textContent,
+    css: document.getElementById("app").style.zoom,
+    stored: localStorage.getItem("dnm-obr/panel-zoom"),
+    inDisabled: document.getElementById("zoom-in").disabled,
+    outDisabled: document.getElementById("zoom-out").disabled,
+  }));
+  let r = await z();
+  ok(`the roller opens at 100% (${r.readout})`, r.readout === "100%" && r.css === "");
+  ok("the zoom bar is outside what it scales", await page.evaluate(() => !document.getElementById("app").contains(document.getElementById("zoom-in"))));
+  await page.click("#zoom-in");
+  r = await z();
+  ok(`+ zooms in by 10% (${r.readout}, ${r.css})`, r.readout === "110%" && r.css === "1.1" && r.stored === "1.1");
+  for (let i = 0; i < 12; i++) await page.click("#zoom-in", { force: true });
+  r = await z();
+  ok(`it stops at the sheet's 160% (${r.readout})`, r.readout === "160%" && r.inDisabled && !r.outDisabled);
+  const over = async () => page.evaluate(() => [...document.querySelectorAll("#app *")]
+    .filter((e) => e.getClientRects().length && e.getBoundingClientRect().right > window.innerWidth + 1)
+    .map((e) => (e.className || e.tagName) + ":" + (e.textContent || "").trim().slice(0, 18)));
+  let o = await over();
+  ok(`at 160% in the 420px drawer nothing runs off the right edge${o.length ? " — " + o.slice(0, 4).join(" | ") : ""}`, o.length === 0);
+  for (let i = 0; i < 12; i++) await page.click("#zoom-out", { force: true });
+  r = await z();
+  ok(`and at the sheet's 60% the other way (${r.readout})`, r.readout === "60%" && r.outDisabled && !r.inDisabled);
+  o = await over();
+  ok(`at 60% nothing runs off the edge either${o.length ? " — " + o.slice(0, 4).join(" | ") : ""}`, o.length === 0);
+  ok("no page errors from zooming", errors.length === 0);
+  await page.close();
+}
+{
+  // A stored value from a hostile or broken page reads back as 100%, never as zoom: 50.
+  // Seeded once per tab: boot()'s own init script clears storage on EVERY load, which
+  // is why persistence is tested here and not above.
+  const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.clear();
+    localStorage.setItem("dnm-obr/panel-zoom", "50");
+  });
+  const reload = async () => { await page.reload(); await page.waitForFunction(() => !!window.__stub); await page.waitForTimeout(200); };
+  const readout = () => page.evaluate(() => document.getElementById("zoom-readout").textContent);
+  await page.goto(url);
+  await page.waitForFunction(() => !!window.__stub);
+  await page.waitForTimeout(200);
+  ok("a stored zoom of 50 is clamped to 160%", await readout() === "160%");
+  await page.click("#zoom-out"); await page.click("#zoom-out");
+  await reload();
+  ok(`a chosen zoom survives a reload (${await readout()})`, await readout() === "140%"
+    && await page.evaluate(() => document.getElementById("app").style.zoom) === "1.4");
+  await page.evaluate(() => localStorage.setItem("dnm-obr/panel-zoom", "nonsense"));
+  await reload();
+  ok("and nonsense reads as 100%", await readout() === "100%");
+  await page.close();
+}
+
 // Creator 2.5: a defeated character is marked on their party row.
 {
   const { page } = await boot();
