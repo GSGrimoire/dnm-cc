@@ -350,6 +350,36 @@ const RUNNING = {
   await page.close();
 }
 
+// Run the actual die handler, then feed the event through the actual room reducer.
+{
+  const { page, errors } = await boot();
+  const original = { id: 'click-spirit', t: Date.now(), by: 'player-1', who: 'Kesh',
+    an: 'Might', av: 10, sn: 'Fight', sv: 2, diff: 2, compAt: 20, src: 'pc',
+    detail: [{ d: 19, kind: 'fail' }, { d: 9, kind: 'success' }], succ: 1, comp: 0, pass: false, gain: 0 };
+  await page.evaluate(({ key, roll }) => {
+    window.__stub.sent.length = 0;
+    window.__stub.setMeta({ [key]: { momentum: 2, threat: 0, log: [roll] } });
+    Math.random = () => 0; // the selected die becomes a critical 1
+  }, { key: ROOM_KEY, roll: original });
+  const die = page.locator('#log button.die.fail');
+  ok('roller failed die advertises 1 Spirit', /1 Spirit/.test(await die.getAttribute('title')));
+  await die.click();
+  const sent = await page.evaluate(() => window.__stub.sent);
+  const event = sent.find(e => e.type === 'reroll');
+  ok('one click sends a Spirit reroll without a confirmation picker', event?.how === 'spirit' && event.dice.length === 1 && event.dice[0].i === 0 && event.dice[0].to === 1);
+  ok('roller marks Spirit for the character sheet to collect once', event?.pay === 'room');
+  ok('roller sends no Momentum or Threat spend', !sent.some(e => e.type === 'pool'));
+  const { applyEvent } = await import('../out/dnm-obr/dnm.js');
+  const next = applyEvent({ momentum: 2, threat: 0, log: [original] }, event, { sender: 'player-1' });
+  await page.evaluate(({ key, state }) => window.__stub.setMeta({ [key]: state }), { key: ROOM_KEY, state: next });
+  ok('the shared log shows both die values and the Spirit price', /Reroll 19 → 1 \(1 Spirit\)/.test(await page.locator('#log').textContent()));
+  ok('only the selected die changed and the new verdict is shown', next.log[0].detail.map(d => d.d).join() === '1,9' && /3 successes vs D2/.test(await page.locator('#log').textContent()));
+  ok('the original result remains visible', await page.locator('#log .is-replaced').textContent() === '19');
+  ok('a second click cannot request another paid reroll', await page.locator('#log button.die').count() === 0);
+  ok('direct reroll produces no browser errors', errors.length === 0);
+  await page.close();
+}
+
 await browser.close();
 await site.close();
 fs.rmSync(stageDir, { recursive: true, force: true });

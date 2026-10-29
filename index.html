@@ -2872,7 +2872,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.5B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -10222,6 +10222,18 @@ function sheetRerollOptions(e) {
 // One roll at a time: which recent roll (by its index in the list) and which dice.
 const sheetRerollPick = { idx: -1, dice: [] };
 
+function rerollSheetDie(idx, die) {
+  const e = normalizeRecentRolls()[idx];
+  if (!e || !Number.isInteger(die) || die < 0 || die >= e.d.length) return;
+  const kind = classifyDie(e.d[die], e.av, e.sv, e.at);
+  const direct = sheetRerollPick.idx !== idx && (kind === 'fail' || kind === 'complication')
+    && sheetRerollOptions(e).some(o => o.how === 'spirit');
+  if (!direct) { toggleSheetPick(idx, die); return; }
+  sheetRerollPick.idx = idx;
+  sheetRerollPick.dice = [die];
+  applySheetReroll(idx, 'spirit');
+}
+
 function toggleSheetPick(idx, die) {
   if (sheetRerollPick.idx !== idx) { sheetRerollPick.idx = idx; sheetRerollPick.dice = []; }
   const at = sheetRerollPick.dice.indexOf(die);
@@ -10273,16 +10285,23 @@ function renderRerollableDice(e, idx, small) {
     const cls = classifyDie(n, e.av, e.sv, e.at);
     if (!mine) return `<div class="die${size} ${cls}">${n}</div>`;
     const picked = picking && sheetRerollPick.dice.includes(i);
-    return `<button type="button" class="die${size} ${cls} die-pick${picked ? ' is-picked' : ''}" aria-pressed="${picked}" title="${picked ? 'Picked to reroll. Press again to put it back.' : 'Press to pick this die to reroll.'}" onclick="toggleSheetPick(${idx}, ${i})">${n}</button>`;
+    const direct = !picking && (cls === 'fail' || cls === 'complication') && opts.some(o => o.how === 'spirit');
+    const title = direct ? 'Reroll this die for 1 Spirit.' : picked ? 'Picked to reroll. Press again to put it back.' : 'Press to pick this die to reroll.';
+    return `<button type="button" class="die${size} ${cls} die-pick${picked ? ' is-picked' : ''}" aria-pressed="${picked}" title="${title}" onclick="rerollSheetDie(${idx}, ${i})">${n}</button>`;
   }).join('')}</div>`;
   html += `<div class="recent-roll-sum ${e.pa ? 'pass' : 'fail'}">${rerollSummaryBits(e.su, e.co, e.pa, e.gn, e.df)}</div>`;
+  if (!picking && opts.length) {
+    const first = Math.max(0, e.d.findIndex(n => ['fail', 'complication'].includes(classifyDie(n, e.av, e.sv, e.at))));
+    if (opts.some(o => o.how === 'spirit')) html += '<div class="dice-pick-hint">Click a non-success die to reroll it for 1 Spirit.</div>';
+    html += `<button type="button" class="mini-btn no-print" onclick="toggleSheetPick(${idx}, ${first})">Choose other reroll options</button>`;
+  }
   // The free-reroll reminder, asked for at the table: the yellow note under a roll that a
   // talent or a piece of gear lets you reroll for nothing.
   // Only the free rerolls LIKELY to apply get the reminder (rerollHintLikelyCC). All of
   // them are still in the panel when a die is picked.
   const free = opts.filter(o => o.cost === 'free' && o.likely);
   if (free.length) {
-    html += `<div class="reroll-hint dm-tip" tabindex="0">Free reroll: ${free.map(o => escHtml(o.label) + (o.when ? ` (only if ${escHtml(o.when)})` : '')).join('; ')}. Press a die to use it.<span class="dm-tip-body"><span class="dm-tip-title">Free rerolls on this roll</span><span class="dm-tip-desc">${free.map(o => `${escHtml(o.label)}: ${escHtml(o.text || '')}`).join(' ')}</span></span></div>`;
+    html += `<div class="reroll-hint dm-tip" tabindex="0">Free reroll: ${free.map(o => escHtml(o.label) + (o.when ? ` (only if ${escHtml(o.when)})` : '')).join('; ')}. Choose other reroll options to use it.<span class="dm-tip-body"><span class="dm-tip-title">Free rerolls on this roll</span><span class="dm-tip-desc">${free.map(o => `${escHtml(o.label)}: ${escHtml(o.text || '')}`).join(' ')}</span></span></div>`;
   }
   if (picking && mine) {
     const n = sheetRerollPick.dice.length;
