@@ -2,6 +2,37 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.5B / 1.7B: direct Spirit reroll fix
+
+Clicking a non-success die previously only selected it, requiring the player to find
+and confirm a separate payment button. It now rerolls exactly that die for **1 Spirit**.
+The initial request mentioned Momentum, but the owner explicitly corrected the cost to
+Spirit before release. No Momentum payment path was shipped.
+
+Both the extension and the creator reuse the existing Spirit reroll functions, payment
+tracking and log renderer. The original result stays in `o`; `rr` supplies the old and
+new die values and the price, followed by the recalculated result. The direct path never
+selects a second die even with Mobile. A visible **Choose other reroll options** button
+keeps free rerolls, Mobile and the existing GM payment sources accessible. Free-reroll
+reminders point to that button to avoid accidentally spending Spirit.
+
+Existing rules remain: your own rolls only, one paid reroll per roll, and no rerolls
+after claiming Momentum. Roller payments continue to be collected once by the character
+sheet through `reconcileRerolls()`, immediately when open or on reopening; the roller
+never rewrites a character token. Hidden/secret rolls retain their existing behavior.
+
+Validation: codec, creator, embedded, party, dock and security suites, plus
+`node --experimental-vm-modules tests/rollerclick.test.mjs`. The latter loads the real
+roller modules in a document simulator, clicks the rendered die and runs the event through
+the real reducer. It checks the event, log, old and new dice, updated verdict, ownership,
+claimed-roll lock and duplicate delivery. The browser regression is also in rollerui.
+This environment blocks the sockets Chromium needs, so layout, rollerui and gmtools browser
+suites could not run here. These checks do not establish delivery in a live Owlbear room.
+
+Deploy extension **1.7B first**, creator **2.5B second**. Everyone must reload the ROOM,
+not just reopen the sheet or roller. Live check: roll, click a failed die in each surface,
+confirm one Spirit is removed and the new result appears for another connected player.
+
 # 1.7 — Zoom in the roller
 
 `dnm-obr` **1.6 → 1.7**; creator unchanged at **2.5**. A number: a new control.

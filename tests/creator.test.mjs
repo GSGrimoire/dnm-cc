@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 2.5", g("APP_VERSION") === "2.5");
+ok("APP_VERSION is 2.5B", g("APP_VERSION") === "2.5B");
 
 // -------------------------------------------------------------
 // Fixture
@@ -1476,6 +1476,40 @@ const DM1_EXPECTED = {
   const hostile = recent()[0];
   ok("a code's reroll records are capped and clamped", hostile.rr.length <= 10 && hostile.rr.every((x) => x.from <= 20 && x.to >= 1 && x.i < 5));
   ok("no roll id reaches an onclick", !g("[...document.querySelectorAll('#recentRollsArea [onclick]')].some(b => b.getAttribute('onclick').includes('alert'))"));
+}
+
+// A click on a non-success die must perform the paid reroll, not just open a picker.
+{
+  buildCharacter();
+  g(`state.character.currentSpirit = 3; state.character.currentMomentum = 2;
+    state.character.recentRolls = [];
+    var clickResult = { rollId: 'click-spirit', attrName: 'Might', attrValue: 10,
+      skillName: 'Fight', skillValue: 2, dice: [19, 9], difficulty: 2,
+      successes: 1, complications: 0, passed: false, momentumGained: 0 };
+    diceUI.lastResult = clickResult; recordRecentRoll(clickResult); renderAll();`);
+  const previousRollDie = w.rollDie;
+  w.rollDie = () => 1;
+  const button = w.document.querySelector('#diceResultArea button.die.fail');
+  ok('failed die advertises its Spirit price', button && /1 Spirit/.test(button.title));
+  button?.click();
+  ok('one click costs exactly 1 Spirit', g("getEffectiveResource('spirit')") === 2);
+  ok('direct reroll does not spend Momentum', g("getEffectiveResource('momentum')") === 2);
+  ok('only the selected die changes', g('normalizeRecentRolls()[0].d.join()') === '1,9');
+  ok('recent log shows old die, new die and Spirit cost', /Reroll 19 → 1 \(1 Spirit\)/.test(w.document.querySelector('#recentRollsArea').textContent));
+  ok('the open result has the new successes and surplus', g('diceUI.lastResult.successes') === 3 && g('diceUI.lastResult.momentumGained') === 1);
+  ok('direct reroll respects the existing one-paid-reroll limit', !g('sheetRerollOptions(normalizeRecentRolls()[0]).some(o => o.how === "spirit")'));
+  // Repeat through Recent Rolls, the separate rendering shown after reopening a sheet.
+  g(`state.character.recentRolls[0].rr = []; delete state.character.recentRolls[0].o;
+    state.character.recentRolls[0].d = [20, 9]; renderAll();`);
+  w.document.querySelector('#recentRollsArea button.die.complication')?.click();
+  ok('a complication in Recent Rolls also rerolls for one Spirit', g('normalizeRecentRolls()[0].d.join()') === '1,9' && g("getEffectiveResource('spirit')") === 1);
+  g(`state.character.currentSpirit = 0; state.character.recentRolls[0].rr = [];
+    state.character.recentRolls[0].d = [19, 9]; renderAll();`);
+  g('rerollSheetDie(0, 0)');
+  ok('no Spirit means no direct paid reroll', g('normalizeRecentRolls()[0].d.join()') === '19,9' && g("getEffectiveResource('spirit')") === 0);
+  g(`state.character.currentSpirit = 2; clearSheetPick(); rerollSheetDie(0, 1);`);
+  ok('clicking a success does not automatically spend Spirit', g("getEffectiveResource('spirit')") === 2 && g('normalizeRecentRolls()[0].d.join()') === '19,9');
+  w.rollDie = previousRollDie;
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);
