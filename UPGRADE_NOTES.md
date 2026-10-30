@@ -2,6 +2,48 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.6 / 1.8: extra dice for Spirit on primary tests
+
+Two base dice plus 0 to 3 extra dice, one Spirit per extra die, five total at most.
+The sheet's old free-form count is now a read-only base count and an explicit purchase
+selector. The total and cost are on the Roll button. Selection spends nothing; doRoll()
+checks current Spirit and Exhaustion before rolling or charging, records boughtDice and
+clears the extra choice after a successful roll. The shared log and recent rolls carry
+the actual purchase count. Rerolls still cost their own Spirit independently.
+
+The extension does not write a character's resources. Its paid-roll control opens the
+selected token's existing sheet popover with a bounded test request. The sheet loads the
+current code, catches up on room changes, validates Attribute, Skill, Difficulty and
+purchase count, and completes the same doRoll() path. The label and one roll id are
+preserved; the roller does not broadcast a duplicate test or debit a second pool.
+
+A request is removed from the frame URL before execution and its id is saved on the
+character in paidRollRequests (the latest 20). A double click cannot open two requests;
+a retry after an uncertain popover response reuses the id for the same setup. The sheet
+commits after completing an automatic test. Invalid, unaffordable or exhausted tests do
+not spend Spirit. A connected GM is required for paid room tests.
+
+User interface: the selected-character roller locks the base to two dice; manual and
+adversary rolls retain their existing dice-count controls. Purchases in the roller require
+Open mode, clearly stated next to the selector. The sheet is opened rather than editing
+tokens behind an already-open sheet, which would introduce two character writers. Normal
+sheet purchases work standalone against that character's own Spirit. The responsive
+layout puts the rolling-stat readout above the controls and gives the priced Roll button
+its own row in narrow panels. The roller's conceal controls and Roll button now wrap.
+
+Validation: codec, creator, embedded, party, dock, security and rollerclick suites.
+Assertions cover 0 to 3 extras, exact Spirit payment, no Momentum/Threat spend, explicit
+prices, reset, insufficient funds, duplicate requests, invalid requests, export retention,
+matching label and owner, and uncertain-open retries. A mutation removing the Spirit
+charge must fail the direct request regression. Chromium and live Owlbear round trips
+remain unavailable in this environment, so actual panel geometry and popover execution
+need a room check. No claims of visual measurement are made.
+
+Deploy extension 1.8 first, sheet 2.6 second. Everyone must reload the ROOM. Live check:
+select a token, choose +2 Spirit dice and roll; confirm the sheet opens with four dice,
+Spirit falls by two, and another connected player sees the test and cost in the log.
+Then test the same selector directly on the sheet and an unaffordable purchase.
+
 # 2.5B / 1.7B: direct Spirit reroll fix
 
 Clicking a non-success die previously only selected it, requiring the player to find
