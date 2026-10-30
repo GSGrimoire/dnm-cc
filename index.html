@@ -1457,12 +1457,21 @@ body::after {
 }
 .dice-controls {
   display: grid;
-  grid-template-columns: auto 1fr 1fr auto;
+  grid-template-columns: auto minmax(130px, 1fr) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
 }
 .dice-field { display: flex; flex-direction: column; gap: 5px; }
+.dice-field.dice-picked { grid-column: 1 / -1; order: -1; }
+.dice-purchase-summary { margin: 0 0 10px; color: var(--text-dim); font-size: .76rem; }
+@media (max-width: 700px) {
+  .dice-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .dice-field { min-width: 0; }
+  .dice-field:last-child { grid-column: 1 / -1; }
+  .dice-field:nth-last-child(2) { grid-column: 1 / -1; }
+  .dice-select, .dice-num, .dice-roll-btn { width: 100%; min-width: 0; }
+}
 .dice-field label {
   font-family: var(--font-mono);
   font-size: 0.58rem;
@@ -2872,7 +2881,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.5B';
+const APP_VERSION = '2.6';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -9793,7 +9802,23 @@ function refreshInventory() {
 const ATTR_KEYS = ['might','quickness','insight','resolve'];
 const SKILL_KEYS = ['fight','move','operate','sneak','study','survive','talk'];
 
-const diceUI = { attr: 'might', skill: 'fight', count: 2, difficulty: 1, lastResult: null };
+const diceUI = { attr: 'might', skill: 'fight', count: 2, extra: 0, difficulty: 1, lastResult: null };
+
+function selectedExtraDice() { return Math.max(0, Math.min(3, Math.floor(Number(diceUI.extra) || 0))); }
+function canPaySpiritDice() { return true; }
+
+// A roller purchase is a bounded, one-shot setup for the same primary roll handler.
+// This leaves character resources on the sheet and makes reloading a request harmless.
+function runPreparedSpiritTest(request) {
+  if (!request || typeof request !== 'object' || typeof request.id !== 'string' || !/^[a-zA-Z0-9_-]{1,40}$/.test(request.id)) return null;
+  if (!ATTR_KEYS.includes(request.attr) || !SKILL_KEYS.includes(request.skill)) return null;
+  if (!Number.isInteger(request.extra) || request.extra < 1 || request.extra > 3) return null;
+  if (!Number.isInteger(request.difficulty) || request.difficulty < 0 || request.difficulty > 5) return null;
+  if (Array.isArray(state.character.paidRollRequests) && state.character.paidRollRequests.slice(-20).some(id => String(id) === request.id)) return null;
+  diceUI.attr = request.attr; diceUI.skill = request.skill;
+  diceUI.extra = request.extra; diceUI.difficulty = request.difficulty;
+  return doRoll(request);
+}
 
 function rollDie() { return 1 + Math.floor(Math.random() * 20); }
 
@@ -9834,15 +9859,23 @@ function renderDicePanel() {
   const attrName = DM_DATA.attributeInfo[diceUI.attr].name;
   const skillName = DM_DATA.skillInfo[diceUI.skill].name;
   const selectedAttrExhausted = isAttrExhausted(diceUI.attr);
+  const extra = selectedExtraDice();
+  const spirit = getEffectiveResource('spirit');
+  const affordable = extra <= spirit && (!extra || canPaySpiritDice());
 
   return `<div class="sheet-section no-print" id="dicePanelAnchor" style="border-top:1px solid var(--border);padding-top:20px;">
     <div class="sheet-section-title">Dice Roller</div>
     <div class="dice-panel">
       <div class="dice-controls">
         <div class="dice-field">
-          <label>Dice</label>
-          <input type="number" class="dice-num" id="diceCount" min="1" max="5" value="${diceUI.count}"
-            oninput="diceUI.count=Math.max(1,Math.min(5,parseInt(this.value)||1));">
+          <label for="diceCount">Base dice</label>
+          <input type="number" class="dice-num" id="diceCount" value="2" readonly aria-label="2 base dice">
+        </div>
+        <div class="dice-field">
+          <label for="spiritExtraDice">Extra dice for Spirit</label>
+          <select class="dice-select" id="spiritExtraDice" aria-describedby="dicePurchaseSummary" onchange="diceUI.extra=Number(this.value);renderAll();">
+            ${[0,1,2,3].map(n => `<option value="${n}"${n === extra ? ' selected' : ''}${n > spirit ? ' disabled' : ''}>${n ? `+${n} ${n === 1 ? 'die' : 'dice'} · ${n} Spirit` : 'None · 0 Spirit'}</option>`).join('')}
+          </select>
         </div>
         <div class="dice-field dice-picked">
           <label>Rolling</label>
@@ -9860,9 +9893,10 @@ function renderDicePanel() {
         </div>
         <div class="dice-field">
           <label>&nbsp;</label>
-          <button class="dice-roll-btn" onclick="doRoll()" ${selectedAttrExhausted ? 'disabled' : ''}>Roll</button>
+          <button class="dice-roll-btn" onclick="doRoll()" ${selectedAttrExhausted || !affordable ? 'disabled' : ''}>Roll ${2 + extra} dice${extra ? ` · ${extra} Spirit` : ''}</button>
         </div>
       </div>
+      <p class="dice-purchase-summary" id="dicePurchaseSummary">${extra && !canPaySpiritDice() ? 'A GM must be connected to record a paid roll.' : !affordable ? `Needs ${extra} Spirit; only ${spirit} available.` : `2 base${extra ? ` + ${extra} extra` : ''} = ${2 + extra} dice. ${extra ? `Spend ${extra} Spirit when you roll.` : 'No Spirit cost.'}`} Up to 3 extra dice.</p>
       <div class="dice-pick-hint">Tap an Attribute or a Skill above to change what you are rolling.</div>
       ${selectedAttrExhausted ? `<div class="dice-disabled-note">${attrName} is shut down by an active Exhaustion state. Rolls using this attribute are disabled.</div>` : ''}
       ${renderDiceContextNotes(diceUI.attr, diceUI.skill)}
@@ -9913,6 +9947,7 @@ function recordRecentRoll(res) {
     co: clampNumber(res.complications, 0, 99),
     pa: !!res.passed,
     gn: clampNumber(res.momentumGained, 0, 99),
+    boughtDice: clampNumber(res.boughtDice, 0, 3),
     at: getCompAt(),
     // v2.4. Made on THIS sheet, so this sheet may reroll it. A roll picked up from the
     // room (made in the roller) is rerolled in the roller instead.
@@ -9948,6 +9983,7 @@ function normalizeRecentRolls() {
     co: clampNumber(e.co, 0, 99),
     pa: !!e.pa,
     gn: clampNumber(e.gn, 0, 99),
+    boughtDice: clampNumber(e.boughtDice, 0, 3),
     at: clampNumber(e.at, 15, 20) || 20,
     // v2.4. Rerolls. All of it arrives in a character code, so all of it is clamped:
     // `rr` and `o` are rendered, and `rr` is looped over.
@@ -10273,7 +10309,7 @@ function renderRerollableDice(e, idx, small) {
   const mine = opts.length > 0;
   const size = small ? ' small' : '';
   const replaced = new Set((e.rr || []).map(r => r.i));
-  let html = '';
+  let html = e.boughtDice ? `<div class="dice-pick-hint">${e.boughtDice} extra ${e.boughtDice === 1 ? 'die' : 'dice'} bought for ${e.boughtDice} Spirit</div>` : '';
   if (e.o && e.rr && e.rr.length) {
     html += `<div class="dice-faces">${e.o.d.map((n, i) => `<div class="die${size} ${classifyDie(n, e.av, e.sv, e.at)}${replaced.has(i) ? ' is-replaced' : ''}">${n}</div>`).join('')}</div>`;
     html += `<div class="recent-roll-sum ${e.o.pa ? 'pass' : 'fail'}">${rerollSummaryBits(e.o.su, e.o.co, e.o.pa, e.o.gn, e.df)}</div>`;
@@ -10425,30 +10461,37 @@ function computeRoll(d20count, attr, skill) {
   };
 }
 
-function doRoll() {
+function doRoll(request = null) {
   if (isAttrExhausted(diceUI.attr)) {
     const area = document.getElementById('diceResultArea');
     const attrName = DM_DATA.attributeInfo[diceUI.attr].name;
     if (area) area.innerHTML = `<div class="dice-result" style="border-left-color:var(--accent);"><div class="dice-summary"><span class="comp">${attrName} is shut down by Exhaustion. This roll is disabled.</span></div></div>`;
     return;
   }
-  const res = computeRoll(diceUI.count, diceUI.attr, diceUI.skill);
+  const extra = selectedExtraDice();
+  const spirit = getEffectiveResource('spirit');
+  if (extra && !canPaySpiritDice()) { showToast('A GM must be connected to record a paid roll.', 'warning'); return null; }
+  if (extra > spirit) { showToast(`Not enough Spirit: need ${extra}, have ${spirit}.`, 'warning'); return null; }
+  const id = request && typeof request.id === 'string' ? request.id.slice(0, 40) : null;
+  const done = Array.isArray(state.character.paidRollRequests) ? state.character.paidRollRequests.slice(-20).map(x => String(x).slice(0, 40)) : [];
+  if (id && done.includes(id)) return null;
+  const res = computeRoll(2 + extra, diceUI.attr, diceUI.skill);
+  res.boughtDice = extra;
+  res.label = request && typeof request.label === 'string' ? request.label.slice(0, 40) : '';
+  if (extra) state.character.currentSpirit = spirit - extra;
+  if (id) state.character.paidRollRequests = [...done, id].slice(-20);
+  diceUI.extra = 0;
   // v2.1. One id per roll, generated here because both things that record the roll need
   // to agree on it: the local Recent Rolls list, and the entry that goes to the shared
   // log. Same shape the roller and postRoll() have always used.
-  res.rollId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  res.rollId = id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   diceUI.lastResult = res;
   // v1.29. Recorded here rather than in postRoll(), so it works in a plain browser tab
   // as well as in Owlbear — postRoll is the Owlbear bridge and does nothing standalone.
   recordRecentRoll(res);
   saveCharacterLocal(true);
-  const area = document.getElementById('diceResultArea');
-  if (area) area.innerHTML = renderDiceResult(res);
-  // The result area is patched in place above, so the Recent Rolls block below it needs
-  // its own redraw. A full renderAll() would work and would also rebuild the dice
-  // selects mid-interaction, which loses the focus a keyboard user is holding.
-  const recent = document.getElementById('recentRollsArea');
-  if (recent) recent.innerHTML = renderRecentRolls();
+  // Refresh the Spirit counter, affordability and cleared purchase selection together.
+  renderAll();
 
   // postRoll() is a no-op here and is REPLACED by the module block in embedded
   // mode, which is what carries the roll to the shared log. Keeping the call site
@@ -10456,6 +10499,7 @@ function doRoll() {
   // removing this line would silently stop rolls reaching the table in Owlbear
   // while the sheet carried on looking correct.
   postRoll(state.character.name || 'Unnamed', res);
+  return res;
 }
 
 // Standalone this does nothing: a single browser tab has no table to announce to,
@@ -11219,6 +11263,7 @@ function hookRenderAll() {
 // real verdict and a real Momentum figure, matching what the roller popover produces
 // for a roll made there. The fallbacks below cover a roll computed before that.
 function installRollBridge() {
+  window.canPaySpiritDice = () => obrHasGM;
   window.postRoll = function postRollToOwlbear(from, res) {
     poolBatch.flush();
     const detail = res.dice.map((d) => ({ d, kind: classifyDie(d, res.attrValue, res.skillValue) }));
@@ -11229,7 +11274,7 @@ function installRollBridge() {
       id: res.rollId || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       t: Date.now(),
       who: (from || "Unnamed").slice(0, 24),
-      label: "",
+      label: String(res.label || '').slice(0, 40),
       an: res.attrName, av: res.attrValue,
       sn: res.skillName, sv: res.skillValue,
       diff: typeof res.difficulty === "number" ? res.difficulty : 0,
@@ -11238,6 +11283,7 @@ function installRollBridge() {
       comp: res.complications,
       pass: typeof res.passed === "boolean" ? res.passed : res.successes > 0,
       gain: res.momentumGained || 0,
+      boughtDice: clampNumber(res.boughtDice, 0, 3),
       // v1.28B. Who rolled it. The roller has stamped this since 0.9.4 and the sheet
       // never has, which quietly broke the Add Momentum button: the roller offers a
       // roll's surplus to the person who made it and to the GM, and an entry with no
@@ -11616,6 +11662,7 @@ function reconcileRolls(found) {
       co: clampNumber(e.comp, 0, 99),
       pa: !!e.pass,
       gn: clampNumber(e.gain, 0, 99),
+      boughtDice: clampNumber(e.boughtDice, 0, 3),
       // Each roll keeps the threshold it was made under, the same rule the sheet's own
       // rolls follow — redrawing an old roll under a new threshold rewrites history.
       at: clampNumber(e.compAt, 15, 20) || 20,
@@ -12365,7 +12412,31 @@ async function startEmbedded() {
     // header as well as in the page that this token has a character the sheet could not
     // read, because the import screen on its own looks like an empty token.
     setSaveState("could not read this character", "failed");
+  } else if (params.has("test")) {
+    await consumeRequestedSpiritTest(params.get("test"));
   }
+}
+
+async function consumeRequestedSpiritTest(raw) {
+  // Remove before executing, so a frame reload cannot silently buy more dice.
+  try {
+    const url = new URL(location.href);
+    url.searchParams.delete("test");
+    history.replaceState(null, "", url.href);
+  } catch { /* the character also keeps the processed request id */ }
+  if (!ready || !obrHasGM || typeof raw !== "string" || raw.length > 600) {
+    showToast("Could not complete the paid roll. No Spirit was spent.", "warning");
+    return null;
+  }
+  let request;
+  try { request = JSON.parse(raw); } catch { return null; }
+  const result = runPreparedSpiritTest(request);
+  if (result) {
+    clearTimeout(saveTimer);
+    await commit();
+    document.getElementById("dicePanelAnchor")?.scrollIntoView?.({ block: "nearest" });
+  } else renderAll();
+  return result;
 }
 
 let bridge = null;

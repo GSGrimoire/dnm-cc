@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 2.5B", g("APP_VERSION") === "2.5B");
+ok("APP_VERSION is 2.6", g("APP_VERSION") === "2.6");
 
 // -------------------------------------------------------------
 // Fixture
@@ -1510,6 +1510,43 @@ const DM1_EXPECTED = {
   g(`state.character.currentSpirit = 2; clearSheetPick(); rerollSheetDie(0, 1);`);
   ok('clicking a success does not automatically spend Spirit', g("getEffectiveResource('spirit')") === 2 && g('normalizeRecentRolls()[0].d.join()') === '19,9');
   w.rollDie = previousRollDie;
+}
+
+// Primary-roll purchases: choose the price before rolling, and pay exactly once.
+{
+  buildCharacter();
+  g(`state.character.currentSpirit = 4; state.character.currentMomentum = 2;
+    state.character.recentRolls = []; diceUI.extra = 0; renderAll();`);
+  const selector = w.document.getElementById('spiritExtraDice');
+  ok('extra dice selector offers zero through three', [...selector.options].map(o => o.value).join() === '0,1,2,3');
+  selector.value = '2'; selector.dispatchEvent(new w.Event('change'));
+  ok('roll button shows dice and Spirit price', /Roll 4 dice.*2 Spirit/.test(w.document.querySelector('.dice-roll-btn').textContent));
+  ok('choosing dice spends nothing', g("getEffectiveResource('spirit')") === 4);
+  w.document.querySelector('.dice-roll-btn').click();
+  ok('two extra dice makes four, paid with two Spirit', g('diceUI.lastResult.dice.length') === 4 && g("getEffectiveResource('spirit')") === 2);
+  ok('extra-dice purchase leaves Momentum alone', g("getEffectiveResource('momentum')") === 2);
+  ok('purchase appears in Recent Rolls', /2 extra dice bought for 2 Spirit/.test(w.document.getElementById('recentRollsArea').textContent));
+  ok('purchase selection clears after rolling', w.document.getElementById('spiritExtraDice').value === '0' && /Roll 2 dice/.test(w.document.querySelector('.dice-roll-btn').textContent));
+  ok('unaffordable extra dice are disabled', w.document.querySelector('#spiritExtraDice option[value="3"]').disabled);
+  const last = g('diceUI.lastResult.rollId');
+  g('diceUI.extra = 3; renderAll(); doRoll();');
+  ok('forcing an unaffordable value cannot roll or spend', g('diceUI.lastResult.rollId') === last && g("getEffectiveResource('spirit')") === 2);
+  ok('unaffordable roll explains its disabled state', w.document.querySelector('.dice-roll-btn').disabled && /only 2 available/.test(w.document.getElementById('dicePurchaseSummary').textContent));
+  g('diceUI.extra = 0; diceUI.count = 5; doRoll();');
+  ok('base count cannot grant free extra dice', g('diceUI.lastResult.dice.length') === 2 && g("getEffectiveResource('spirit')") === 2);
+  // A real request from the separate roller uses the same handler and a durable id.
+  const req = { id: 'primary-request', attr: 'might', skill: 'fight', extra: 1, difficulty: 3, label: 'Climb' };
+  g(`runPreparedSpiritTest(${JSON.stringify(req)})`);
+  ok('prepared test preserves its setup and pays one Spirit', g('diceUI.lastResult.dice.length') === 3 && g('diceUI.lastResult.difficulty') === 3 && g("getEffectiveResource('spirit')") === 1);
+  const kept = g('buildCharacterCode()');
+  g(`runPreparedSpiritTest(${JSON.stringify(req)})`);
+  ok('replaying the same request does not roll or charge again', g("getEffectiveResource('spirit')") === 1 && g('diceUI.lastResult.rollId') === req.id);
+  ok('processed request ids survive character-code export', g(`parseCharacterCode(${JSON.stringify(kept)}).character.paidRollRequests.includes('primary-request')`));
+  g('state.character.currentSpirit = 3; diceUI.extra = 99; doRoll();');
+  ok('purchase is capped at three extras and five total dice', g('diceUI.lastResult.dice.length') === 5 && g("getEffectiveResource('spirit')") === 0);
+  for (const bad of [{ ...req, extra: 4 }, { ...req, extra: -1 }, { ...req, extra: 1.5 }, { ...req, attr: 'unknown' }, { ...req, difficulty: 6 }]) {
+    ok('invalid prepared purchase is refused', g(`runPreparedSpiritTest(${JSON.stringify(bad)})`) === null);
+  }
 }
 
 console.log(`\ncreator: ${pass} passed, ${fail} failed`);

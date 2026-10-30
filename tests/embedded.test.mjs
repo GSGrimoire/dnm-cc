@@ -639,6 +639,27 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   ok("and both legacy modal ids", calls("modal.close").length === 2);
 }
 
+// A paid primary test arrives from the roller and uses the same sheet payment path.
+{
+  g(`state.character.currentSpirit = 3; state.character.recentRolls = [];
+    state.character.paidRollRequests = []; loadIntoCreator(buildCharacterCode());`);
+  const request = { id: 'paid-primary-1', attr: 'might', skill: 'fight', extra: 2, difficulty: 2, label: 'Paid primary' };
+  sent.length = 0;
+  const result = await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify(request))})`);
+  const rolls = sent.filter(e => e.type === 'roll');
+  ok('requested test rolls four dice and pays two Spirit', result?.dice.length === 4 && g("getEffectiveResource('spirit')") === 1);
+  ok('paid primary reaches the shared log once under the request id', rolls.length === 1 && rolls[0].entry.id === request.id && rolls[0].entry.boughtDice === 2);
+  ok('paid primary preserves its label and actor', rolls[0]?.entry.label === request.label && rolls[0]?.entry.by === 'p1');
+  ok('no Momentum or Threat payment is emitted', !sent.some(e => e.type === 'pool'));
+  await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify(request))})`);
+  ok('duplicate request cannot charge twice', sent.filter(e => e.type === 'roll').length === 1 && g("getEffectiveResource('spirit')") === 1);
+  ok('oversized request is rejected', await g(`consumeRequestedSpiritTest('x'.repeat(601))`) === null);
+  g(`obrHasGM = false; state.character.currentSpirit = 3;`);
+  await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify({ ...request, id: 'no-gm' }))})`);
+  ok('no connected GM means no paid test or Spirit charge', sent.filter(e => e.type === 'roll').length === 1 && g("getEffectiveResource('spirit')") === 3);
+  g('obrHasGM = true; diceUI.extra = 0;');
+}
+
 console.log(`\nembedded: ${pass} passed, ${fail} failed`);
 console.log(`
 NOT VERIFIED HERE — the SDK is a stub, so this is the block's logic, not Owlbear:
