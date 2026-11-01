@@ -1,0 +1,117 @@
+[
+  {
+    "id": "save-completion-order",
+    "observed": {
+      "savedSpirit": 2,
+      "localSpirit": 1,
+      "status": "saved"
+    }
+  },
+  {
+    "id": "paid-roll-save-failure",
+    "observed": {
+      "durableSpirit": 3,
+      "publishedDice": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "replayDice": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "sameRollId": true
+    }
+  },
+  {
+    "id": "paid-roll-send-failure",
+    "observed": {
+      "persistedSpirit": 1,
+      "retriedResult": null,
+      "roomRolls": 0
+    }
+  },
+  {
+    "id": "two-background-writers",
+    "observed": {
+      "oneEventDelta": 1,
+      "resultingMomentum": 2
+    }
+  },
+  {
+    "id": "same-length-recovery",
+    "observed": {
+      "characterCodeLength": 3183,
+      "recoveredLatestEdit": false
+    }
+  },
+  {
+    "id": "first-open-reroll-debt",
+    "observed": {
+      "beforeSpirit": 3,
+      "afterSpirit": 3,
+      "receiptMarkedApplied": true
+    }
+  },
+  {
+    "id": "trimmed-reroll-debt",
+    "observed": {
+      "logEntries": 40,
+      "afterSpirit": 3,
+      "paidRerollRemoved": true
+    }
+  },
+  {
+    "id": "duplicate-momentum-claim",
+    "observed": {
+      "singleRollGain": 3,
+      "twoStaleClaimsPay": 6
+    }
+  },
+  {
+    "id": "momentum-cap-disagreement",
+    "observed": {
+      "initialPool": 5,
+      "rollGain": 3,
+      "resultingPool": 8,
+      "sheetCap": 6
+    }
+  },
+  {
+    "id": "sheet-claim-not-shared",
+    "observed": {
+      "gainedMomentum": 1,
+      "sharedClaimed": false,
+      "localClaimed": true
+    }
+  },
+  {
+    "id": "unbounded-decompression",
+    "observed": {
+      "compressedBytes": 2049,
+      "expandedBytes": 2097152,
+      "rejected": false
+    }
+  },
+  {
+    "id": "unbounded-character-list",
+    "observed": {
+      "characterCodeCharacters": 3307,
+      "acceptedBonds": 1000,
+      "renderedCharacters": 648032
+    }
+  },
+  {
+    "id": "corrupt-character-fallback",
+    "observed": {
+      "rejected": false,
+      "inventoryBefore": 1,
+      "inventoryAfter": 0,
+      "spiritBefore": 1,
+      "parsedSpiritAfter": null
+    }
+  }
+]

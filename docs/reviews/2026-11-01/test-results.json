@@ -1,0 +1,83 @@
+{
+  "date": "2026-11-01",
+  "revisions": {
+    "GSGrimoire/dnm-obr": "70cb3cbe32a137923bc6e089d14afdadeb556672",
+    "GSGrimoire/dnm-cc": "10c8c38b39633f8bc45565e720c49ce9f1ee9e0e"
+  },
+  "passed": 1099,
+  "failed": 0,
+  "suites": [
+    {
+      "suite": "codec",
+      "passed": 15,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "creator",
+      "passed": 338,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "embedded",
+      "passed": 120,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "party",
+      "passed": 328,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "dock",
+      "passed": 130,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "security",
+      "passed": 141,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "rollerclick",
+      "passed": 27,
+      "failed": 0,
+      "status": "executed",
+      "reason": null
+    },
+    {
+      "suite": "layout",
+      "passed": null,
+      "failed": null,
+      "status": "skipped",
+      "reason": "layout: SKIPPED \u2014 no browser available: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell"
+    },
+    {
+      "suite": "rollerui",
+      "passed": null,
+      "failed": null,
+      "status": "skipped",
+      "reason": "rollerui: SKIPPED \u2014 no browser available: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell"
+    },
+    {
+      "suite": "gmtools",
+      "passed": null,
+      "failed": null,
+      "status": "skipped",
+      "reason": "gmtools: SKIPPED \u2014 no browser available: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell"
+    }
+  ],
+  "defect_scenarios_reproduced": 13,
+  "production_code_changed": false
+}
