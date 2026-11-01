@@ -1,0 +1,32 @@
+[
+  {
+    "path": "dnm-obr/manifest.json",
+    "matches_reviewed_source": true,
+    "sha256": "4bbb9fc43e7a4ed7a7297c3a383aa383ef10d446124106ffd55b210076917e07"
+  },
+  {
+    "path": "dnm-obr/roller.js",
+    "matches_reviewed_source": true,
+    "sha256": "be35ed5d4136b09fbab7cb9ffcae5900d9d31f8a8e21e16b34b7386f226a4fd2"
+  },
+  {
+    "path": "dnm-obr/dnm.js",
+    "matches_reviewed_source": true,
+    "sha256": "1b2b1c14df525f5f37ddcbdfa8c278851d7b90b1086c82b23017672023599c36"
+  },
+  {
+    "path": "dnm-obr/background.js",
+    "matches_reviewed_source": true,
+    "sha256": "ed54b41d63c6fce0d22eeac3445cb13ae6380a0dd1e1b634e91fdfbdc6f3d758"
+  },
+  {
+    "path": "dnm-obr/gmpanel.js",
+    "matches_reviewed_source": true,
+    "sha256": "c67b63e692a62640b9d62be4d57c36277a88b8aecb0242cb9c85f33dc4b9aee3"
+  },
+  {
+    "path": "dnm-cc/index.html",
+    "matches_reviewed_source": true,
+    "sha256": "4ed1da7f49139c8824547df1aeb313c06e585370fa48e09e8e06fde0effcef9d"
+  }
+]
