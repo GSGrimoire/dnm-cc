@@ -402,16 +402,17 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
     return loadIntoCreator(buildCharacterCode()) || '';
   })()`);
   ok("a character loads for the reroll checks", !err);
-  g("state.character.currentSpirit = 3; delete state.character.appliedRerolls;");
+  g("state.character.currentSpirit = 4; delete state.character.appliedRerolls;");
   const room = (log) => ({ log, bonds: [], epochs: { scene: 0, session: 0, adventure: 0, breather: 0, break: 0, bed: 0 } });
   const rolled = (id, rr, extra = {}) => ({ id, t: Date.now(), who: "Rerolla", by: "x", an: "Might", av: 10, sn: "Fight", sv: 2, diff: 1,
     detail: [{ d: 3, kind: "success" }, { d: 1, kind: "crit" }], succ: 3, comp: 0, pass: true, gain: 2, rr, ...extra });
   const spirit = () => g("getEffectiveResource('spirit')");
 
-  // First contact adopts what is already in the log, without paying for it.
+  // 2.6B: first contact PAYS. 2.4 adopted what was in the log unpaid, which made a
+  // reroll free for any character whose sheet had not opened since. (Review F04.)
   const old = room([rolled("old", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g0", t: 1 }])]);
   g(`reconcileRerolls(${JSON.stringify(old)})`);
-  ok("a character meeting the room does not pay for old rerolls", spirit() === 3);
+  ok("a character with no ledger yet pays for a roller reroll it finds", spirit() === 3);
 
   const fresh = room([
     rolled("old", [{ i: 0, from: 20, to: 3, how: "spirit", pay: "room", g: "g0", t: 1 }]),
@@ -639,26 +640,9 @@ const actionEvents = () => sent.filter((e) => e.type === "action");
   ok("and both legacy modal ids", calls("modal.close").length === 2);
 }
 
-// A paid primary test arrives from the roller and uses the same sheet payment path.
-{
-  g(`state.character.currentSpirit = 3; state.character.recentRolls = [];
-    state.character.paidRollRequests = []; loadIntoCreator(buildCharacterCode());`);
-  const request = { id: 'paid-primary-1', attr: 'might', skill: 'fight', extra: 2, difficulty: 2, label: 'Paid primary' };
-  sent.length = 0;
-  const result = await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify(request))})`);
-  const rolls = sent.filter(e => e.type === 'roll');
-  ok('requested test rolls four dice and pays two Spirit', result?.dice.length === 4 && g("getEffectiveResource('spirit')") === 1);
-  ok('paid primary reaches the shared log once under the request id', rolls.length === 1 && rolls[0].entry.id === request.id && rolls[0].entry.boughtDice === 2);
-  ok('paid primary preserves its label and actor', rolls[0]?.entry.label === request.label && rolls[0]?.entry.by === 'p1');
-  ok('no Momentum or Threat payment is emitted', !sent.some(e => e.type === 'pool'));
-  await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify(request))})`);
-  ok('duplicate request cannot charge twice', sent.filter(e => e.type === 'roll').length === 1 && g("getEffectiveResource('spirit')") === 1);
-  ok('oversized request is rejected', await g(`consumeRequestedSpiritTest('x'.repeat(601))`) === null);
-  g(`obrHasGM = false; state.character.currentSpirit = 3;`);
-  await g(`consumeRequestedSpiritTest(${JSON.stringify(JSON.stringify({ ...request, id: 'no-gm' }))})`);
-  ok('no connected GM means no paid test or Spirit charge', sent.filter(e => e.type === 'roll').length === 1 && g("getEffectiveResource('spirit')") === 3);
-  g('obrHasGM = true; diceUI.extra = 0;');
-}
+// 2.6B. The paid primary test moved to review.test.mjs: a paid roll is now published
+// only after the token write is confirmed, and this window has no token to write to.
+// (Asserted there on a sheet booted onto a stub token.)
 
 console.log(`\nembedded: ${pass} passed, ${fail} failed`);
 console.log(`

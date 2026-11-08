@@ -2881,7 +2881,7 @@ body.obr-embedded .tab-only { display: none !important; }
 // Update this constant on every release; the header link and the
 // character sheet stamp both read from it.
 // ============================================================
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.6B';
 
 // ============================================================
 // GAME DATA - Dreams & Machines Character Creator
@@ -6058,6 +6058,11 @@ function bitReader(bytes) {
 
 let fixedLiteralTree = null, fixedDistanceTree = null;
 
+// 1.8B / 2.6B. A ceiling on what one payload may inflate to. A real character is
+// about 10 kB of JSON; without a ceiling 2 kB of crafted deflate expands to 2 MB,
+// synchronously, in whoever opens the token. 256 kB is twenty-five real characters.
+const INFLATE_LIMIT = 262144;
+
 function inflateRaw(bytes) {
   const reader = bitReader(bytes);
   const out = [];
@@ -6071,6 +6076,7 @@ function inflateRaw(bytes) {
       reader.align();
       const len = reader.byte() | (reader.byte() << 8);
       reader.byte(); reader.byte();
+      if (out.length + len > INFLATE_LIMIT) throw new Error("deflate: payload too large");
       for (let i = 0; i < len; i++) out.push(reader.byte());
       continue;
     }
@@ -6116,6 +6122,7 @@ function inflateRaw(bytes) {
     for (;;) {
       const symbol = reader.symbol(literals);
       if (symbol === 256) break;
+      if (out.length >= INFLATE_LIMIT) throw new Error("deflate: payload too large");
       if (symbol < 256) { out.push(symbol); continue; }
       const li = symbol - 257;
       if (li >= LEN_BASE.length) throw new Error("deflate: length code out of range");
@@ -6219,6 +6226,26 @@ function unpackerFor(version) {
   if (version === 'DM2') return unpackPayload;
   if (version === 'DM1') return b64decodeSafe;
   return null;
+}
+
+// v2.6B. Every list in a character code is untrusted and gets rendered, so each is
+// capped on the way in — after the payload, which is where they come from. 150 is far
+// beyond any played character (a few bonds, a few dozen items) and keeps a hostile code
+// carrying a thousand bonds from building most of a megabyte of markup per render.
+// recentRolls has its own, tighter clamp on top of this. One level of nesting is
+// covered too, for the per-boundary use lists.
+const MAX_CHARACTER_LIST = 150;
+function capCharacterLists(c) {
+  for (const key of Object.keys(c)) {
+    const v = c[key];
+    if (Array.isArray(v)) {
+      if (v.length > MAX_CHARACTER_LIST) c[key] = v.slice(0, MAX_CHARACTER_LIST);
+    } else if (v && typeof v === 'object') {
+      for (const inner of Object.keys(v)) {
+        if (Array.isArray(v[inner]) && v[inner].length > MAX_CHARACTER_LIST) v[inner] = v[inner].slice(0, MAX_CHARACTER_LIST);
+      }
+    }
+  }
 }
 
 function parseCharacterCode(code) {
@@ -6330,9 +6357,16 @@ function parseCharacterCode(code) {
         const payload = stripUnsafeKeys(JSON.parse(unpack(val)));
         Object.assign(c, getDefaultCharacter(), payload);
       } catch (e) {
-        // Ignore malformed payload and fall back to older fields.
+        // v2.6B. A code that CARRIES a payload which will not decode is a damaged code,
+        // not an old one. It used to fall back to the older segments here, which hold
+        // the build but not the play state — inventory, Spirit, injuries, notes all came
+        // back empty with no error, and the sheet then saved that over the token. Refused
+        // instead, so the token keeps what it had. A genuinely old code has no CP
+        // segment at all and never reaches this branch.
+        return { error: 'This character code is damaged: its saved play data could not be read. Nothing has been changed. Try copying the code again from where it came from.' };
       }
     }
+    capCharacterLists(c);
 
     // v2.0B. The segment checks above reject an unknown origin, archetype or
     // temperament CODE — and then the CP payload overwrites all three with whatever it
@@ -10415,6 +10449,16 @@ function claimRollMomentum() {
   const own = recent.find(e => e.rid && e.rid === String(res.rollId || ''));
   if (own) { own.cl = true; state.character.recentRolls = recent; }
 
+  // v2.6B. In a room whose writer pays claims, the claim goes to the room as ONE event
+  // and the room adds the capped amount and writes the log line — so the roller and the
+  // sheet cannot both pay the same roll. The counter moves when the room answers.
+  if (postMomentumClaim(res)) {
+    saveCharacterLocal(true);
+    renderAll();
+    showToast(`Claimed ${res.momentumGained} Momentum for the group pool.`, 'success');
+    return;
+  }
+
   if (added <= 0) {
     // The pool was already at its cap. Say so rather than greying the button with no
     // explanation, and still mark it claimed so it cannot be pressed again.
@@ -10432,6 +10476,12 @@ function claimRollMomentum() {
   const short = added < res.momentumGained ? ` (${res.momentumGained - added} lost to the cap)` : '';
   showToast(`Added ${added} Momentum to the group pool.${short}`, 'success');
 }
+
+// Standalone there is no room to claim from, so the sheet adds the Momentum itself.
+// The module block replaces this inside Owlbear: it always marks the room's copy of the
+// roll as claimed — locking its dice everywhere, and greying the roller's button — and
+// returns true when the room's writer will make the payment as well.
+function postMomentumClaim(res) { return false; }
 
 function computeRoll(d20count, attr, skill) {
   const stats = computeStats();
@@ -11016,6 +11066,18 @@ function makeDirectBridge() {
       OBR.broadcast.sendMessage(CHANNEL, ev, { destination: "ALL" })
         .catch((err) => console.warn("[dnm] broadcast failed", err));
     },
+    // v2.6B. The same send, but the caller learns whether it went. Only a paid roll
+    // needs to know: its Spirit is already gone, so a silent failure loses a roll the
+    // player paid for.
+    async broadcastConfirmed(ev) {
+      try {
+        await OBR.broadcast.sendMessage(CHANNEL, ev, { destination: "ALL" });
+        return true;
+      } catch (err) {
+        console.warn("[dnm] broadcast failed", err);
+        return false;
+      }
+    },
     closeSheet() {
       // v2.0: the sheet is a popover. The two modal ids stay in the list because a room
       // that was already open when the extension updated still has the old modal on
@@ -11218,25 +11280,51 @@ function queueSave() {
   saveTimer = setTimeout(commit, SAVE_DEBOUNCE_MS);
 }
 
-async function commit() {
-  if (!ready || !tokenId) return;
-  let code;
-  try {
-    code = buildCharacterCode();
-  } catch (err) {
-    console.error("[dnm] could not build code", err);
-    setSaveState("save failed", "failed");
-    return;
-  }
-  if (code === lastSaved) { setSaveState("saved"); return; }
-  try {
-    await bridge.writeTokenCode(tokenId, code);
-    lastSaved = code;
-    setSaveState("saved");
-  } catch (err) {
-    console.error("[dnm] save failed", err);
-    setSaveState("save failed", "failed");
-  }
+// v2.6B. ONE write in flight at a time. Each call used to start its own token write, so
+// a debounced edit could start a second save while the first was still out; if the
+// older one landed last, the token went back to the older character and the bar still
+// said "saved". Now a call that arrives during a write only asks for another pass, and
+// the pass rebuilds the code from the character as it is THEN — so the last write is
+// always the newest state. "saved" is shown only when what the token holds is what the
+// sheet holds. Resolves true when that is so, false on a failure, so a caller that must
+// not go on without a durable save (a paid roll) can tell.
+let saveInFlight = null;
+let saveAgain = false;
+
+function commit() {
+  if (!ready || !tokenId) return Promise.resolve(false);
+  if (saveInFlight) { saveAgain = true; return saveInFlight; }
+  saveInFlight = (async () => {
+    try {
+      do {
+        saveAgain = false;
+        let code;
+        try {
+          code = buildCharacterCode();
+        } catch (err) {
+          console.error("[dnm] could not build code", err);
+          setSaveState("save failed", "failed");
+          return false;
+        }
+        if (code === lastSaved) continue;
+        try {
+          await bridge.writeTokenCode(tokenId, code);
+          lastSaved = code;
+        } catch (err) {
+          console.error("[dnm] save failed", err);
+          setSaveState("save failed", "failed");
+          return false;
+        }
+      } while (saveAgain);
+      let current = null;
+      try { current = buildCharacterCode(); } catch { /* reported on the next pass */ }
+      if (current === lastSaved) setSaveState("saved");
+      return current === lastSaved;
+    } finally {
+      saveInFlight = null;
+    }
+  })();
+  return saveInFlight;
 }
 
 // Every mutation in this file funnels through renderAll(), so wrapping it is one
@@ -11295,6 +11383,7 @@ function installRollBridge() {
       compAt: getCompAt(),
       src: "pc",
     };
+    if (clampNumber(res.boughtDice, 0, 3) > 0) { publishPaidRoll(entry, res); return; }
     bridge.broadcast({ type: "roll", entry });
   };
   // v2.4. A reroll made on this sheet, under the same roll id. Paid here already
@@ -11303,6 +11392,103 @@ function installRollBridge() {
     poolBatch.flush();
     bridge.broadcast(ev);
   };
+  // v2.6B. 2.6 marked a sheet claim only on the sheet, so the roller still offered the
+  // same Momentum and the room never locked the dice. See postMomentumClaim().
+  window.postMomentumClaim = function postMomentumClaimToOwlbear(res) {
+    const id = res && res.rollId ? String(res.rollId).slice(0, 40) : "";
+    if (!id) return false;
+    poolBatch.flush();
+    // Only when the room can see the roll: one that never arrived, or has fallen off the
+    // end of the log, has nothing for the writer to pay from.
+    const inLog = lastRoomState && Array.isArray(lastRoomState.log) && lastRoomState.log.some((e) => e && e.id === id);
+    if (lastRoomState && lastRoomState.claimPay && inLog) {
+      bridge.broadcast({ type: "claim", id, pay: true, who: (state.character.name || "Unnamed").slice(0, 24), t: Date.now() });
+      return true;
+    }
+    bridge.broadcast({ type: "claim", id });
+    return false;
+  };
+}
+
+// -------------------------------------------------------------
+// Paid rolls (v2.6B)
+// -------------------------------------------------------------
+// A roll with Spirit-bought dice is the one roll where losing the save or the send
+// costs the player something. 2.6 spent the Spirit, marked the request done and
+// broadcast the dice before the token write was confirmed, so:
+//
+//   · a failed WRITE left the room showing the roll while the token still held the
+//     Spirit and an unprocessed request — reopening rolled it again, new dice under the
+//     same id, which the room's dedupe then hid;
+//   · a failed SEND left the Spirit spent and the request done with nothing at the
+//     table, and no way to send it.
+//
+// So the order is: the payment, the request id and the finished entry are saved to the
+// token TOGETHER, as `unsentRolls`; only then is the entry sent; and it leaves
+// `unsentRolls` only once the send is confirmed. A save that fails undoes the roll and
+// says no Spirit was spent. A send that fails keeps the entry, and the sheet sends that
+// SAME entry — same dice, same id — the next time it opens. The room deduplicates by id,
+// so a resend of one that did in fact arrive costs nothing.
+const MAX_UNSENT_ROLLS = 3;
+
+function readUnsentRolls() {
+  const raw = Array.isArray(state.character && state.character.unsentRolls) ? state.character.unsentRolls : [];
+  return raw.filter((e) => e && typeof e === "object" && typeof e.id === "string").slice(-MAX_UNSENT_ROLLS);
+}
+
+function dropUnsentRoll(id) {
+  state.character.unsentRolls = readUnsentRolls().filter((e) => e.id !== id);
+}
+
+async function sendUnsentRoll(entry) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 800 * attempt));
+    if (await bridge.broadcastConfirmed({ type: "roll", entry })) return true;
+  }
+  return false;
+}
+
+async function publishPaidRoll(entry, res) {
+  const spent = clampNumber(res.boughtDice, 0, 3);
+  state.character.unsentRolls = [...readUnsentRolls().filter((e) => e.id !== entry.id), entry].slice(-MAX_UNSENT_ROLLS);
+  clearTimeout(saveTimer);
+  const saved = await commit();
+  if (!saved) {
+    // Undo exactly what doRoll() did, so the token and the sheet agree that this roll
+    // never happened.
+    state.character.currentSpirit = getEffectiveResource("spirit") + spent;
+    if (Array.isArray(state.character.paidRollRequests)) {
+      state.character.paidRollRequests = state.character.paidRollRequests.filter((x) => String(x) !== entry.id);
+    }
+    dropUnsentRoll(entry.id);
+    if (Array.isArray(state.character.recentRolls)) {
+      state.character.recentRolls = state.character.recentRolls.filter((e) => !(e && e.rid === entry.id));
+    }
+    if (diceUI.lastResult === res) diceUI.lastResult = null;
+    showToast("The paid roll could not be saved to the token, so it was not made. No Spirit was spent.", "warning");
+    renderAll();
+    return false;
+  }
+  if (await sendUnsentRoll(entry)) {
+    dropUnsentRoll(entry.id);
+    queueSave();
+    return true;
+  }
+  showToast("The roll is saved but the table has not seen it yet. It will be sent when this sheet next opens.", "warning");
+  return false;
+}
+
+// Called once the character is loaded. Only the player who made a roll resends it, so a
+// GM opening a player's sheet does not post that player's roll under the GM's seat.
+async function resendUnsentRolls() {
+  const pending = readUnsentRolls();
+  if (!pending.length) return;
+  let changed = false;
+  for (const entry of pending) {
+    if (entry.by && obrPlayerId && entry.by !== obrPlayerId) continue;
+    if (await sendUnsentRoll(entry)) { dropUnsentRoll(entry.id); changed = true; }
+  }
+  if (changed) queueSave();
 }
 
 // -------------------------------------------------------------
@@ -11691,9 +11877,11 @@ function reconcileRolls(found) {
 //
 // Matched on the character's name, as the roll merge is. Each reroll is collected once:
 // its roll id and press id go into `appliedRerolls`, which rides in the character code.
-// A character meeting this room for the first time adopts what is already in the log
-// without paying for it, as the bond queue does.
-const MAX_APPLIED_REROLLS = 30;
+// (Until 2.6B a character with no ledger adopted what was already in the log unpaid.
+// See the note inside.)
+// 40: above the room's 20 debts plus older log-only rerolls, so a key cannot be
+// dropped from here while the room still lists it.
+const MAX_APPLIED_REROLLS = 40;
 function reconcileRerolls(found) {
   if (!ready || !state.character) return null;
   const me = bondNameKey(state.character.name);
@@ -11704,16 +11892,29 @@ function reconcileRerolls(found) {
     if (!e || e.kind === "action" || !Array.isArray(e.rr) || bondNameKey(e.who) !== me) continue;
     const seen = new Set();
     for (const r of e.rr) {
-      if (!r || r.pay !== "room" || seen.has(r.g)) continue;
+      // v2.6B. Only the two kinds that cost something are tracked: a free reroll needs
+      // no collecting, and leaving it out keeps the ledger from evicting a key whose
+      // debt is still listed in the room — which would charge it again.
+      if (!r || r.pay !== "room" || seen.has(r.g) || (r.how !== "spirit" && r.how !== "inspire")) continue;
       seen.add(r.g);
       owed.push({ key: `${String(e.id).slice(0, 40)}:${String(r.g).slice(0, 20)}`, how: r.how, text: `${e.an} ${e.av} (${e.sn} ${e.sv})` });
     }
   }
-  const stored = state.character.appliedRerolls;
-  if (!Array.isArray(stored)) {
-    state.character.appliedRerolls = owed.map((o) => o.key).slice(-MAX_APPLIED_REROLLS);
-    return owed.length ? { adopted: owed.length } : null;
+  // v2.6B. The room also keeps owed rerolls in `debts`, beside the log, because the log
+  // keeps only 40 entries and a busy table could push a paid reroll off the end before
+  // this sheet opened — taking the only record of the debt with it.
+  const debts = Array.isArray(found && found.debts) ? found.debts : [];
+  for (const d of debts) {
+    if (!d || typeof d.k !== "string" || bondNameKey(d.w) !== me) continue;
+    if (d.h !== "spirit" && d.h !== "inspire") continue;
+    const key = d.k.slice(0, 64);
+    if (!owed.some((o) => o.key === key)) owed.push({ key, how: d.h });
   }
+  // v2.6B. A character with no ledger yet starts with an empty one and PAYS what it
+  // finds. 2.4 adopted it unpaid, as the bond queue adopts grants, but a grant adopted
+  // is a gift declined and a debt adopted is a free reroll: a character whose sheet had
+  // not opened since 2.4 rerolled in the roller for nothing.
+  const stored = Array.isArray(state.character.appliedRerolls) ? state.character.appliedRerolls : [];
   const done = new Set(stored.map(String));
   const fresh = owed.filter((o) => !done.has(o.key));
   if (!fresh.length) return null;
@@ -11838,6 +12039,9 @@ function reconcileBonds(roomState) {
 // when room metadata next changes, which from a player's seat looks like the rest
 // arriving at random — or not at all until they touched something.
 function reconcileOnOpen() {
+  // v2.6B. Before the room check: a roll that never reached the table needs sending
+  // whether or not the room has answered yet.
+  if (ready) resendUnsentRolls().catch((err) => console.warn("[dnm] could not resend a roll", err));
   if (!ready || !lastRoomState) return;
   const result = reconcileEpochs(lastRoomState);
   const bonded = reconcileBonds(lastRoomState);

@@ -146,18 +146,20 @@ player with nothing to catch up on.
 Three modes:
 
 - **Open** — the full entry is broadcast.
-- **Hidden** — the result stays in the roller's browser; a placeholder action entry tells the
-  table that someone rolled, and who. Available to everyone.
+- **Hidden** — ALSO broadcast in full and written to room metadata (since 0.9.4, so the GM
+  sees a player's hidden roll). Each client decides what to draw through
+  `canRevealConcealed()`: the roller and the GM see the dice, others see that a roll was
+  made. It hides the result from screens, not from devtools. Available to everyone.
 - **Secret** — nothing is broadcast at all, so no one can tell a roll happened. GM only,
-  deliberately: a player rolling with no trace is what a shared log exists to prevent.
+  deliberately: a player rolling with no trace is what a shared log exists to prevent. The
+  GM's copy lives in `localStorage` (`HIDDEN_KEY` in `roller.js`, a name left over from
+  before the split) — this browser only, never reaching another player, and not spending
+  the room's shared budget.
 
-`concealedPlaceholder()` builds the placeholder by **allow-list**, never by deleting fields
-from the roll. Spreading the entry and stripping `detail`, `succ` and the rest would leak the
-day someone adds a field, and the leak would be silent.
-
-The roller's private copy lives in `localStorage` — this browser only, never reaching another
-player, and not spending the room's shared budget. It used to be a plain array, so closing the
-popover discarded it, which read as concealed rolls working only sometimes.
+0.9.3 sent Hidden rolls as a redacted placeholder built by `concealedPlaceholder()`. That
+helper is gone; the placeholder made Hidden genuinely unreadable but also kept it from the
+GM, which was the thing 0.9.4 fixed. Do not describe Hidden as private anywhere a player
+might read it — the README said so until 1.8B.
 
 ## Character recovery (1.3)
 

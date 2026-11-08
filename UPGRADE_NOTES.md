@@ -2,6 +2,104 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.6B / 1.8B: fixes from the 1 November review
+
+The review on branch `review/full-2026-11-01` (PR #3, `docs/reviews/2026-11-01/`) listed
+nine findings against 2.6 / 1.8 with probes that reproduced thirteen scenarios. Each was
+checked against the source before anything was changed. All nine hold up; eight are fixed
+here and the ninth was documentation. `tests/review.test.mjs` is the probes turned round to
+require the corrected behaviour, and every assertion in it that names a finding fails
+against 2.6 / 1.8 (checked by running it against the old `main`).
+
+The review was written by the same assistant that built 2.5B and 2.6, and says so. That is
+worth keeping in mind for what it did not look at, not for what it found: every finding
+below was reproduced independently.
+
+**F01 Save order (creator).** `commit()` started a token write per call, so an older write
+could land last. Now one write is in flight; a call during it sets `saveAgain`, and the next
+pass rebuilds the code from the character as it is then. "saved" is shown only when the
+token's code equals a fresh build. `commit()` resolves true/false, which F02 needs.
+
+**F02 Paid primary rolls (creator).** Payment, request id and the finished log entry are
+saved to the token together as `unsentRolls` (max 3) BEFORE the roll is broadcast. A failed
+save undoes doRoll()'s changes (Spirit, `paidRollRequests`, Recent Rolls, the on-screen
+result) and says no Spirit was spent. A failed send is retried three times, then left in
+`unsentRolls`; `reconcileOnOpen()` resends it — the same entry, same dice, same id — and
+the room's dedupe by id makes a resend of one that did arrive harmless. Only the player who
+made it resends, so a GM opening the sheet does not post it under the GM's seat. Applies to
+roller requests and to direct sheet purchases alike, since both go through `postRoll()`.
+`bridge.broadcastConfirmed()` is new; `bridge.broadcast()` is unchanged.
+
+**F03 Momentum claims (both).** `claim` with `pay: true` is now one reducer operation: the
+marker, a payout of the ROLL's stored `gain` capped at `MOMENTUM_CAP` (6), and the log line
+with the amount really added. The sender supplies no amount. The roller and the sheet both
+use it; the sheet used to mark only its own copy, so the roller still offered the same
+Momentum and the room never locked the dice. Version skew is handled by `claimPay: 1`,
+which `trimState()` stamps on the room: a client sees it only once the GM's background page
+is 1.8B, and without it falls back to the old marker plus a pool delta (now capped, and now
+sent by the sheet too). A Secret roll is not in the room log, so the roller keeps the old
+path for it; so does the sheet for a roll that has fallen off the log. **Manual + and − in
+the roller are still uncapped**, deliberately — that is the GM setting the pool by hand.
+
+**F04 Reroll debts (both).** Two holes. A character with no `appliedRerolls` used to adopt
+the log's debts unpaid; it now starts an empty ledger and pays (a grant adopted is a gift
+declined, a debt adopted is a free reroll — the bond-queue analogy did not carry over). And
+the reducer now files every room-paid Spirit/Inspire reroll in `debts` (max 20, 7 days),
+which survives the 40-entry log trim; `reconcileRerolls()` reads both. Free rerolls are no
+longer written to the ledger, and the ledger is 40, so a key cannot leave it while the room
+still lists the debt. The review's "reserve funds before accepting paid results" is **not
+done**: two roller rerolls made against a stale Spirit snapshot can still overdraw, and the
+sheet clamps at 0. That needs the roller to hold a reservation it has nowhere to keep.
+
+**F05 Recovery baseline (extension).** The watcher's signature was ids plus code LENGTHS,
+so an equal-length edit was skipped and the old code stayed as the one to recover. The
+signature is ids only; when it is unchanged the baseline still takes the current codes.
+
+**F06 Two writers (extension).** Every GM background relayed. Now `isElectedWriter()` in
+`dnm.js` picks the lowest connection id among the GMs; the rest stay silent and the next
+party change hands over. An unknown own connection writes, as before. **Not done:**
+operation ids for pool deltas, so a delta in flight during a hand-over can still be lost
+or doubled. Assumed, not verified: that a second TAB of one GM account is listed by
+`getPlayers()` under its own connection. If it is not, two tabs behave as before.
+
+**F07 Budgets (both).** The shared inflater refuses output past 256 kB (both copies, still
+character-for-character). Every array in a parsed character is capped at 150, one level of
+nesting included, after the payload is applied.
+
+**F08 Damaged payload (creator).** A code whose CP segment fails to decode is now an error
+and the token is not written. A code with no CP at all still imports. **This caught two
+tests passing for the wrong reason**: `creator.test.mjs` ("a pre-v1.20 code carrying
+roomCode") and `security.test.mjs` (the prototype-pollution code) both spliced a DM1-style
+payload into a DM2 code. It never decoded, the silent fallback hid that, and the pollution
+checks were running against a payload the parser never read. Both now pack with
+`packPayload()`, and the security test asserts the payload was actually decoded.
+
+**F09 Hidden rolls (docs).** `dnm-obr/README.md` said Hidden rolls never reach room
+metadata; the architecture reference described the 0.9.3 placeholder. Both corrected:
+Hidden is broadcast in full and hidden from screens only; Secret is the private one. A
+stale comment in `roller.js` is flagged. No behaviour changed.
+
+**Also:** `gmtools.test.mjs` had been failing since 1.7B — it clicked a die expecting the
+option panel, and 1.7B made that click a direct Spirit reroll. It now opens the panel from
+"Choose other reroll options". The paid-primary block moved from `embedded.test.mjs` to
+`review.test.mjs`, which has a token to save to.
+
+Validation: codec 15, creator 338, embedded 113, party 328, dock 130, security 142,
+layout 127, rollerui 69, gmtools 216, rollerclick 27, review 55 — all passing.
+
+Not verified by any suite, and each needs the room:
+
+1. Two GM tabs in one room: press Momentum +1 once and confirm the pool moves by 1. Close
+   the first-opened tab and confirm the other still records changes.
+2. Roll with +1 Spirit die from the sheet; confirm one roll in the log and Spirit down 1.
+3. Press Add Momentum on the sheet; confirm the roller's button greys and the pool stops
+   at 6. Press it in the roller on another roll from two windows at once; confirm it pays once.
+4. Reroll for Spirit in the roller with the sheet closed; open the sheet; Spirit is down 1.
+5. Edit a character, delete its token, and confirm Recovery offers the edited version.
+
+Deploy: extension 1.8B first, sheet 2.6B second, everyone reloads the ROOM. No manifest
+filename or background_url change, so nobody reinstalls. Between sessions only.
+
 # 2.6 / 1.8: extra dice for Spirit on primary tests
 
 Two base dice plus 0 to 3 extra dice, one Spirit per extra die, five total at most.

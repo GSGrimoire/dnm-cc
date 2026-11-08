@@ -813,7 +813,10 @@ async function press(page, startsWith, times = 2) {
   ok("your own roll's dice are buttons", first.buttons === 2);
   ok(`a character with a Tactical Lens gets the yellow free-reroll hint on a Fight roll (${first.hint.slice(0, 32)}…)`, /Free reroll: Tactical Lens/.test(first.hint) && /aiming/.test(first.hint));
 
-  await page.click("#log .entry button.die >> nth=0");
+  // 1.7B made a click on a failed die reroll it for 1 Spirit straight away; the full
+  // list of options now opens from "Choose other reroll options". This assertion was
+  // written before that and never updated, so it timed out from 1.7B on.
+  await page.click('#log .entry button.mini:has-text("Choose other reroll options")');
   await page.waitForTimeout(80);
   const panel = await page.evaluate(() => [...document.querySelectorAll("#log .reroll-panel .reroll-opt")].map((b) => b.textContent));
   ok(`picking a die offers Spirit and the free Lens reroll (${panel.join(", ")})`, panel.join("|") === "1 Spirit|Tactical Lens (free)");
