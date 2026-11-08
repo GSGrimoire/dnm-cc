@@ -40,7 +40,7 @@ await new Promise((r) => { if (w.document.readyState === "complete") r(); else w
 const g = (code) => w.eval(code);
 
 ok("app booted", g("typeof state") === "object" && g("typeof DM_DATA") === "object");
-ok("APP_VERSION is 2.6", g("APP_VERSION") === "2.6");
+ok("APP_VERSION is 2.6B", g("APP_VERSION") === "2.6B");
 
 // -------------------------------------------------------------
 // Fixture
@@ -130,12 +130,15 @@ ok("doRoll runs with no feed and no server", g(`(function(){
   ok("a pre-v1.20 code carrying roomCode still imports", g(`(function(){
     var legacy = JSON.parse(JSON.stringify(state.character));
     legacy.roomCode = 'our-tuesday-game';
-    var b64 = btoa(encodeURIComponent(JSON.stringify(legacy))).replace(/=/g,'');
+    // 2.6B. Packed with the code's OWN format (DM2). This used to splice a DM1-style
+    // payload into a DM2 code, which never decoded — and passed only because a payload
+    // that failed to decode was silently ignored and the name came from the NM segment.
+    var b64 = packPayload(JSON.stringify(legacy));
     var code = buildCharacterCode().split('-').map(function(p){
       return p.indexOf('CP') === 0 ? 'CP' + b64 : p;
     }).join('-');
     var p = parseCharacterCode(code);
-    return !p.error && p.character.name === 'Fixture';
+    return !p.error && p.character.name === 'Fixture' && p.character.roomCode === 'our-tuesday-game';
   })()`));
 }
 

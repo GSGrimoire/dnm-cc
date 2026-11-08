@@ -186,8 +186,13 @@ const rollEv = (entry) => ({ type: "roll", entry });
     c.name = 'Fixture';
     normalizeEditableLists();
     var code = buildCharacterCode();
-    var payload = { name: 'Pwned', __proto__: { polluted: 'yes' } };
-    var b64 = btoa(encodeURIComponent(JSON.stringify(payload))).replace(/=/g,'');
+    // 2.6B. The __proto__ key has to survive JSON.stringify to test anything, so the
+    // JSON is written by hand; and it is packed in the code's own format (DM2). Until
+    // 2.6B this spliced a DM1-style payload into a DM2 code, which never decoded at all
+    // and was silently ignored — so the pollution checks below were running against a
+    // payload the parser never read.
+    var json = '{"name":"Pwned","__proto__":{"polluted":"yes"},"constructor":{"prototype":{"polluted":"yes"}}}';
+    var b64 = packPayload(json);
     return code.split('-').map(function(p){
       return p.charAt(0) === 'C' && p.charAt(1) === 'P' ? 'CP' + b64 : p;
     }).join('-');
@@ -195,6 +200,8 @@ const rollEv = (entry) => ({ type: "roll", entry });
 
   const res = g(`parseCharacterCode(${JSON.stringify(hostile)})`);
   ok("a hostile code still parses rather than throwing", !res.error);
+  // Proves the payload was READ, which is what makes the two checks below mean anything.
+  ok("the hostile payload was actually decoded", res.character && res.character.name === "Pwned");
   ok("Object.prototype is not polluted", g("({}).polluted") === undefined);
   ok("the parsed character keeps a normal prototype",
     g(`(function(){

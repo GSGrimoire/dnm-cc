@@ -483,6 +483,21 @@ changing it. The rules that have to hold:
   `reconcileRerolls()`, once, tracked in `appliedRerolls`.
 - **Free reroll sources come from the snapshot** (`rerolls`, built by the creator). Do not
   give the extension a copy of DM_DATA to work them out.
+- **Room-paid Spirit/Inspire rerolls are also filed in `debts`** (1.8B), which outlives the
+  40-entry log. A character with no ledger PAYS what it finds; it no longer adopts unpaid.
+
+## Claims, paid rolls and saving (2.6B / 1.8B)
+
+- **A Momentum claim is ONE event**: `claim` with `pay: true`. The reducer marks it, pays
+  the roll's stored `gain` capped at `MOMENTUM_CAP`, and writes the log line. Never send a
+  separate pool delta beside it. Clients use it only when the room carries `claimPay`
+  (stamped by `trimState()`), so a newer client meeting an older cached background falls
+  back rather than sending a claim the old writer marks and never pays.
+- **A paid roll is saved before it is sent.** `unsentRolls` holds the entry until the send
+  is confirmed and is resent, unchanged, on open. Do not broadcast a paid roll first.
+- **`commit()` has one write in flight** and resolves true only when the token holds what
+  the sheet holds. Anything that must not proceed without a durable save awaits it.
+- **One writer among several GMs**: `isElectedWriter()`, the lowest GM connection id.
 
 ## The trust boundary
 
@@ -579,7 +594,7 @@ touching the trust boundary — ask before building.
 
 ## Testing
 
-`dnm-cc/tests/` holds nine suites. They read the two repos from `dnm-cc/out/`, which is
+`dnm-cc/tests/` holds eleven suites. They read the two repos from `dnm-cc/out/`, which is
 gitignored scaffolding, not source — stage it before every run or you will test the last
 release:
 
@@ -589,6 +604,7 @@ npm install jsdom playwright --no-save     # both, together: --no-save prunes th
 mkdir -p out/dnm-cc && cp index.html out/dnm-cc/
 rm -rf out/dnm-obr && cp -r ../dnm-obr out/dnm-obr
 for t in codec creator embedded party dock security layout rollerui gmtools; do node tests/$t.test.mjs; done
+for t in rollerclick review; do node --experimental-vm-modules tests/$t.test.mjs; done
 ```
 
 `npm install X --no-save` removes anything else installed the same way, so install jsdom
@@ -609,6 +625,9 @@ and playwright in ONE command or the next run dies on a missing module.
   a character-for-character comparison of the two vendored copies
 - `gmtools.test.mjs` — the GM tools, in Chromium with the stub SDK AND the real reducer
   standing in for the GM's background page, so a press reaches the room and comes back
+- `review.test.mjs` — the 1 November 2026 review's probes as acceptance tests: the
+  creator booted onto a stub token with controllable write and send failures, and the
+  real background page, reducer and roller loaded as ES modules
 - `rollerui.test.mjs` — the only suite that RUNS `roller.js`. Chromium, with the
   vendored SDK swapped for a stub in a staged copy, so the test can push a scene, a
   room and a role at it. Added in 1.4B and it found four real bugs on its first run,
