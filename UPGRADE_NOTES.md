@@ -2,6 +2,28 @@
 
 This file is the cumulative setup and technical record. New releases go at the top. It is written for a developer reading cold, and it records what was deliberately left out as well as what shipped.
 
+# 2.6.1 / 1.8.1: Twin Orbs icons
+
+Branding only, so a .x release on both halves. The owner approved the GS Tools Twin Orbs logo
+family on 2026-11-18; the canonical kit is in GSGrimoire/gs-tools-hub at
+`branding/twin-orbs/v1/` (identities `dnm-cc` and `dnm-obr`).
+
+- Creator: 16 and 32 px favicons from the gear orb, inlined as data URIs so `index.html`
+  stays one file that opens from disk with no network. No Apple touch icon: inlined it
+  would add about 48 kB to the one file. The header keeps the Dreams & Machines wordmark;
+  the GS logo is in `docs/brand/` only.
+- Extension: the manifest's top-level `icon` (the listing in Owlbear's extension list)
+  now points at `brand/icon-256.png`, the token-and-grid orb. `action.icon` stays the
+  monochrome line `icon.svg` on purpose: toolbar buttons are drawn as line icons, and a
+  full-colour disc would be the only one on the bar. `index.html` and `gm.html` link
+  favicons, which show when the GM tools are popped out.
+- Version moved in all the usual places: `APP_VERSION`, CHANGELOG banner, note and entry,
+  `creator.test.mjs`, `manifest.json`, `EXT_VERSION`, `dock.test.mjs`. The extension
+  README's reload line names 1.8.1 / 2.6.1.
+- Not touched: `beta/` in either repo, the four shared constants, the codec.
+
+The creator works with 1.8 or 1.8.1; deploy order is still dnm-obr first.
+
 # 2.6 / 1.8: extra dice for Spirit on primary tests
 
 Two base dice plus 0 to 3 extra dice, one Spirit per extra die, five total at most.
